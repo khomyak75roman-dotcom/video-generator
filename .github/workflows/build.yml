@@ -60,8 +60,8 @@ jobs:
           Copy-Item ffmpeg.exe smoke\
           Copy-Item dist\VideoGenerator.exe smoke\
           Push-Location smoke
-          & .\VideoGenerator.exe --smoke
-          $code = $LASTEXITCODE
+          $p = Start-Process -FilePath ".\VideoGenerator.exe" -ArgumentList "--smoke" -Wait -PassThru
+          $code = $p.ExitCode
           Pop-Location
           Write-Host "Smoke exit code: $code"
           $log = ""
