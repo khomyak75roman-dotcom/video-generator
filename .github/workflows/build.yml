@@ -1,22 +1,29 @@
 name: Build installer
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: write
+  issues: write
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install Python dependencies
         run: |
-          pip install edge-tts requests
-          pip install pyinstaller
+          python -m pip install --upgrade pip
+          pip install --retries 5 edge-tts requests pyinstaller
+
       - name: Download ffmpeg
         shell: pwsh
         run: |
@@ -28,22 +35,64 @@ jobs:
           foreach ($u in $urls) {
             try {
               Write-Host "Спроба: $u"
-              curl.exe -L --retry 3 --connect-timeout 30 -o ffmpeg.zip $u
+              curl.exe -L --retry 3 --retry-delay 5 --connect-timeout 30 -o ffmpeg.zip $u
               if ($LASTEXITCODE -ne 0) { throw "curl exit $LASTEXITCODE" }
-              Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build -Force
-              $exe = Get-ChildItem -Path ffmpeg_build -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-              if ($exe) { Copy-Item $exe.FullName -Destination "ffmpeg.exe" -Force; $ok = $true }
+              if ((Test-Path ffmpeg.zip) -and ((Get-Item ffmpeg.zip).Length -gt 50MB)) {
+                Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build -Force
+                $exe = Get-ChildItem -Path ffmpeg_build -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+                if ($exe) { Copy-Item $exe.FullName -Destination "ffmpeg.exe" -Force; $ok = $true }
+              } else { throw "файл замалий або відсутній" }
             } catch { Write-Host "Джерело не вдалося: $_" }
             if ($ok) { break }
           }
           if (-not $ok) { throw "ffmpeg завантажити не вдалося" }
+
       - name: Build VideoGenerator.exe (PyInstaller)
         run: pyinstaller --onefile --windowed --name VideoGenerator app.py
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
+
       - name: Build installer
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+
+      - name: Check installer exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "Output/VideoGenerator-Setup.exe")) { throw "Output/VideoGenerator-Setup.exe не створено" }
+          Write-Host "Інсталятор створено"
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create v1.0.0 "Output/VideoGenerator-Setup.exe" --title "Генератор відео v1.0.0" --notes "Інсталятор готово." || gh release upload v1.0.0 "Output/VideoGenerator-Setup.exe" --clobber
+
+  report-failure:
+    needs: build
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            const failed = [];
+            for (const job of jobs.jobs) {
+              for (const step of job.steps || []) {
+                if (step.conclusion === 'failure') failed.push(job.name + ' → ' + step.name);
+              }
+            }
+            const runUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '💥 Збірка не вдалася: ' + (failed[0] || 'невідомо'),
+              body: 'Збірка впала на кроках:\n' + failed.map(s => '- ' + s).join('\n') +
+                    '\n\nЛоги: ' + runUrl + '\n\n_Авто-звіт від CI._'
+            });
