@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Генератор відео з запиту: озвучка edge-tts + фон + субтитри (ffmpeg)."""
+"""Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg)."""
 import asyncio
 import os
 import queue
@@ -22,6 +22,7 @@ VOICES = {
 }
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+UA_STRING = "VideoGenerator/1.1 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -114,11 +115,12 @@ def fetch_openverse_images(query, workdir, count=3):
             timeout=25)
         if r.status_code != 200:
             return None, "Openverse: HTTP {}".format(r.status_code)
-        urls = [it.get("url") for it in r.json().get("results", []) if it.get("url")][:count]
-        if not urls:
+        items = [it for it in r.json().get("results", []) if it.get("url")][:count]
+        if not items:
             return None, "Openverse: нічого не знайшов за запитом"
         paths = []
-        for i, u in enumerate(urls):
+        for i, it in enumerate(items):
+            u = it["url"]
             p = os.path.join(workdir, "img{}.jpg".format(i))
             with requests.get(u, timeout=30, headers={"User-Agent": "VideoGenerator/1.0"}) as d:
                 d.raise_for_status()
@@ -126,9 +128,233 @@ def fetch_openverse_images(query, workdir, count=3):
                     for chunk in d.iter_content(65536):
                         out.write(chunk)
             paths.append(p)
+            append_credit(workdir, "🖼️ {} — {} — {} — {}".format(
+                (it.get("title") or "?")[:60], it.get("license") or "?",
+                it.get("creator") or "?", it.get("foreign_landing_url") or ""))
         return (paths, None) if paths else (None, "Openverse: зображення не завантажились")
     except Exception as e:
         return None, "Openverse: {}".format(e)
+
+
+def fetch_openverse_videos(query, workdir, need=30.0, max_clips=6):
+    """Відео-кліпи з Openverse — відкриті ліцензії (Creative Commons), БЕЗ API-ключа.
+    Завантажує кліпи, поки не набере ~need секунд матеріалу."""
+    try:
+        r = requests.get(
+            "https://api.openverse.org/v1/videos/",
+            params={"q": query, "page_size": 20},
+            headers={"User-Agent": "VideoGenerator/1.1 (Windows; video-from-query)"},
+            timeout=25)
+        if r.status_code != 200:
+            return None, "Openverse videos: HTTP {}".format(r.status_code)
+        res = r.json().get("results", [])
+        # duration у мілісекундах; беремо придатні кліпи
+        good = [it for it in res
+                if it.get("url")
+                and 3000 <= (it.get("duration") or 0) <= 300000
+                and (it.get("width") or 0) >= 480]
+        if not good:
+            return None, "Openverse videos: підходящих кліпів немає за запитом"
+        paths, total = [], 0.0
+        for i, it in enumerate(good):
+            if len(paths) >= max_clips or total >= need:
+                break
+            ext = os.path.splitext(it["url"].split("?")[0])[1].lstrip(".") or "mp4"
+            p = os.path.join(workdir, "clip{}.{}".format(i, ext))
+            try:
+                with requests.get(it["url"], stream=True, timeout=90,
+                                  headers={"User-Agent": "VideoGenerator/1.1"}) as d:
+                    d.raise_for_status()
+                    size = int(d.headers.get("Content-Length") or 0)
+                    if size > 120 * 1024 * 1024:
+                        continue  # пропускаємо надто великі файли
+                    with open(p, "wb") as out:
+                        for chunk in d.iter_content(1 << 16):
+                            out.write(chunk)
+                paths.append(p)
+                total += (it.get("duration") or 0) / 1000.0
+                append_credit(workdir, "🎬 {} — {} — {} — {}".format(
+                    (it.get("title") or "?")[:60], it.get("license") or "?",
+                    it.get("creator") or "?", it.get("foreign_landing_url") or ""))
+            except Exception:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        return (paths, None) if paths else (None, "Openverse videos: кліпи не завантажились")
+    except Exception as e:
+        return None, "Openverse videos: {}".format(e)
+
+
+def append_credit(workdir, line):
+    """Збирає credits.txt — автори та ліцензії матеріалів у робочій папці."""
+    try:
+        with open(os.path.join(workdir, "credits.txt"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def fetch_wikimedia_images(query, workdir, count=3):
+    """Зображення з Wikimedia Commons — БЕЗ ключа і БЕЗ жорстких лімітів.
+    Дублює Openverse: якщо той обмежив запити, фото все одно знайдуться."""
+    try:
+        r = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={"action": "query", "format": "json",
+                    "generator": "search", "gsrsearch": "filetype:bitmap " + query,
+                    "gsrnamespace": "6", "gsrlimit": str(count * 3),
+                    "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": "1600"},
+            headers={"User-Agent": UA_STRING, "Api-User-Agent": UA_STRING}, timeout=25)
+        if r.status_code != 200:
+            return None, "Wikimedia: HTTP {}".format(r.status_code)
+        pages = ((r.json().get("query") or {}).get("pages") or {})
+        items = sorted(pages.values(), key=lambda p: p.get("index", 999))
+        paths = []
+        for p in items:
+            if len(paths) >= count:
+                break
+            ii = (p.get("imageinfo") or [{}])[0]
+            if (ii.get("width") or 0) < 640 or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
+                continue
+            u = ii.get("thumburl") or ii.get("url")
+            if not u:
+                continue
+            path = os.path.join(workdir, "wimg{}.jpg".format(len(paths)))
+            try:
+                with requests.get(u, timeout=60, headers={"User-Agent": UA_STRING}) as d:
+                    d.raise_for_status()
+                    with open(path, "wb") as out:
+                        for chunk in d.iter_content(65536):
+                            out.write(chunk)
+            except Exception:
+                continue
+            paths.append(path)
+            meta = ii.get("extmetadata") or {}
+            author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
+            page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
+            append_credit(workdir, "🖼️ {} — {} — {} — {}".format(
+                (p.get("title") or "?")[:60],
+                (meta.get("LicenseShortName") or {}).get("value", "?"),
+                author, page_url))
+        return (paths, None) if paths else (None, "Wikimedia: нічого не знайшов за запитом")
+    except Exception as e:
+        return None, "Wikimedia: {}".format(e)
+
+
+def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
+    """Відео-кліпи з Wikimedia Commons — БЕЗ ключа. Беремо готові легкі webm-транскоди
+    ≤720p (прийом з відкритого проєкту clipforge): оригінали .ogv важкі та гірше
+    читаються ffmpeg. Без webm-варіанта кліп пропускаємо."""
+    def pick_webm(vi):
+        cands = []
+        for d in vi.get("derivatives") or []:
+            src = d.get("src") or ""
+            info = "{} {}".format(d.get("transcodekey") or "", d.get("type") or "").lower()
+            if src and "webm" in info:
+                h = d.get("height") or 0
+                m = re.search(r"(\d+)p", d.get("transcodekey") or "")
+                if not h and m:
+                    h = int(m.group(1))
+                cands.append((h, src))
+        ok = [c for c in cands if 0 < c[0] <= 720]
+        if ok:
+            return max(ok, key=lambda c: c[0])[1]
+        if cands:
+            return min(cands, key=lambda c: c[0])[1]
+        u = vi.get("url") or ""
+        return u if u.lower().split("?")[0].endswith(".webm") else None
+
+    try:
+        r = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={"action": "query", "format": "json",
+                    "generator": "search", "gsrsearch": "filetype:video " + query,
+                    "gsrnamespace": "6", "gsrlimit": "20",
+                    "prop": "videoinfo",
+                    "viprop": "url|size|mime|extmetadata|duration|derivatives",
+                    "viurlwidth": "640"},
+            headers={"User-Agent": UA_STRING, "Api-User-Agent": UA_STRING}, timeout=25)
+        if r.status_code != 200:
+            return None, "Wikimedia videos: HTTP {}".format(r.status_code)
+        pages = ((r.json().get("query") or {}).get("pages") or {})
+        items = sorted(pages.values(), key=lambda p: p.get("index", 999))
+        paths = []
+        for p in items:
+            if len(paths) >= max_clips:
+                break
+            vi = (p.get("videoinfo") or [{}])[0]
+            src = pick_webm(vi)
+            if not src:
+                continue
+            d = vi.get("duration") or 0
+            if d and not 3 <= d <= 300:
+                continue
+            path = os.path.join(workdir, "wclip{}.webm".format(len(paths)))
+            try:
+                with requests.get(src, stream=True, timeout=120, headers={"User-Agent": UA_STRING}) as resp:
+                    resp.raise_for_status()
+                    size = int(resp.headers.get("Content-Length") or 0)
+                    if size > 120 * 1024 * 1024:
+                        continue
+                    with open(path, "wb") as out:
+                        for chunk in resp.iter_content(1 << 16):
+                            out.write(chunk)
+                paths.append(path)
+                meta = vi.get("extmetadata") or {}
+                author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
+                page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
+                append_credit(workdir, "🎬 {} — {} — {} — {}".format(
+                    (p.get("title") or "?")[:60],
+                    (meta.get("LicenseShortName") or {}).get("value", "?"),
+                    author, page_url))
+            except Exception:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        return (paths, None) if paths else (None, "Wikimedia videos: кліпів немає/не завантажились")
+    except Exception as e:
+        return None, "Wikimedia videos: {}".format(e)
+
+
+def build_bg_from_clips(clips, dur, w, h, workdir):
+    """Справжній відеоряд: кожен кліп обрізається до свого слота, нормалізується
+    і склеюється. Якщо матеріалу менше за озвучку — кліпи йдуть по колу."""
+    ff = ffmpeg_path()
+    w, h = int(w), int(h)
+    usable = []
+    for c in clips:
+        try:
+            d = audio_duration(c)
+            if d and d >= 1.0:
+                usable.append((c, d))
+        except Exception:
+            pass
+    if not usable:
+        raise RuntimeError("жоден кліп не читається ffmpeg")
+    per = max(dur / len(usable), 2.0)
+    slots, i = [], 0
+    while sum(s[1] for s in slots) < dur - 0.5:
+        c, d = usable[i % len(usable)]
+        slots.append((c, min(per, d)))
+        i += 1
+    segs = []
+    for j, (c, take) in enumerate(slots):
+        seg = os.path.join(workdir, "vseg{}.mp4".format(j))
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", c, "-t", "{:.2f}".format(take),
+             "-an", "-vf",
+             ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+              "fps=25,setsar=1,format=yuv420p").format(w, h, w, h),
+             "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
+        segs.append(seg)
+    lst = os.path.join(workdir, "vlist.txt")
+    with open(lst, "w", encoding="utf-8") as f:
+        for s in segs:
+            f.write("file '{}'\n".format(s))
+    bg = os.path.join(workdir, "bg.mp4")
+    run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", bg])
+    return bg
 
 
 def build_bg_from_images(images, dur, w, h, workdir):
@@ -181,13 +407,41 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None):
 
     bg = fetch_pexels_background(query, workdir)
     if not bg:
-        say("Шукаю зображення в Openverse (без API-ключа)...")
+        # Відео-кліпи: два незалежні джерела без ключів — Openverse, потім Wikimedia
+        for source_name, fetch_fn in (("Openverse", fetch_openverse_videos),
+                                      ("Wikimedia", fetch_wikimedia_videos)):
+            if bg:
+                break
+            say("🎞️ Шукаю відкриті відео-кліпи (" + source_name + ", без API-ключа)...")
+            clips, reason = fetch_fn(query, workdir, need=dur)
+            if not clips:
+                say("ℹ️ " + (reason or "кліпів не знайшов") + " — пробую далі")
+                continue
+            say("🎞️ Завантажено кліпів: " + str(len(clips)) + " (" + source_name + ", CC-ліцензії)")
+            try:
+                bg = build_bg_from_clips(clips, dur, w, h, workdir)
+                say("🎬 Відеоряд змонтовано зі справжніх кліпів")
+            except Exception as e:
+                say("⚠️ Кліпи не зібралися ({}), пробую далі…".format(str(e)[:200]))
+                bg = None
+    if not bg:
+        # Фото: два незалежні джерела без ключів — Openverse, потім Wikimedia
+        say("🖼️ Шукаю зображення (Openverse → Wikimedia)...")
         imgs, reason = fetch_openverse_images(query, workdir)
+        if not imgs:
+            say("ℹ️ " + (reason or "Openverse недоступний") + " — пробую Wikimedia Commons")
+            imgs, reason = fetch_wikimedia_images(query, workdir)
         if imgs:
-            say("🖼️ Знайдено зображень: " + str(len(imgs)) + " (Openverse)")
-            bg = build_bg_from_images(imgs, dur, w, h, workdir)
+            say("🖼️ Знайдено зображень: " + str(len(imgs)))
+            try:
+                bg = build_bg_from_images(imgs, dur, w, h, workdir)
+            except Exception as e:
+                say("⚠️ Фото не зібралися ({}), буде градієнтний фон".format(str(e)[:200]))
+                bg = None
         else:
-            say("⚠️ " + (reason or "Openverse недоступній") + " — буде градієнтний фон")
+            say("⚠️ " + (reason or "джерела недоступні") + " — буде градієнтний фон")
+    if os.path.exists(os.path.join(workdir, "credits.txt")):
+        say("📄 Ліцензії та автори матеріалів: credits.txt у робочій папці")
     music = (music or "").strip()
 
     # Відеодоріжка
