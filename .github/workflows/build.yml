@@ -15,13 +15,28 @@ jobs:
           python-version: '3.11'
       - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
+          pip install edge-tts requests
           pip install pyinstaller
       - name: Download ffmpeg
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
-          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build
-          Copy-Item "ffmpeg_build/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" -Destination "ffmpeg.exe"
+          $urls = @(
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            try {
+              Write-Host "Спроба: $u"
+              curl.exe -L --retry 3 --connect-timeout 30 -o ffmpeg.zip $u
+              if ($LASTEXITCODE -ne 0) { throw "curl exit $LASTEXITCODE" }
+              Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build -Force
+              $exe = Get-ChildItem -Path ffmpeg_build -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+              if ($exe) { Copy-Item $exe.FullName -Destination "ffmpeg.exe" -Force; $ok = $true }
+            } catch { Write-Host "Джерело не вдалося: $_" }
+            if ($ok) { break }
+          }
+          if (-not $ok) { throw "ffmpeg завантажити не вдалося" }
       - name: Build VideoGenerator.exe (PyInstaller)
         run: pyinstaller --onefile --windowed --name VideoGenerator app.py
       - name: Install Inno Setup
