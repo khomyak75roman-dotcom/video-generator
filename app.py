@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg)."""
+"""Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg). UI в стилі iOS (CustomTkinter)."""
 import asyncio
 import os
 import queue
@@ -7,18 +7,28 @@ import re
 import subprocess
 import sys
 import threading
-import tkinter as tk
 from datetime import datetime
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
 
+import customtkinter as ctk
 import edge_tts
 import requests
 
+ctk.set_appearance_mode("dark")  # iOS: темна тема за замовчуванням
+ctk.set_default_color_theme("blue")
+
+# Шрифт Segoe UI — системний шрифт Windows (Roboto, що в CustomTkinter за замовчуванням, у Windows відсутній і виглядає дивно)
+
 VOICES = {
-    "Остап (укр, чоловічий)": "uk-UA-OstapNeural",
-    "Поліна (укр, жіночий)": "uk-UA-PolinaNeural",
-    "Christopher (англ)": "en-US-ChristopherNeural",
-    "Jenny (англ)": "en-US-JennyNeural",
+    "Остап": "uk-UA-OstapNeural",
+    "Поліна": "uk-UA-PolinaNeural",
+    "Christopher": "en-US-ChristopherNeural",
+    "Jenny": "en-US-JennyNeural",
+}
+SIZES = {
+    "720p": "1280x720",
+    "1080p": "1920x1080",
+    "Shorts": "1080x1920 (Shorts)",
 }
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
@@ -487,63 +497,135 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None):
 
 
 class App:
+    """Інтерфейс у стилі iOS: темний фон, заокруглені картки, синій акцент."""
+
+    BG = "#1C1C1E"      # iOS: основний темний фон
+    CARD = "#2C2C2E"    # iOS: картка
+    ACCENT = "#0A84FF"  # iOS: синій акцент
+    MUTED = "#8E8E93"   # iOS: приглушений текст
+
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("🎬 Генератор відео")
-        self.root.geometry("640x560")
+        self.root = ctk.CTk()
+        self.root.title("Генератор відео")
+        self.root.geometry("720x820")
+        self.root.configure(fg_color=self.BG)
         self.q = queue.Queue()
         self.workdir = None
         self._build()
         self.root.after(150, self._poll)
 
-    def _build(self):
-        frm = ttk.Frame(self.root, padding=12); frm.pack(fill="both", expand=True)
-        ttk.Label(frm, text="Твій запит (тема відео):").pack(anchor="w")
-        qrow = ttk.Frame(frm); qrow.pack(fill="x", pady=(2, 8))
-        self.query = tk.Text(qrow, height=4, font=("Segoe UI", 12), wrap="word")
-        self.query.pack(side="left", fill="x", expand=True)
-        qscroll = ttk.Scrollbar(qrow, orient="vertical", command=self.query.yview)
-        self.query.configure(yscrollcommand=qscroll.set)
-        qscroll.pack(side="left", fill="y")
-        ttk.Button(qrow, text="📋 Вставити", command=self.paste_query).pack(side="left", padx=(6, 0))
+    def _card(self, master, **pack):
+        card = ctk.CTkFrame(master, fg_color=self.CARD, corner_radius=18)
+        card.pack(**pack)
+        return card
 
-        # Вставка скопійованого тексту: Ctrl+V, Shift+Insert, правий клік
+    def _build(self):
+        # Великий заголовок як в iOS
+        ctk.CTkLabel(self.root, text="🎬  Відео",
+                     font=ctk.CTkFont(family="Segoe UI", size=34, weight="bold"),
+                     text_color="#FFFFFF").pack(anchor="w", padx=20, pady=(18, 0))
+        ctk.CTkLabel(self.root, text="Опиши тему — зроблю відео з озвучкою та субтитрами",
+                     font=ctk.CTkFont(family="Segoe UI", size=14),
+                     text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 4))
+
+        # — Картка: запит —
+        qc = self._card(self.root, fill="x", padx=20, pady=(12, 4))
+        ctk.CTkLabel(qc, text="Твій запит",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        qrow = ctk.CTkFrame(qc, fg_color="transparent")
+        qrow.pack(fill="x", padx=16, pady=(0, 4))
+        self.query = ctk.CTkTextbox(qrow, height=110,
+                                    font=ctk.CTkFont(family="Segoe UI", size=14),
+                                    wrap="word", fg_color=self.BG)
+        self.query.pack(side="left", fill="both", expand=True)
+        ctk.CTkButton(qrow, text="📋 Вставити", width=100, height=34,
+                      corner_radius=17, fg_color=self.ACCENT,
+                      font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.paste_query).pack(side="left", padx=(8, 0))
+        # Вставка скопійованого тексту: Ctrl+V, Shift+Insert
         for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self.query.bind(seq, self._paste_event)
-        self.query.bind("<Button-3>", self._query_menu)
+        ctk.CTkLabel(qc, text="Ctrl+V теж працює",
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                     text_color=self.MUTED).pack(anchor="e", padx=16, pady=(0, 10))
 
-        row = ttk.Frame(frm); row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Голос:").pack(side="left")
-        self.voice = ttk.Combobox(row, values=list(VOICES), state="readonly", width=28)
-        self.voice.current(0); self.voice.pack(side="left", padx=6)
-        ttk.Label(row, text="Розмір:").pack(side="left", padx=(12, 2))
-        self.size = ttk.Combobox(row, values=["1280x720", "1920x1080", "1080x1920 (Shorts)"], width=18, state="readonly")
-        self.size.current(0); self.size.pack(side="left")
+        # — Картка: голос —
+        vc = self._card(self.root, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(vc, text="🎙 Голос озвучення",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.voice = ctk.CTkSegmentedButton(vc, values=list(VOICES),
+                                            font=ctk.CTkFont(family="Segoe UI", size=13),
+                                            selected_color=self.ACCENT,
+                                            selected_hover_color=self.ACCENT)
+        self.voice.set("Остап")
+        self.voice.pack(fill="x", padx=16, pady=(0, 14))
 
-        self.music_path = tk.StringVar(value="")
-        mrow = ttk.Frame(frm); mrow.pack(fill="x", pady=2)
-        ttk.Label(mrow, text="Фонова музика:").pack(side="left")
-        ttk.Entry(mrow, textvariable=self.music_path).pack(side="left", fill="x", expand=True, padx=4)
-        ttk.Button(mrow, text="…", width=3, command=self.pick_music).pack(side="left")
+        # — Картка: розмір —
+        zc = self._card(self.root, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(zc, text="📐 Розмір відео",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.size = ctk.CTkSegmentedButton(zc, values=list(SIZES),
+                                           font=ctk.CTkFont(family="Segoe UI", size=13),
+                                           selected_color=self.ACCENT,
+                                           selected_hover_color=self.ACCENT)
+        self.size.set("720p")
+        self.size.pack(fill="x", padx=16, pady=(0, 14))
 
-        self.btn = ttk.Button(frm, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО", command=self.start)
-        self.btn.pack(fill="x", pady=8)
-        self.bar = ttk.Progressbar(frm, mode="indeterminate"); self.bar.pack(fill="x")
-        ttk.Button(frm, text="📂 Відкрити папку з результатом",
-                   command=self.open_folder).pack(anchor="e", pady=4)
-        ttk.Label(frm, text="Журнал:").pack(anchor="w", pady=(6, 0))
-        lrow = ttk.Frame(frm); lrow.pack(fill="both", expand=True)
-        self.log = tk.Text(lrow, height=9, state="disabled", font=("Consolas", 9), wrap="word")
-        self.log.pack(side="left", fill="both", expand=True)
-        lscroll = ttk.Scrollbar(lrow, orient="vertical", command=self.log.yview)
-        self.log.configure(yscrollcommand=lscroll.set)
-        lscroll.pack(side="right", fill="y")
+        # — Картка: музика —
+        mc = self._card(self.root, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(mc, text="🎵 Фонова музика (не обов'язково)",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        mrow = ctk.CTkFrame(mc, fg_color="transparent")
+        mrow.pack(fill="x", padx=16, pady=(0, 12))
+        self.music_lbl = ctk.CTkLabel(mrow, text="Не обрано — буде лише голос",
+                                      font=ctk.CTkFont(family="Segoe UI", size=13),
+                                      text_color=self.MUTED, anchor="w")
+        self.music_lbl.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(mrow, text="Обрати файл…", width=120, height=34,
+                      corner_radius=17, fg_color="#3A3A3C",
+                      hover_color="#48484A", font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.pick_music).pack(side="left")
+
+        # — Головна кнопка-пігулка —
+        self.btn = ctk.CTkButton(self.root, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО",
+                                 height=52, corner_radius=26,
+                                 font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+                                 fg_color=self.ACCENT,
+                                 hover_color="#3395FF",
+                                 command=self.start)
+        self.btn.pack(fill="x", padx=20, pady=(12, 4))
+
+        self.bar = ctk.CTkProgressBar(self.root, mode="indeterminate",
+                                      progress_color=self.ACCENT)
+        self.bar.pack(fill="x", padx=20)
+        self.bar.set(0)
+
+        ctk.CTkButton(self.root, text="📂 Відкрити папку з результатом",
+                      height=34, corner_radius=17, fg_color="transparent",
+                      border_width=1, border_color="#48484A",
+                      hover_color=self.CARD,
+                      font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.open_folder).pack(anchor="e", padx=20, pady=6)
+
+        # — Картка: журнал —
+        lc = self._card(self.root, fill="both", expand=True, padx=20, pady=(2, 16))
+        ctk.CTkLabel(lc, text="Журнал",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.log = ctk.CTkTextbox(lc, state="disabled",
+                                   font=ctk.CTkFont(family="Segoe UI", size=12),
+                                   wrap="word", fg_color=self.BG)
+        self.log.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
     def paste_query(self):
         """Вставляє текст із буфера обміну в поле запиту."""
         try:
             clip = self.root.clipboard_get()
-        except tk.TclError:
+        except Exception:
             self.say("⚠️ Буфер обміну порожній")
             return
         clip = clip.strip()
@@ -556,22 +638,11 @@ class App:
         self.paste_query()
         return "break"
 
-    def _query_menu(self, event):
-        """Меню правого кліку: вставити / копіювати / очистити."""
-        m = tk.Menu(self.root, tearoff=0)
-        m.add_command(label="📋 Вставити", command=self.paste_query)
-        m.add_command(label="✂️ Вирізати", command=lambda: self.query.event_generate("<<Cut>>"))
-        m.add_command(label="📄 Копіювати", command=lambda: self.query.event_generate("<<Copy>>"))
-        m.add_separator()
-        m.add_command(label="🗑️ Очистити поле", command=lambda: self.query.delete("1.0", "end"))
-        try:
-            m.tk_popup(event.x_root, event.y_root)
-        finally:
-            m.grab_release()
-
     def pick_music(self):
         p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
-        if p: self.music_path.set(p)
+        if p:
+            self.music_lbl.configure(text=os.path.basename(p), text_color="#FFFFFF")
+            self.music_path = p
 
     def open_folder(self):
         if self.workdir and os.path.isdir(self.workdir):
@@ -588,10 +659,12 @@ class App:
                 break
             if msg is None:  # пайплайн завершено
                 self.bar.stop()
-                self.btn.state(["!disabled"])
+                self.bar.set(0)
+                self.btn.configure(state="normal")
                 continue
             self.log.configure(state="normal")
-            self.log.insert("end", msg + "\n"); self.log.see("end")
+            self.log.insert("end", msg + "\n")
+            self.log.see("end")
             self.log.configure(state="disabled")
         self.root.after(150, self._poll)
 
@@ -600,13 +673,16 @@ class App:
         if len(query) < 3:
             messagebox.showwarning("Стоп", "Спершу встав запит 🙂")
             return
-        self.btn.state(["disabled"]); self.bar.start(12)
+        if not hasattr(self, "music_path"):
+            self.music_path = ""
+        self.btn.configure(state="disabled")
+        self.bar.start()
         threading.Thread(target=self.pipeline, args=(query,), daemon=True).start()
 
     def pipeline(self, query):
         try:
-            generate_video(query, self.voice.get(), self.size.get(),
-                           self.music_path.get().strip(), self.say,
+            generate_video(query, self.voice.get(), SIZES[self.size.get()],
+                           getattr(self, "music_path", "").strip(), self.say,
                            on_workdir=lambda wd: setattr(self, "workdir", wd))
         except Exception as e:
             self.say(f"❌ Помилка: {e}")
@@ -622,7 +698,7 @@ if __name__ == "__main__":
                 f.write(msg + "\n")
         ok = True
         try:
-            generate_video("Перевірка збірки генератора", "Остап (укр, чоловічий)",
+            generate_video("Перевірка збірки генератора", "Остап",
                            "1280x720", "", _log, on_workdir=lambda wd: None)
         except Exception as e:
             ok = False
