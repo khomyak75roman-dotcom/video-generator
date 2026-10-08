@@ -9,7 +9,7 @@ OutputBaseFilename=VideoGenerator-Setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=lowest
+PrivilegesRequired=low
 
 [Files]
 Source: "dist\VideoGenerator.exe"; DestDir: "{app}"; Flags: ignoreversion
