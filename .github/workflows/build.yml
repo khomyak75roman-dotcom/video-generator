@@ -1,34 +1,125 @@
 name: Build installer
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: build-installer
+  cancel-in-progress: true
+
 permissions:
   contents: write
+  issues: write
+
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      smoke_log: ${{ steps.smoke.outputs.log }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          python -m pip install --upgrade pip
+          pip install --retries 5 edge-tts requests customtkinter pyinstaller
+
       - name: Download ffmpeg
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
-          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build
-          Copy-Item "ffmpeg_build/ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe" -Destination "ffmpeg.exe"
+          $urls = @(
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+            "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            try {
+              Write-Host "Спроба: $u"
+              curl.exe -L --retry 3 --retry-delay 5 --connect-timeout 30 -o ffmpeg.zip $u
+              if ($LASTEXITCODE -ne 0) { throw "curl exit $LASTEXITCODE" }
+              if ((Test-Path ffmpeg.zip) -and ((Get-Item ffmpeg.zip).Length -gt 50MB)) {
+                Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_build -Force
+                $exe = Get-ChildItem -Path ffmpeg_build -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+                if ($exe) { Copy-Item $exe.FullName -Destination "ffmpeg.exe" -Force; $ok = $true }
+              } else { throw "файл замалий або відсутній" }
+            } catch { Write-Host "Джерело не вдалося: $_" }
+            if ($ok) { break }
+          }
+          if (-not $ok) { throw "ffmpeg завантажити не вдалося" }
+
       - name: Build VideoGenerator.exe (PyInstaller)
         run: pyinstaller --onefile --windowed --name VideoGenerator --collect-all customtkinter app.py
+
+      - name: Smoke test — тестова генерація без GUI
+        id: smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          Copy-Item ffmpeg.exe smoke\
+          Copy-Item dist\VideoGenerator.exe smoke\
+          Push-Location smoke
+          $p = Start-Process -FilePath ".\VideoGenerator.exe" -ArgumentList "--smoke" -Wait -PassThru
+          $code = $p.ExitCode
+          Pop-Location
+          Write-Host "Smoke exit code: $code"
+          $log = ""
+          if (Test-Path smoke\smoke-log.txt) { $log = Get-Content smoke\smoke-log.txt -Raw }
+          "log<<SMOKEEOF`n$log`nSMOKEEOF" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          if ($code -ne 0) { throw "Smoke test failed — див. лог вище" }
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
+
       - name: Build installer
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+
+      - name: Check installer exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "Output/VideoGenerator-Setup.exe")) { throw "Output/VideoGenerator-Setup.exe не створено" }
+          Write-Host "Інсталятор створено"
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create v1.0.0 "Output/VideoGenerator-Setup.exe" --title "Генератор відео v1.0.0" --notes "Інсталятор готово." || gh release upload v1.0.0 "Output/VideoGenerator-Setup.exe" --clobber
+
+  report-failure:
+    needs: build
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          SMOKE_LOG: ${{ needs.build.outputs.smoke_log }}
+        with:
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            const failed = [];
+            for (const job of jobs.jobs) {
+              for (const step of job.steps || []) {
+                if (step.conclusion === 'failure') failed.push(job.name + ' → ' + step.name);
+              }
+            }
+            const runUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
+            const smokeLog = process.env.SMOKE_LOG || '';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '💥 Збірка не вдалася: ' + (failed[0] || 'невідомо'),
+              body: 'Збірка впала на кроках:\n' + failed.map(s => '- ' + s).join('\n') +
+                    '\n\nЛоги смоук-тесту:\n```\n' + smokeLog + '\n```' +
+                    '\n\nЛоги: ' + runUrl + '\n\n_Авто-звіт від CI._'
+            });
