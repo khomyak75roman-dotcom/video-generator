@@ -30,7 +30,12 @@ SIZES = {
     "1080p": "1920x1080",
     "Shorts": "1080x1920 (Shorts)",
 }
-PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
+YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
+TOOLS_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "VideoGenerator")
+YTDLP_EXE = os.path.join(TOOLS_DIR, "yt-dlp.exe")
+YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
+MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 UA_STRING = "VideoGenerator/1.1 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
@@ -91,28 +96,6 @@ def narration_for(query):
         f"Сподіваємося, це відео буде для вас корисним. "
         f"Дякуємо за перегляд і до нових зустрічей!"
     )
-
-
-def fetch_pexels_background(query, workdir):
-    """Стокове відео з Pexels, якщо заданий PEXELS_API_KEY. Інакше — Openverse/градієнт."""
-    if PEXELS_KEY:
-        try:
-            r = requests.get(
-                "https://api.pexels.com/videos/search",
-                params={"query": query, "per_page": 5},
-                headers={"Authorization": PEXELS_KEY}, timeout=20)
-            files = [f for v in r.json().get("videos", []) for f in v.get("video_files", [])]
-            files = [f for f in files if f.get("width", 0) >= 1280] or files
-            if files:
-                best = max(files, key=lambda f: f.get("width", 0))
-                with requests.get(best["link"], stream=True, timeout=60) as d, \
-                     open(os.path.join(workdir, "bg.mp4"), "wb") as out:
-                    for chunk in d.iter_content(1 << 16):
-                        out.write(chunk)
-                return os.path.join(workdir, "bg.mp4")
-        except Exception:
-            pass
-    return None  # fallback: Openverse або градієнт
 
 
 def fetch_openverse_images(query, workdir, count=3):
@@ -392,7 +375,112 @@ def build_bg_from_images(images, dur, w, h, workdir):
     return bg
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None):
+def ensure_ytdlp(say):
+    """Один раз завантажує офіційний yt-dlp.exe з GitHub (без жодних ключів)."""
+    if os.path.exists(YTDLP_EXE):
+        return YTDLP_EXE
+    os.makedirs(TOOLS_DIR, exist_ok=True)
+    say("⬇️ Перший раз: завантажую yt-dlp (офіційний завантажувач з GitHub, ~18 МБ)…")
+    with requests.get(YTDLP_URL, stream=True, timeout=90,
+                      headers={"User-Agent": UA_STRING}) as r, \
+         open(YTDLP_EXE + ".part", "wb") as f:
+        r.raise_for_status()
+        for chunk in r.iter_content(1 << 16):
+            f.write(chunk)
+    os.replace(YTDLP_EXE + ".part", YTDLP_EXE)
+    say("✅ yt-dlp встановлено")
+    return YTDLP_EXE
+
+
+def youtube_download(url, outdir, height, say, fixed_name=None):
+    """Завантажує відео з YouTube через yt-dlp. Повертає шлях до готового файлу."""
+    os.makedirs(outdir, exist_ok=True)
+    exe = ensure_ytdlp(say)
+    if fixed_name:
+        out_tmpl = os.path.join(outdir, fixed_name + ".%(ext)s")
+    else:
+        out_tmpl = os.path.join(outdir, "%(title).100B.%(ext)s")
+    cmd = [exe, "--no-playlist", "--no-warnings", "--newline",
+           "-f", "bv*[ext=mp4][height<={0}]+ba[ext=m4a]/b[ext=mp4][height<={0}]/b[height<={0}]".format(height),
+           "--merge-output-format", "mp4",
+           "--ffmpeg-location", os.path.dirname(os.path.abspath(ffmpeg_path())),
+           "-o", out_tmpl, "--no-simulate", "--print", "after_move:filepath", url]
+    say("▶️ Завантажую відео з YouTube…")
+    proc = subprocess.Popen(cmd, cwd=outdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            universal_newlines=True, encoding="utf-8", errors="replace")
+    final_path = None
+    err = None
+    last_pct = -100.0
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("ERROR"):
+            err = line[:250]
+            break
+        if "[download]" in line and "%" in line:
+            try:
+                pct = float(line.split("%")[0].split()[-1].replace(",", "."))
+                if pct - last_pct >= 25 or pct >= 99.9:
+                    last_pct = pct
+                    say("⬇️ " + str(int(pct)) + "%")
+            except ValueError:
+                pass
+        elif line.lower().endswith((".mp4", ".mkv", ".webm")) and os.path.isabs(line):
+            final_path = line
+    if err:
+        proc.terminate()
+        raise RuntimeError("yt-dlp: " + err)
+    code = proc.wait()
+    if code != 0 or not final_path:
+        raise RuntimeError("yt-dlp не зміг завантажити відео (код {}). Перевір посилання.".format(code))
+    return final_path
+
+
+def has_audio(path):
+    """Чи є у файлі звукова доріжка (розбір виводу ffmpeg -i)."""
+    r = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", path], capture_output=True, text=True, encoding="utf-8", errors="ignore")
+    return "Audio: " in (r.stderr or "")
+
+
+def merge_videos(files, say):
+    """Компіляція відеоряду: зшиває кілька відео в одне (720p, звук зберігається,
+    файлам без звуку тиха доріжка додається автоматично)."""
+    outdir = os.path.join(MERGE_OUT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(outdir, exist_ok=True)
+    ff = ffmpeg_path()
+    vf = ("scale=1280:720:force_original_aspect_ratio=decrease,"
+          "pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30")
+    parts = []
+    for i, src in enumerate(files):
+        part = os.path.join(outdir, "part{:03d}.mp4".format(i))
+        say("🎞 Обробляю {}/{}: {}".format(i + 1, len(files), os.path.basename(src)))
+        if has_audio(src):
+            cmd = [ff, "-y", "-hide_banner", "-nostdin", "-i", src,
+                   "-vf", vf,
+                   "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                   "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+                   "-ar", "44100", "-ac", "2", part]
+        else:
+            cmd = [ff, "-y", "-hide_banner", "-nostdin", "-i", src,
+                   "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                   "-vf", vf, "-map", "0:v", "-map", "1:a", "-shortest",
+                   "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                   "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", part]
+        run(cmd, cwd=outdir)
+        parts.append(part)
+    lst = os.path.join(outdir, "list.txt")
+    with open(lst, "w", encoding="utf-8") as f:
+        for p in parts:
+            f.write("file '{}'\n".format(p.replace("\\", "/").replace("'", "'\\''")))
+    out = os.path.join(outdir, "final.mp4")
+    say("🎞 Зшиваю {} відео в одне…".format(len(parts)))
+    run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0", "-i", lst,
+         "-c", "copy", out], cwd=outdir)
+    return out
+
+
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -415,7 +503,35 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None):
     make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
     say("💬 Субтитри готові")
 
-    bg = fetch_pexels_background(query, workdir)
+    bg = None
+    if (yt_url or "").strip():
+        try:
+            say("▶️ Завантажую твоє відео з YouTube як фон")
+            p = youtube_download(yt_url.strip(), workdir, 720, say, fixed_name="bg")
+            if p and os.path.exists(p):
+                bg_mp4 = os.path.join(workdir, "bg.mp4")
+                if os.path.abspath(p) != os.path.abspath(bg_mp4):
+                    if p.lower().endswith(".mp4"):
+                        os.replace(p, bg_mp4)
+                    else:
+                        say("🔄 Конвертую у MP4…")
+                        run([ff, "-y", "-hide_banner", "-nostdin", "-i", p,
+                             "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", bg_mp4],
+                            cwd=workdir)
+                bg = bg_mp4
+                say("🎬 Фон: твоє відео з YouTube")
+        except Exception as e:
+            say("⚠️ YouTube не вийшов ({}), шукаю фон сам…".format(str(e)[:200]))
+            bg = None
+    if not bg and bg_files:
+        try:
+            say("🎞 Монтую фон з твоїх {} відео…".format(len(bg_files)))
+            bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir)
+            say("🎬 Фон: твоя компіляція з кількох відео")
+        except Exception as e:
+            say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
+            bg = None
     if not bg:
         # Відео-кліпи: два незалежні джерела без ключів — Openverse, потім Wikimedia
         for source_name, fetch_fn in (("Openverse", fetch_openverse_videos),
@@ -507,10 +623,11 @@ class App:
     def __init__(self):
         self.root = ctk.CTk()
         self.root.title("Генератор відео")
-        self.root.geometry("720x820")
+        self.root.geometry("760x1010")
         self.root.configure(fg_color=self.BG)
         self.q = queue.Queue()
         self.workdir = None
+        self.merge_files = []
         self._build()
         self.root.after(150, self._poll)
 
@@ -590,6 +707,62 @@ class App:
                       hover_color="#48484A", font=ctk.CTkFont(family="Segoe UI", size=13),
                       command=self.pick_music).pack(side="left")
 
+        # — Картка: YouTube —
+        yc = self._card(self.root, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(yc, text="▶️ Завантажити з YouTube",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        yrow = ctk.CTkFrame(yc, fg_color="transparent")
+        yrow.pack(fill="x", padx=16, pady=(0, 6))
+        self.yt_url = ctk.CTkEntry(yrow, placeholder_text="Посилання на відео (https://youtube.com/…)",
+                                   height=36, font=ctk.CTkFont(family="Segoe UI", size=13))
+        self.yt_url.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(yrow, text="⬇️ Завантажити", width=120, height=34,
+                      corner_radius=17, fg_color="#3A3A3C",
+                      hover_color="#48484A", font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.download_yt).pack(side="left", padx=(8, 0))
+        self.yt_q = ctk.CTkSegmentedButton(yc, values=list(YT_QUALITY),
+                                           font=ctk.CTkFont(family="Segoe UI", size=13),
+                                           selected_color=self.ACCENT,
+                                           selected_hover_color=self.ACCENT)
+        self.yt_q.set("720p")
+        self.yt_q.pack(fill="x", padx=16, pady=(0, 4))
+        self.yt_bg = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(yc, text="Використати це відео як фон мого ролика",
+                      variable=self.yt_bg,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(0, 12))
+
+        # — Картка: компіляція з кількох відео —
+        gc = self._card(self.root, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(gc, text="🎞 Компіляція з кількох відео",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.merge_lbl = ctk.CTkLabel(gc, text="Не обрано жодного відео",
+                                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                                      text_color=self.MUTED, anchor="w")
+        self.merge_lbl.pack(fill="x", padx=16, pady=(0, 4))
+        grow = ctk.CTkFrame(gc, fg_color="transparent")
+        grow.pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkButton(grow, text="➕ Додати відео…", height=34,
+                      corner_radius=17, fg_color="#3A3A3C", hover_color="#48484A",
+                      font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.pick_merge_files).pack(side="left")
+        ctk.CTkButton(grow, text="✖️ Очистити", width=100, height=34,
+                      corner_radius=17, fg_color="transparent", border_width=1,
+                      border_color="#48484A", hover_color=self.CARD,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.clear_merge_files).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(grow, text="🎞 Зшити в одне", height=34,
+                      corner_radius=17, fg_color=self.ACCENT, hover_color="#3395FF",
+                      font=ctk.CTkFont(family="Segoe UI", size=13),
+                      command=self.merge_now).pack(side="right")
+        self.merge_bg = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(gc, text="Використати ці відео як фон мого ролика",
+                      variable=self.merge_bg,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(0, 12))
+
         # — Головна кнопка-пігулка —
         self.btn = ctk.CTkButton(self.root, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО",
                                  height=52, corner_radius=26,
@@ -644,6 +817,60 @@ class App:
             self.music_lbl.configure(text=os.path.basename(p), text_color="#FFFFFF")
             self.music_path = p
 
+    def download_yt(self):
+        """Завантаження відео з YouTube окремим потоковим процесом."""
+        url = self.yt_url.get().strip()
+        if not url.startswith("http"):
+            messagebox.showwarning("Стоп", "Встав посилання на відео 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._yt_thread, args=(url,), daemon=True).start()
+
+    def _yt_thread(self, url):
+        try:
+            p = youtube_download(url, YT_OUT_DIR, YT_QUALITY[self.yt_q.get()], self.say)
+            self.say("✅ Готово: " + p)
+            self.say("📂 Файл у папці Відео\\YouTube")
+        except Exception as e:
+            self.say("❌ " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def pick_merge_files(self):
+        """Вибір кількох відео для компіляції."""
+        ps = filedialog.askopenfilenames(filetypes=[("Відео", "*.mp4 *.mov *.mkv *.avi *.webm")])
+        if ps:
+            self.merge_files = list(ps)
+            names = ", ".join(os.path.basename(p) for p in self.merge_files[:3])
+            if len(self.merge_files) > 3:
+                names += " +" + str(len(self.merge_files) - 3) + " ще"
+            self.merge_lbl.configure(text="Обрано: " + names, text_color="#FFFFFF")
+            self.say("🎞 Обрано відео: " + str(len(self.merge_files)))
+
+    def clear_merge_files(self):
+        self.merge_files = []
+        self.merge_lbl.configure(text="Не обрано жодного відео", text_color=self.MUTED)
+
+    def merge_now(self):
+        """Компіляція обраних відео в одне — окремим потоком."""
+        if not self.merge_files:
+            messagebox.showwarning("Стоп", "Спершу додай хоча б одне відео 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._merge_thread, daemon=True).start()
+
+    def _merge_thread(self):
+        try:
+            p = merge_videos(self.merge_files, self.say)
+            self.say("✅ ГОТОВО: " + p)
+            self.say("📂 Папка: Відео\\Compiled")
+        except Exception as e:
+            self.say("❌ " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
     def open_folder(self):
         if self.workdir and os.path.isdir(self.workdir):
             os.startfile(self.workdir)  # Windows
@@ -681,9 +908,16 @@ class App:
 
     def pipeline(self, query):
         try:
+            yt = ""
+            if getattr(self, "yt_bg", None) and self.yt_bg.get() and self.yt_url.get().strip():
+                yt = self.yt_url.get().strip()
+            files = None
+            if getattr(self, "merge_bg", None) and self.merge_bg.get() and self.merge_files:
+                files = list(self.merge_files)
             generate_video(query, self.voice.get(), SIZES[self.size.get()],
                            getattr(self, "music_path", "").strip(), self.say,
-                           on_workdir=lambda wd: setattr(self, "workdir", wd))
+                           on_workdir=lambda wd: setattr(self, "workdir", wd),
+                           yt_url=yt, bg_files=files)
         except Exception as e:
             self.say(f"❌ Помилка: {e}")
         finally:
