@@ -77,7 +77,13 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       - name: Build installer
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem -Path "C:\Program Files", "C:\Program Files (x86)" -Filter ISCC.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe не знайдено — Inno Setup не встановлено" }
+          $isccPath = $iscc.FullName
+          Write-Host "Використовую: $isccPath"
+          & $isccPath installer.iss
 
       - name: Check installer exists
         shell: pwsh
