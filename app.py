@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg). UI в стилі iOS (CustomTkinter)."""
 import asyncio
+import base64
 import os
 import queue
 import re
@@ -480,6 +481,58 @@ def merge_videos(files, say):
     return out
 
 
+def tts_save(text, voice, out_mp3, say):
+    """Озвучка з запасними планами: edge-tts → системний голос Windows → тиха пауза.
+
+    Хмара edge-tts часом відповідає 403 (Microsoft обмежує доступ) —
+    додаток усе одно генерує відео, а не падає.
+    """
+    ff = ffmpeg_path()
+
+    # План 1: edge-tts — найкращі голоси
+    for attempt in (1, 2):
+        try:
+            asyncio.run(edge_tts.Communicate(text, voice).save(out_mp3))
+            if os.path.exists(out_mp3) and os.path.getsize(out_mp3) > 500:
+                return
+        except Exception as e:
+            say(f"ℹ️ edge-tts не відповів (спроба {attempt}): {e}")
+    say("⚠️ Хмарна озвучка недоступна — пробую системний голос Windows…")
+
+    # План 2: системний голос Windows — працює без інтернету
+    try:
+        wav = os.path.join(os.environ.get("TEMP", "."), "vg_fallback.wav")
+        if os.path.exists(wav):
+            os.remove(wav)
+        b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        ps = (
+            "Add-Type -AssemblyName System.Speech;"
+            "$wav = Join-Path $env:TEMP 'vg_fallback.wav';"
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+            "$s.SetOutputToWaveFile($wav);"
+            "$s.Speak([System.Text.Encoding]::UTF8.GetString("
+            "[Convert]::FromBase64String('" + b64 + "')));"
+            "$s.Dispose()"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                       capture_output=True, timeout=300)
+        if os.path.exists(wav) and os.path.getsize(wav) > 2000:
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", wav,
+                 "-c:a", "libmp3lame", "-b:a", "48k", "-ar", "24000", out_mp3])
+            os.remove(wav)
+            say("ℹ️ Озвучено системним голосом Windows (без хмари)")
+            return
+    except Exception as e:
+        say(f"ℹ️ Системний голос не вдалося задіяти: {e}")
+
+    # План 3: тиха пауза потрібної тривалості — відео все одно згенерується
+    say("⚠️ Голосів немає — ставлю тиху паузу, щоб відео зібралось")
+    seconds = max(3.0, len(text) / 14.0)
+    run([ff, "-y", "-hide_banner", "-nostdin",
+         "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+         "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
+
+
 def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
@@ -495,7 +548,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     text = narration_for(query)
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
-    asyncio.run(edge_tts.Communicate(text, voice).save(os.path.join(workdir, "voice.mp3")))
+    tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say)
 
     dur = audio_duration(os.path.join(workdir, "voice.mp3"))
     say(f"⏱️ Тривалість: {dur:.1f} с")
