@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg). UI в стилі iOS (CustomTkinter)."""
+"""Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg).
+UI в стилі iOS (CustomTkinter). v3: скролінг (все влазить на будь-який екран),
+авто-встановлення ffmpeg, YouTube-відео як фон, оцінка заголовка."""
 import asyncio
 import base64
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
+import zipfile
 from datetime import datetime
 from tkinter import messagebox, filedialog
 
@@ -33,17 +37,84 @@ SIZES = {
 }
 YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
 TOOLS_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "VideoGenerator")
+FFMPEG_EXE = os.path.join(TOOLS_DIR, "ffmpeg.exe")
 YTDLP_EXE = os.path.join(TOOLS_DIR, "yt-dlp.exe")
 YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+FFMPEG_SOURCES = [
+    "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+]
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.1 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.2 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
-    local = os.path.join(APP_DIR, "ffmpeg.exe")
-    return local if os.path.exists(local) else "ffmpeg"
+    """Шукає ffmpeg: біля програми → в папці інструментів → у системі (PATH)."""
+    for cand in (os.path.join(APP_DIR, "ffmpeg.exe"), FFMPEG_EXE):
+        if os.path.exists(cand):
+            return cand
+    return "ffmpeg"
+
+
+def ffmpeg_available():
+    """Чи запускається ffmpeg (швидка перевірка -version)."""
+    try:
+        r = subprocess.run([ffmpeg_path(), "-version"], capture_output=True, timeout=15)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_ffmpeg(say):
+    """ffmpeg — серце генератора, без нього нічого не працює.
+    Якщо його немає на комп'ютері — один раз завантажує офіційну безкоштовну
+    збірку (без жодних ключів) у папку інструментів."""
+    if ffmpeg_available():
+        return
+    os.makedirs(TOOLS_DIR, exist_ok=True)
+    if os.path.exists(FFMPEG_EXE):
+        say("⚠️ ffmpeg.exe є, але не запускається — завантажую свіжу версію")
+        try:
+            os.remove(FFMPEG_EXE)
+        except OSError:
+            pass
+    zip_path = os.path.join(TOOLS_DIR, "ffmpeg.zip")
+    for url in FFMPEG_SOURCES:
+        try:
+            say("⬇️ Завантажую ffmpeg (офіційна збірка, ~100 МБ, тільки перший раз)…")
+            with requests.get(url, stream=True, timeout=300,
+                              headers={"User-Agent": UA_STRING}) as r, \
+                 open(zip_path, "wb") as f:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length") or 0)
+                done, last_pct = 0, -1
+                for chunk in r.iter_content(1 << 18):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if total:
+                        pct = int(done * 100 / total)
+                        if pct >= last_pct + 20:
+                            last_pct = pct
+                            say("⬇️ ffmpeg: {}%".format(pct))
+            with zipfile.ZipFile(zip_path) as z:
+                names = [n for n in z.namelist() if n.endswith("bin/ffmpeg.exe")]
+                if not names:
+                    raise RuntimeError("у архіві немає ffmpeg.exe")
+                with z.open(names[0]) as src, open(FFMPEG_EXE, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except Exception as e:
+            say("ℹ️ Одне джерело не вийшло ({}), пробую інше…".format(str(e)[:120]))
+            continue
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        if os.path.exists(FFMPEG_EXE) and os.path.getsize(FFMPEG_EXE) > 10_000_000:
+            say("✅ ffmpeg встановлено — можна генерувати!")
+            return
+    raise RuntimeError("не вдалося встановити ffmpeg — перевір інтернет і спробуй ще раз")
 
 
 def run(cmd, cwd=None):
@@ -97,6 +168,53 @@ def narration_for(query):
         f"Сподіваємося, це відео буде для вас корисним. "
         f"Дякуємо за перегляд і до нових зустрічей!"
     )
+
+
+def score_hook(text, say):
+    """🧲 Оцінка заголовка за 5 ознаками сильного хука.
+    Компактна українська адаптація 21 формули з відкритого youtube-скіла
+    (чиста логіка, без ключів і без інтернету)."""
+    t = " ".join((text or "").split())
+    if len(t) < 3:
+        say("🧲 Спершу встав заголовок у поле запиту 🙂")
+        return
+    score, tips = 50, []
+    if re.search(r"\d", t):
+        score += 15
+    else:
+        tips.append("додай конкретне число — «3 способи», «за 7 днів», «+40%» (формула «Статистика»)")
+    if re.search(r"(?iu)\b(ти|твій|твоє|твоя|ви|ваш|ваша|своє)\b", t):
+        score += 12
+    else:
+        tips.append("звертайся до глядача («ти», «твій») — так утримують перші секунди")
+    if re.search(r"(?iu)\b(як|чому|секрет|помилк|ніхто|найкращ|спосіб)\b", t):
+        score += 13
+    else:
+        tips.append("додай інтригу або обіцянку: «як…», «чому…», «головна помилка в…»")
+    if re.search(r"(?iu)\b(без|стоп|покроков|порад|заощад|навчис|зароб|швидк)\b", t):
+        score += 10
+    else:
+        tips.append("покажи вигоду глядача: «…без досвіду», «…і заощадиш годину»")
+    if len(t) > 80:
+        score -= 12
+        tips.append("заголовок довгий — скороти до 40–70 символів, лиш одну обіцянку")
+    elif len(t) >= 15:
+        score += 10
+    else:
+        tips.append("занадто коротко — додай, що саме отримає глядач")
+    score = max(0, min(100, score))
+    if score >= 80:
+        verdict = "сильно! Такий заголовок кличе"
+    elif score >= 60:
+        verdict = "непогано, але є куди рости"
+    else:
+        verdict = "слабко — перероби за порадами нижче"
+    say("🧲 Оцінка заголовка: {}/100 — {}".format(score, verdict))
+    if tips:
+        for tip in tips[:3]:
+            say("🧲 💡 " + tip)
+    else:
+        say("🧲 💡 Всі п'ять ознак на місці — можна генерувати!")
 
 
 def fetch_openverse_images(query, workdir, count=3):
@@ -338,7 +456,7 @@ def build_bg_from_clips(clips, dur, w, h, workdir):
         seg = os.path.join(workdir, "vseg{}.mp4".format(j))
         run([ff, "-y", "-hide_banner", "-nostdin", "-i", c, "-t", "{:.2f}".format(take),
              "-an", "-vf",
-             ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+             ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},""
               "fps=25,setsar=1,format=yuv420p").format(w, h, w, h),
              "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
         segs.append(seg)
@@ -360,7 +478,7 @@ def build_bg_from_images(images, dur, w, h, workdir):
         seg = os.path.join(workdir, "seg{}.mp4".format(i))
         frames = int(per * 25) + 1
         run([ff, "-y", "-hide_banner", "-nostdin", "-i", img,
-             "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+             "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},""
                      "zoompan=z='min(zoom+0.0006,1.25)':"
                      "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={}:fps=25,"
                      "format=yuv420p").format(w, h, w, h, frames),
@@ -540,6 +658,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     os.makedirs(workdir, exist_ok=True)
     if on_workdir:
         on_workdir(workdir)
+    say("🔍 Перевіряю ffmpeg (якщо немає — встановлю сам, один раз)…")
+    ensure_ffmpeg(say)
     ff = ffmpeg_path()
     w, h = size_str.split(" ")[0].split("x")
     say(f"▶️ Запит: {query}")
@@ -666,7 +786,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
 
 
 class App:
-    """Інтерфейс у стилі iOS: темний фон, заокруглені картки, синій акцент."""
+    """Інтерфейс у стилі iOS: темний фон, заокруглені картки, синій акцент.
+    v3: картки крутяться скролом, кнопка генерації і журнал ЗАВЖДИ видно внизу."""
 
     BG = "#1C1C1E"      # iOS: основний темний фон
     CARD = "#2C2C2E"    # iOS: картка
@@ -676,30 +797,90 @@ class App:
     def __init__(self):
         self.root = ctk.CTk()
         self.root.title("Генератор відео")
-        self.root.geometry("760x1010")
+        # Висота під екран користувача: якщо екран низький — все рівно влізе, бо є скрол
+        try:
+            dpi = self.root.winfo_fpixels("1i")
+        except Exception:
+            dpi = 96.0
+        scale = max(1.0, dpi / 96.0)
+        scr_h = self.root.winfo_screenheight() / scale
+        h = int(max(560, min(1010, scr_h - 80)))
+        self.root.geometry(f"760x{h}")
+        self.root.minsize(700, 480)
         self.root.configure(fg_color=self.BG)
         self.q = queue.Queue()
         self.workdir = None
         self.merge_files = []
         self._build()
         self.root.after(150, self._poll)
+        threading.Thread(target=self._startup_check, daemon=True).start()
 
     def _card(self, master, **pack):
         card = ctk.CTkFrame(master, fg_color=self.CARD, corner_radius=18)
         card.pack(**pack)
         return card
 
+    def _startup_check(self):
+        """Одразу показує в журналі, чи готовий ffmpeg до роботи."""
+        if ffmpeg_available():
+            self.say("✅ ffmpeg знайдено — усе готове до генерації")
+        else:
+            self.say("ℹ️ ffmpeg ще не встановлено — при першій генерації завантажу його сам (один раз, ~100 МБ)")
+
     def _build(self):
+        # === НИЖНЯ ЗАКРІПЛЕНА ЗОНА: кнопка, прогрес, журнал — ЗАВЖДИ на екрані ===
+        bottom = ctk.CTkFrame(self.root, fg_color="transparent")
+        bottom.pack(side="bottom", fill="x")
+
+        # Головна кнопка-пігулка
+        self.btn = ctk.CTkButton(bottom, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО",
+                                 height=52, corner_radius=26,
+                                 font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+                                 fg_color=self.ACCENT,
+                                 hover_color="#3395FF",
+                                 command=self.start)
+        self.btn.pack(fill="x", padx=20, pady=(10, 0))
+
+        self.bar = ctk.CTkProgressBar(bottom, mode="indeterminate",
+                                      progress_color=self.ACCENT)
+        self.bar.pack(fill="x", padx=20)
+        self.bar.set(0)
+
+        ctk.CTkButton(bottom, text="📂 Відкрити папку з результатом",
+                      height=32, corner_radius=16, fg_color="transparent",
+                      border_width=1, border_color="#48484A",
+                      hover_color=self.CARD,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.open_folder).pack(anchor="e", padx=20, pady=4)
+
+        # Картка журналу (фіксована висота, завжди видима)
+        lc = ctk.CTkFrame(bottom, fg_color=self.CARD, corner_radius=18)
+        lc.pack(fill="x", padx=20, pady=(0, 12))
+        ctk.CTkLabel(lc, text="Журнал",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(10, 2))
+        self.log = ctk.CTkTextbox(lc, state="disabled", height=150,
+                                  font=ctk.CTkFont(family="Segoe UI", size=12),
+                                  wrap="word", fg_color=self.BG)
+        self.log.pack(fill="x", padx=16, pady=(0, 14))
+
+        # === ВЕРХНЯ ЗОНА ЗІ СКРОЛІНГОМ: усі картки налаштувань ===
+        scroll = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
+        scroll.pack(side="top", fill="both", expand=True)
+
         # Великий заголовок як в iOS
-        ctk.CTkLabel(self.root, text="🎬  Відео",
+        ctk.CTkLabel(scroll, text="🎬  Відео",
                      font=ctk.CTkFont(family="Segoe UI", size=34, weight="bold"),
-                     text_color="#FFFFFF").pack(anchor="w", padx=20, pady=(18, 0))
-        ctk.CTkLabel(self.root, text="Опиши тему — зроблю відео з озвучкою та субтитрами",
+                     text_color="#FFFFFF").pack(anchor="w", padx=20, pady=(12, 0))
+        ctk.CTkLabel(scroll, text="Опиши тему — зроблю відео з озвучкою та субтитрами",
                      font=ctk.CTkFont(family="Segoe UI", size=14),
+                     text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 2))
+        ctk.CTkLabel(scroll, text="⬇️ Картки нижче крутяться коліщатком мишки",
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 4))
 
         # — Картка: запит —
-        qc = self._card(self.root, fill="x", padx=20, pady=(12, 4))
+        qc = self._card(scroll, fill="x", padx=20, pady=(8, 4))
         ctk.CTkLabel(qc, text="Твій запит",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -716,12 +897,23 @@ class App:
         # Вставка скопійованого тексту: Ctrl+V, Shift+Insert
         for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self.query.bind(seq, self._paste_event)
-        ctk.CTkLabel(qc, text="Ctrl+V теж працює",
+        # Ctrl+Enter = згенерувати
+        self.query.bind("<Control-Return>", self._ctrl_enter)
+        srow = ctk.CTkFrame(qc, fg_color="transparent")
+        srow.pack(fill="x", padx=16, pady=(2, 0))
+        ctk.CTkLabel(srow, text="Перевір, чи заголовок «чепляє» глядача",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
-                     text_color=self.MUTED).pack(anchor="e", padx=16, pady=(0, 10))
+                     text_color=self.MUTED).pack(side="left")
+        ctk.CTkButton(srow, text="🧲 Оцінити заголовок", width=150, height=30,
+                      corner_radius=15, fg_color="#3A3A3C", hover_color="#48484A",
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.score_now).pack(side="right")
+        ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати",
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                     text_color=self.MUTED).pack(anchor="e", padx=16, pady=(2, 10))
 
         # — Картка: голос —
-        vc = self._card(self.root, fill="x", padx=20, pady=4)
+        vc = self._card(scroll, fill="x", padx=20, pady=4)
         ctk.CTkLabel(vc, text="🎙 Голос озвучення",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -733,7 +925,7 @@ class App:
         self.voice.pack(fill="x", padx=16, pady=(0, 14))
 
         # — Картка: розмір —
-        zc = self._card(self.root, fill="x", padx=20, pady=4)
+        zc = self._card(scroll, fill="x", padx=20, pady=4)
         ctk.CTkLabel(zc, text="📐 Розмір відео",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -745,7 +937,7 @@ class App:
         self.size.pack(fill="x", padx=16, pady=(0, 14))
 
         # — Картка: музика —
-        mc = self._card(self.root, fill="x", padx=20, pady=4)
+        mc = self._card(scroll, fill="x", padx=20, pady=4)
         ctk.CTkLabel(mc, text="🎵 Фонова музика (не обов'язково)",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -761,8 +953,8 @@ class App:
                       command=self.pick_music).pack(side="left")
 
         # — Картка: YouTube —
-        yc = self._card(self.root, fill="x", padx=20, pady=4)
-        ctk.CTkLabel(yc, text="▶️ Завантажити з YouTube",
+        yc = self._card(scroll, fill="x", padx=20, pady=4)
+        ctk.CTkLabel(yc, text="▶️ YouTube: завантажити і/або взяти у генерацію",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
         yrow = ctk.CTkFrame(yc, fg_color="transparent")
@@ -781,13 +973,16 @@ class App:
         self.yt_q.set("720p")
         self.yt_q.pack(fill="x", padx=16, pady=(0, 4))
         self.yt_bg = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(yc, text="Використати це відео як фон мого ролика",
+        ctk.CTkSwitch(yc, text="🎬 Використати це відео у моїй генерації (як фон)",
                       variable=self.yt_bg,
                       font=ctk.CTkFont(family="Segoe UI", size=12),
-                      progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(0, 12))
+                      progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(0, 4))
+        ctk.CTkLabel(yc, text="Кнопка ⬇️ просто зберігає відео у папку Відео\\YouTube",
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                     text_color=self.MUTED).pack(anchor="w", padx=16, pady=(0, 12))
 
         # — Картка: компіляція з кількох відео —
-        gc = self._card(self.root, fill="x", padx=20, pady=4)
+        gc = self._card(scroll, fill="x", padx=20, pady=4)
         ctk.CTkLabel(gc, text="🎞 Компіляція з кількох відео",
                      font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -811,41 +1006,10 @@ class App:
                       font=ctk.CTkFont(family="Segoe UI", size=13),
                       command=self.merge_now).pack(side="right")
         self.merge_bg = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(gc, text="Використати ці відео як фон мого ролика",
+        ctk.CTkSwitch(gc, text="🎬 Використати ці відео у моїй генерації (як фон)",
                       variable=self.merge_bg,
                       font=ctk.CTkFont(family="Segoe UI", size=12),
                       progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(0, 12))
-
-        # — Головна кнопка-пігулка —
-        self.btn = ctk.CTkButton(self.root, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО",
-                                 height=52, corner_radius=26,
-                                 font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
-                                 fg_color=self.ACCENT,
-                                 hover_color="#3395FF",
-                                 command=self.start)
-        self.btn.pack(fill="x", padx=20, pady=(12, 4))
-
-        self.bar = ctk.CTkProgressBar(self.root, mode="indeterminate",
-                                      progress_color=self.ACCENT)
-        self.bar.pack(fill="x", padx=20)
-        self.bar.set(0)
-
-        ctk.CTkButton(self.root, text="📂 Відкрити папку з результатом",
-                      height=34, corner_radius=17, fg_color="transparent",
-                      border_width=1, border_color="#48484A",
-                      hover_color=self.CARD,
-                      font=ctk.CTkFont(family="Segoe UI", size=13),
-                      command=self.open_folder).pack(anchor="e", padx=20, pady=6)
-
-        # — Картка: журнал —
-        lc = self._card(self.root, fill="both", expand=True, padx=20, pady=(2, 16))
-        ctk.CTkLabel(lc, text="Журнал",
-                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        self.log = ctk.CTkTextbox(lc, state="disabled",
-                                   font=ctk.CTkFont(family="Segoe UI", size=12),
-                                   wrap="word", fg_color=self.BG)
-        self.log.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
     def paste_query(self):
         """Вставляє текст із буфера обміну в поле запиту."""
@@ -863,6 +1027,14 @@ class App:
     def _paste_event(self, event):
         self.paste_query()
         return "break"
+
+    def _ctrl_enter(self, event):
+        self.start()
+        return "break"
+
+    def score_now(self):
+        """🧲 Оцінка заголовка з поля запиту (поради — у журнал)."""
+        score_hook(self.query.get("1.0", "end").strip(), self.say)
 
     def pick_music(self):
         p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
@@ -882,6 +1054,7 @@ class App:
 
     def _yt_thread(self, url):
         try:
+            ensure_ffmpeg(self.say)
             p = youtube_download(url, YT_OUT_DIR, YT_QUALITY[self.yt_q.get()], self.say)
             self.say("✅ Готово: " + p)
             self.say("📂 Файл у папці Відео\\YouTube")
@@ -916,6 +1089,7 @@ class App:
 
     def _merge_thread(self):
         try:
+            ensure_ffmpeg(self.say)
             p = merge_videos(self.merge_files, self.say)
             self.say("✅ ГОТОВО: " + p)
             self.say("📂 Папка: Відео\\Compiled")
@@ -962,8 +1136,10 @@ class App:
     def pipeline(self, query):
         try:
             yt = ""
-            if getattr(self, "yt_bg", None) and self.yt_bg.get() and self.yt_url.get().strip():
+            if getattr(self, "yt_bg", None) and self.yt_bg.get():
                 yt = self.yt_url.get().strip()
+                if not yt:
+                    self.say("⚠️ Перемикач YouTube увімкнено, але посилання порожнє — шукаю фон сам")
             files = None
             if getattr(self, "merge_bg", None) and self.merge_bg.get() and self.merge_files:
                 files = list(self.merge_files)
@@ -971,6 +1147,12 @@ class App:
                            getattr(self, "music_path", "").strip(), self.say,
                            on_workdir=lambda wd: setattr(self, "workdir", wd),
                            yt_url=yt, bg_files=files)
+            if self.workdir and os.path.isdir(self.workdir):
+                try:
+                    os.startfile(self.workdir)  # Windows: одразу показати результат
+                    self.say("📂 Відкрив папку з готовим відео")
+                except Exception:
+                    pass
         except Exception as e:
             self.say(f"❌ Помилка: {e}")
         finally:
