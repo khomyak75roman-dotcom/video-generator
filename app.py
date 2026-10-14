@@ -457,7 +457,7 @@ def build_bg_from_clips(clips, dur, w, h, workdir):
         seg = os.path.join(workdir, "vseg{}.mp4".format(j))
         run([ff, "-y", "-hide_banner", "-nostdin", "-i", c, "-t", "{:.2f}".format(take),
              "-an", "-vf",
-             ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},""
+             ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
               "fps=25,setsar=1,format=yuv420p").format(w, h, w, h),
              "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
         segs.append(seg)
@@ -479,7 +479,7 @@ def build_bg_from_images(images, dur, w, h, workdir):
         seg = os.path.join(workdir, "seg{}.mp4".format(i))
         frames = int(per * 25) + 1
         run([ff, "-y", "-hide_banner", "-nostdin", "-i", img,
-             "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},""
+             "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
                      "zoompan=z='min(zoom+0.0006,1.25)':"
                      "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={}:fps=25,"
                      "format=yuv420p").format(w, h, w, h, frames),
