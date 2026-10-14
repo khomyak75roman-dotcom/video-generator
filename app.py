@@ -7,7 +7,8 @@ v5: фронтенд у стилі iPhone — вікно з пропорціям
 v6: кнопки 📋 «Вставити» в усіх полях для посилань (запит, YouTube, пошук).
 v7: сценарій по частинах — кожна частина отримує свій фон з YouTube (авто-пошук).
 v8: свій сценарій — 📂 відкрити з txt-файлу / 💾 зберегти у файл;
-рядок «Кліп: посилання» ставить ТВОЄ конкретне відео у фон частини."""
+рядок «Кліп: посилання» ставить ТВОЄ конкретне відео у фон частини.
+v9: після теми відео сам шукаю на YouTube відео по словах запиту і монтую їх у фон."""
 import asyncio
 import base64
 import json
@@ -57,7 +58,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.8 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.9 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -697,7 +698,7 @@ def tts_save(text, voice, out_mp3, say):
          "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -768,6 +769,39 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
             bg = None
+    if not bg and auto_yt:
+        # v9: сам шукаю на YouTube відео по словах теми (нуль ключів) і монтую у фон
+        say("🔎 Шукаю на YouTube відео по темі «{}»…".format(query[:60]))
+        results, err = yt_search(query, YT_SEARCH_LIMIT, say)
+        got = []
+        if not results:
+            say("ℹ️ YouTube: " + (err or "нічого") + " — шукаю відкриті кліпи")
+        for r in (results or [])[:4]:
+            if len(got) >= 3:
+                break
+            d = int(r.get("dur") or 0)
+            if d and (d < 10 or d > 3600):
+                say("↩️ Пропускаю (тривалість {} с): {}".format(d, r["title"][:50]))
+                continue
+            try:
+                say("🎬 Беру у фон: " + r["title"][:70])
+                p = youtube_download(r["url"], workdir, 720, say,
+                                     fixed_name="auto{:02d}".format(len(got)),
+                                     max_sec=YT_CLIP_MAX_SEC)
+                if p and os.path.exists(p):
+                    got.append(p)
+            except Exception as e:
+                say("⚠️ Не завантажилось, пробую наступне: " + str(e)[:120])
+        if got:
+            try:
+                say("🎞 Монтую фон з {} відео з YouTube по темі…".format(len(got)))
+                bg = build_bg_from_clips(got, dur, w, h, workdir)
+                say("🎬 Фон: відео, знайдені на YouTube по словах теми")
+            except Exception as e:
+                say("⚠️ YouTube-фон не зібрався ({}), шукаю відкриті кліпи…".format(str(e)[:200]))
+                bg = None
+        else:
+            say("ℹ️ На YouTube нічого не підійшло — шукаю відкриті кліпи")
     if not bg:
         # Відео-кліпи: два незалежні джерела без ключів — Openverse, потім Wikimedia
         for source_name, fetch_fn in (("Openverse", fetch_openverse_videos),
@@ -1383,7 +1417,7 @@ class App:
         ctk.CTkLabel(self.yt_results_frame, text="Тут з'являться результати пошуку",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w")
-        ctk.CTkLabel(sc, text="📋 вставляє текст з буфера обміну • обрані відео підуть кліпами у фон (кожне — перші 2 хв)",
+        ctk.CTkLabel(sc, text="📋 вставляє текст з буфера обміну • обрані відео підуть кліпами у фон • нічого не обрав — я сам знайду на YouTube по словах теми",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 14))
 
@@ -1701,7 +1735,8 @@ if __name__ == "__main__":
         ok = True
         try:
             generate_video("Перевірка збірки генератора", "Остап",
-                           "1280x720", "", _log, on_workdir=lambda wd: None)
+                           "1280x720", "", _log, on_workdir=lambda wd: None,
+                           auto_yt=False)
         except Exception as e:
             ok = False
             _log("SMOKE FAILED: " + str(e))
