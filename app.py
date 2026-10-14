@@ -3,7 +3,11 @@
 UI у стилі iPhone (CustomTkinter, dark mode iOS). v3: скролінг, авто-ffmpeg, YouTube-фон.
 v4: пошук YouTube без ключів — обрані знайдені відео йдуть кліпами у фон.
 v5: фронтенд у стилі iPhone — вікно з пропорціями екрана ноутбука (16:10),
-центрована колонка контенту, статус-бар з годинником, home-індикатор."""
+центрована колонка контенту, статус-бар з годинником, home-індикатор.
+v6: кнопки 📋 «Вставити» в усіх полях для посилань (запит, YouTube, пошук).
+v7: сценарій по частинах — кожна частина отримує свій фон з YouTube (авто-пошук).
+v8: свій сценарій — 📂 відкрити з txt-файлу / 💾 зберегти у файл;
+рядок «Кліп: посилання» ставить ТВОЄ конкретне відео у фон частини."""
 import asyncio
 import base64
 import json
@@ -41,6 +45,7 @@ SIZES = {
 YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
 YT_SEARCH_LIMIT = 12   # скільки результатів пошуку показувати
 YT_CLIP_MAX_SEC = 120  # кожне обране відео — максимум стільки секунд у фоні
+SCRIPT_MAX_SCENES = 12   # максимум частин сценарію у режимі «🎬 за сценарієм»
 TOOLS_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "VideoGenerator")
 FFMPEG_EXE = os.path.join(TOOLS_DIR, "ffmpeg.exe")
 YTDLP_EXE = os.path.join(TOOLS_DIR, "yt-dlp.exe")
@@ -52,7 +57,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.5 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.8 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -843,6 +848,235 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     return workdir
 
 
+def parse_script(text):
+    """Сценарій у частини: блоки розділені порожніми рядками.
+    Керуючі рядки на початку частини (будь-яким порядком, далі — текст озвучки):
+      «Пошук: запит» (або «Знайти:», «Search:») — запит для YouTube-пошуку фону частини;
+      «Кліп: посилання» (або «Відео:», «Clip:») — ТВОЄ конкретне YouTube-відео у фон
+      частини (якщо не завантажиться — шукаю автоматично за запитом)."""
+    scenes = []
+    for block in re.split(r"\n[ \t]*\n+", (text or "").strip()):
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        if not lines:
+            continue
+        q, url = None, None
+        while lines:
+            m = re.match(r"(?i)^(?:пошук|знайти|search)\s*[:\-—]\s*(.+)$", lines[0])
+            u = re.match(r"(?i)^(?:кліп|відео|clip)\s*[:\-—]\s*(\S+)$", lines[0])
+            if m and not q:
+                q = m.group(1).strip()
+                lines = lines[1:]
+            elif u and not url:
+                url = u.group(1).strip()
+                lines = lines[1:]
+            else:
+                break
+        body = " ".join(lines).strip()
+        if not body:
+            continue
+        if url and not re.match(r"(?i)^https?://", url):
+            url = None
+        if not q:
+            words = [w for w in re.sub(r"[^\w\s\-]", " ", body).split() if len(w) > 2]
+            q = " ".join(words[:6]) if words else body[:40]
+        scenes.append({"q": q, "text": body, "url": url})
+    return scenes
+
+
+def scene_segment(clip, dur, w, h, workdir, idx):
+    """Фон однієї частини: нормалізується під розмір і триває рівно dur секунд
+    (короткий кліп зациклюється, довгий обрізається)."""
+    ff = ffmpeg_path()
+    seg = os.path.join(workdir, "pseg{:02d}.mp4".format(idx))
+    vf = ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+          "fps=25,setsar=1,format=yuv420p").format(int(w), int(h), int(w), int(h))
+    run([ff, "-y", "-hide_banner", "-nostdin", "-stream_loop", "-1", "-i", clip,
+         "-t", "{:.2f}".format(dur + 0.2), "-an", "-vf", vf,
+         "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
+    return seg
+
+
+def gradient_segment(dur, w, h, workdir, idx):
+    """Резервний фон частини, коли на YouTube нічого не знайшлось."""
+    ff = ffmpeg_path()
+    seg = os.path.join(workdir, "pseg{:02d}.mp4".format(idx))
+    run([ff, "-y", "-hide_banner", "-nostdin",
+         "-f", "lavfi", "-i", "gradients=s={0}x{1}:c0=0x0f2027:c1=0x2c5364:speed=0.03".format(int(w), int(h)),
+         "-t", "{:.2f}".format(dur + 0.2),
+         "-vf", "fps=25,setsar=1,format=yuv420p",
+         "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
+    return seg
+
+
+def concat_audio(mp3s, out_mp3):
+    """Склеює озвучки частин в один voice.mp3."""
+    if len(mp3s) == 1:
+        shutil.copyfile(mp3s[0], out_mp3)
+        return out_mp3
+    ff = ffmpeg_path()
+    cmd = [ff, "-y", "-hide_banner", "-nostdin"]
+    for m in mp3s:
+        cmd += ["-i", m]
+    cmd += ["-filter_complex", "concat=n={}:v=0:a=1".format(len(mp3s)),
+            "-c:a", "libmp3lame", "-b:a", "48k", "-ar", "24000", out_mp3]
+    run(cmd)
+    return out_mp3
+
+
+def make_srt_scenes(scenes, durs, workdir):
+    """Субтитри для сценарію: речення кожної частини вкладаються у її час."""
+    def fmt(t):
+        h, rem = divmod(t, 3600); m, s = divmod(rem, 60)
+        return f"{int(h):02d}:{int(m):02d}:{s:06.3f}".replace(".", ",")
+    lines, t0 = [], 0.0
+    for sc, d in zip(scenes, durs):
+        sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", sc["text"]) if s.strip()]
+        if not sents:
+            sents = [sc["text"]]
+        weights = [max(len(s), 1) for s in sents]
+        scale = d / sum(weights)
+        t = t0
+        for s, wgt in zip(sents, weights):
+            end = min(t + wgt * scale, t0 + d)
+            lines.append(f"{len(lines)+1}\n{fmt(t)} --> {fmt(end)}\n{s}\n")
+            t = end
+        t0 += d
+    with open(os.path.join(workdir, "sub.srt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None):
+    """Генерація за сценарієм: кожна частина озвучується окремо і отримує
+    ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
+    Порядок фону частин = порядку частин у сценарії."""
+    scenes = parse_script(script_text)
+    if not scenes:
+        raise RuntimeError("Сценарій порожній — розділи частини порожнім рядком")
+    if len(scenes) > SCRIPT_MAX_SCENES:
+        say("⚠️ Частин {} — беру перші {}".format(len(scenes), SCRIPT_MAX_SCENES))
+        scenes = scenes[:SCRIPT_MAX_SCENES]
+    base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
+    workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_scenario")
+    os.makedirs(workdir, exist_ok=True)
+    if on_workdir:
+        on_workdir(workdir)
+    say("🔍 Перевіряю ffmpeg (якщо немає — встановлю сам, один раз)…")
+    ensure_ffmpeg(say)
+    ff = ffmpeg_path()
+    w, h = size_str.split(" ")[0].split("x")
+    voice = VOICES[voice_label]
+    say("🎬 Сценарій прийнято: {} частин".format(len(scenes)))
+
+    # 1) Озвучка кожної частини окремо
+    say("🎙️ Озвучую частини голосом {}…".format(voice_label))
+    mp3s, durs = [], []
+    for i, sc in enumerate(scenes):
+        m = os.path.join(workdir, "voice_{:02d}.mp3".format(i))
+        tts_save(sc["text"], voice, m, say)
+        d = audio_duration(m)
+        mp3s.append(m)
+        durs.append(max(d, 1.0))
+        say("🎙️ Частина {}/{} готова: {:.1f} с".format(i + 1, len(scenes), d))
+    concat_audio(mp3s, os.path.join(workdir, "voice.mp3"))
+    total = sum(durs)
+    say("⏱️ Загальна тривалість: {:.1f} с".format(total))
+
+    # 2) Субтитри по частинах
+    make_srt_scenes(scenes, durs, workdir)
+    say("💬 Субтитри готові")
+
+    # 3) Фон кожної частини: своє відео («Кліп: …») або авто-пошук YouTube
+    segs = []
+    for i, sc in enumerate(scenes):
+        clip = None
+        if sc.get("url"):
+            say("🔗 Частина {}/{}: беру ТВОЄ відео {}".format(i + 1, len(scenes), sc["url"][:70]))
+            try:
+                clip = youtube_download(sc["url"], workdir, 720, say,
+                                        fixed_name="scene{:02d}".format(i),
+                                        max_sec=YT_CLIP_MAX_SEC)
+            except Exception as e:
+                say("⚠️ Твоє відео не завантажилось ({}), шукаю заміну…".format(str(e)[:120]))
+                clip = None
+        if not clip:
+            say("🔎 Частина {}/{}: шукаю фон «{}»".format(i + 1, len(scenes), sc["q"]))
+            results, err = yt_search(sc["q"], YT_SEARCH_LIMIT, say)
+            if not results:
+                say("ℹ️ Пошук: " + (err or "нічого") + " — буде градієнт")
+            for r in (results or [])[:4]:
+                d = int(r.get("dur") or 0)
+                if d and (d < 10 or d > 3600):
+                    say("↩️ Пропускаю (тривалість {} с): {}".format(d, r["title"][:50]))
+                    continue
+                try:
+                    say("🎬 Беру: " + r["title"][:70])
+                    clip = youtube_download(r["url"], workdir, 720, say,
+                                            fixed_name="scene{:02d}".format(i),
+                                            max_sec=YT_CLIP_MAX_SEC)
+                    break
+                except Exception as e:
+                    say("⚠️ Не завантажилось, пробую наступне: " + str(e)[:120])
+                    clip = None
+        if clip:
+            try:
+                segs.append(scene_segment(clip, durs[i], w, h, workdir, i))
+                say("✅ Фон частини {} змонтовано".format(i + 1))
+            except Exception as e:
+                say("⚠️ Кліп частини {} не обробився ({}), буде градієнт".format(i + 1, str(e)[:120]))
+                segs.append(gradient_segment(durs[i], w, h, workdir, i))
+        else:
+            segs.append(gradient_segment(durs[i], w, h, workdir, i))
+
+    # 4) Склеюємо фон частин у один відеоряд
+    lst = os.path.join(workdir, "plist.txt")
+    with open(lst, "w", encoding="utf-8") as f:
+        for s in segs:
+            f.write("file '{}'\n".format(s))
+    bg = os.path.join(workdir, "bg.mp4")
+    try:
+        run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+             "-i", lst, "-c", "copy", bg])
+    except Exception:
+        say("🔄 Склеюю фон повторним кодуванням…")
+        run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+             "-i", lst, "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
+             "-pix_fmt", "yuv420p", "-an", bg])
+    say("🎞 Відеоряд змонтовано по частинах сценарію")
+
+    # 5) Фінальний рендер: фон + озвучка + субтитри (+ музика)
+    music = (music or "").strip()
+    vf_in = ["-stream_loop", "-1", "-i", "bg.mp4"]
+    cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3"]
+    if music:
+        cmd += ["-i", music]
+    if music:
+        cmd += ["-filter_complex",
+                f"[0:v]scale={w}:{h}:force_original_aspect_ratio=cover,"
+                f"subtitles=sub.srt:force_style='FontSize=16'[v];"
+                f"[1:a][2:a]amix=inputs=2:duration=first:weights='1 0.15'[a]",
+                "-map", "[v]", "-map", "[a]"]
+    else:
+        cmd += ["-map", "0:v", "-map", "1:a", "-shortest", "-vf",
+                f"scale={w}:{h}:force_original_aspect_ratio=cover,"
+                f"subtitles=sub.srt:force_style='FontSize=16'"]
+    cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+    say("🚀 Рендерю відео…")
+    try:
+        run(cmd, cwd=workdir)
+    except Exception as err:
+        say("⚠️ Рендер із субтитрами не вдався — рендерю без субтитрів…")
+        say("📝 Причина: " + str(err)[:400])
+        cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
+                "-map", "0:v", "-map", "1:a", "-shortest",
+                "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+        run(cmd2, cwd=workdir)
+        say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
+    return workdir
+
+
 class App:
     """Інтерфейс у стилі iPhone: чорний фон dark mode iOS, картки-групи, синій акцент.
     v5: вікно з пропорціями екрана ноутбука (16:10), центрована колонка контенту,
@@ -1012,6 +1246,44 @@ class App:
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="e", padx=20, pady=(2, 12))
 
+        # — Картка: сценарій —
+        tc = self._card(scroll, fill="x", padx=self.pad, pady=4)
+        ctk.CTkLabel(tc, text="🎬 Сценарій (відео по частинах)",
+                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     anchor="w").pack(fill="x", padx=20, pady=(14, 2))
+        ctk.CTkLabel(tc, text="Напиши текст по частинах — між частинами порожній рядок. Для кожної частини я САМ знайду на YouTube кліп у фон. Рядок «Пошук: запит» задає пошук, «Кліп: посилання» — твоє конкретне відео. Довгий сценарій зручно 📂 відкрити з txt-файлу.",
+                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                     text_color=self.MUTED, justify="left", wraplength=700).pack(fill="x", padx=20, pady=(0, 4))
+        self.script = ctk.CTkTextbox(tc, height=150,
+                                     font=ctk.CTkFont(family="Segoe UI", size=14),
+                                     wrap="word", fg_color=self.BG, corner_radius=14)
+        self.script.pack(fill="x", padx=20, pady=(0, 4))
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.script.bind(seq, self._paste_script_event)
+        self.script.bind("<Control-Return>", self._ctrl_enter)
+        trow = ctk.CTkFrame(tc, fg_color="transparent")
+        trow.pack(fill="x", padx=20, pady=(2, 0))
+        ctk.CTkButton(trow, text="📋 Вставити", width=110, height=36,
+                      corner_radius=18, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=lambda: self.paste_into(self.script)).pack(side="left")
+        ctk.CTkButton(trow, text="📂 Відкрити", width=110, height=36,
+                      corner_radius=18, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.load_script_file).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(trow, text="💾 Зберегти", width=110, height=36,
+                      corner_radius=18, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.save_script_file).pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(trow, text="«Пошук: запит» • «Кліп: посилання» • частини через порожній рядок",
+                     font=ctk.CTkFont(family="Segoe UI", size=10),
+                     text_color=self.MUTED).pack(side="right")
+        self.use_script = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(tc, text="🎬 Генерувати за сценарієм (кожна частина — свій фон з YouTube)",
+                      variable=self.use_script,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=20, pady=(2, 14))
+
         # — Картка: голос —
         vc = self._card(scroll, fill="x", padx=self.pad, pady=4)
         ctk.CTkLabel(vc, text="🎙 Голос озвучення",
@@ -1063,6 +1335,10 @@ class App:
                                    height=40, corner_radius=12, fg_color=self.INSET,
                                    font=ctk.CTkFont(family="Segoe UI", size=13))
         self.yt_url.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(yrow, text="📋", width=56, height=40,
+                      corner_radius=20, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=15),
+                      command=lambda: self.paste_into(self.yt_url)).pack(side="left", padx=(8, 0))
         ctk.CTkButton(yrow, text="⬇️ Завантажити", width=130, height=40,
                       corner_radius=20, fg_color=self.INSET,
                       hover_color=self.HOVER, font=ctk.CTkFont(family="Segoe UI", size=13),
@@ -1078,7 +1354,7 @@ class App:
                       variable=self.yt_bg,
                       font=ctk.CTkFont(family="Segoe UI", size=12),
                       progress_color=self.ACCENT).pack(anchor="w", padx=20, pady=(0, 4))
-        ctk.CTkLabel(yc, text="Кнопка ⬇️ просто зберігає відео у папку Відео\\YouTube",
+        ctk.CTkLabel(yc, text="Кнопка 📋 вставляє скопійоване посилання • ⬇️ зберігає відео у папку Відео\\YouTube",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 14))
 
@@ -1093,6 +1369,10 @@ class App:
                                            height=40, corner_radius=12, fg_color=self.INSET,
                                            font=ctk.CTkFont(family="Segoe UI", size=13))
         self.yt_search_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(srow, text="📋", width=56, height=40,
+                      corner_radius=20, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=15),
+                      command=lambda: self.paste_into(self.yt_search_entry)).pack(side="left", padx=(8, 0))
         ctk.CTkButton(srow, text="🔎 Шукати", width=120, height=40,
                       corner_radius=20, fg_color=self.INSET,
                       hover_color=self.HOVER, font=ctk.CTkFont(family="Segoe UI", size=13),
@@ -1103,7 +1383,7 @@ class App:
         ctk.CTkLabel(self.yt_results_frame, text="Тут з'являться результати пошуку",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w")
-        ctk.CTkLabel(sc, text="Обрані відео підуть кліпами у фон генерації (кожне — перші 2 хв)",
+        ctk.CTkLabel(sc, text="📋 вставляє текст з буфера обміну • обрані відео підуть кліпами у фон (кожне — перші 2 хв)",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="w", padx=20, pady=(0, 14))
 
@@ -1137,22 +1417,76 @@ class App:
                       font=ctk.CTkFont(family="Segoe UI", size=12),
                       progress_color=self.ACCENT).pack(anchor="w", padx=20, pady=(0, 14))
 
-    def paste_query(self):
-        """Вставляє текст із буфера обміну в поле запиту."""
+    def paste_into(self, widget):
+        """Вставляє текст із буфера обміну в будь-яке поле (кнопки 📋)."""
         try:
             clip = self.root.clipboard_get()
         except Exception:
-            self.say("⚠️ Буфер обміну порожній")
+            messagebox.showwarning("Стоп", "Буфер обміну порожній — спершу скопіюй текст або посилання 🙂")
             return
         clip = clip.strip()
-        if clip:
-            self.query.insert("insert", clip)
-            self.query.see("insert")
-            self.say("📋 Текст вставлено в поле запиту")
+        if not clip:
+            messagebox.showwarning("Стоп", "Буфер обміну порожній — спершу скопіюй текст або посилання 🙂")
+            return
+        if isinstance(widget, ctk.CTkTextbox):
+            widget.insert("insert", clip)
+            widget.see("insert")
+        else:
+            widget.delete(0, "end")
+            widget.insert(0, clip)
+        self.say("📋 Вставлено: " + clip[:80])
+
+    def paste_query(self):
+        """Вставляє текст із буфера обміну в поле запиту."""
+        self.paste_into(self.query)
 
     def _paste_event(self, event):
         self.paste_query()
         return "break"
+
+    def _paste_script_event(self, event):
+        """Ctrl+V у полі сценарію — вставка з буфера."""
+        self.paste_into(self.script)
+        return "break"
+
+    def load_script_file(self):
+        """📂 Відкрити свій сценарій з txt-файлу — зручно для довгих сценаріїв."""
+        path = filedialog.askopenfilename(
+            title="Відкрити сценарій",
+            filetypes=[("Текстові файли", "*.txt"), ("Усі файли", "*.*")])
+        if not path:
+            return
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "cp1251"):
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    text = f.read()
+                break
+            except Exception:
+                text = None
+        if text is None:
+            messagebox.showerror("Генератор відео", "Не вдалось прочитати файл — збережи його у кодуванні UTF-8.")
+            return
+        self.script.delete("1.0", "end")
+        self.script.insert("1.0", text.strip())
+        self.use_script.set(True)
+        self.say("📂 Сценарій відкрито: {} — {} частин".format(
+            os.path.basename(path), len(parse_script(text))))
+
+    def save_script_file(self):
+        """💾 Зберегти сценарій у txt-файл — щоб повернутись до нього потім."""
+        path = filedialog.asksaveasfilename(
+            title="Зберегти сценарій", defaultextension=".txt",
+            filetypes=[("Текстові файли", "*.txt")])
+        if not path:
+            return
+        text = self.script.get("1.0", "end").strip()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+            self.say("💾 Сценарій збережено: " + path)
+        except Exception as e:
+            messagebox.showerror("Генератор відео", "Не вдалось зберегти: " + str(e)[:200])
 
     def _ctrl_enter(self, event):
         self.start()
@@ -1192,6 +1526,9 @@ class App:
     def yt_search_now(self):
         """Пошук YouTube у фоновому потоці (без жодних API-ключів)."""
         q = self.yt_search_entry.get().strip()
+        if q.startswith("http"):
+            messagebox.showwarning("Стоп", "Це схоже на посилання 🙂 Встав його у поле «▶️ YouTube» вище, а тут пиши запит для пошуку")
+            return
         if len(q) < 2:
             messagebox.showwarning("Стоп", "Введи, що шукати 🙂")
             return
@@ -1306,7 +1643,12 @@ class App:
 
     def start(self):
         query = self.query.get("1.0", "end").strip()
-        if len(query) < 3:
+        if getattr(self, "use_script", None) and self.use_script.get():
+            script = self.script.get("1.0", "end").strip()
+            if len(script) < 10:
+                messagebox.showwarning("Стоп", "Режим сценарію увімкнений — напиши сценарій у картці «🎬 Сценарій» 🙂")
+                return
+        elif len(query) < 3:
             messagebox.showwarning("Стоп", "Спершу встав запит 🙂")
             return
         if not hasattr(self, "music_path"):
@@ -1328,10 +1670,16 @@ class App:
             sel = [u for u, v in getattr(self, "yt_checked", {}).items() if v.get()]
             if sel:
                 self.say("🎬 У фон піде {} обраних відео з пошуку".format(len(sel)))
-            generate_video(query, self.voice.get(), SIZES[self.size.get()],
-                           getattr(self, "music_path", "").strip(), self.say,
-                           on_workdir=lambda wd: setattr(self, "workdir", wd),
-                           yt_url=yt, bg_files=files, yt_search_urls=sel)
+            if getattr(self, "use_script", None) and self.use_script.get():
+                generate_script_video(self.script.get("1.0", "end").strip(),
+                                      self.voice.get(), SIZES[self.size.get()],
+                                      getattr(self, "music_path", "").strip(), self.say,
+                                      on_workdir=lambda wd: setattr(self, "workdir", wd))
+            else:
+                generate_video(query, self.voice.get(), SIZES[self.size.get()],
+                               getattr(self, "music_path", "").strip(), self.say,
+                               on_workdir=lambda wd: setattr(self, "workdir", wd),
+                               yt_url=yt, bg_files=files, yt_search_urls=sel)
             if self.workdir and os.path.isdir(self.workdir):
                 try:
                     os.startfile(self.workdir)  # Windows: одразу показати результат
