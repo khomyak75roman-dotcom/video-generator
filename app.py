@@ -17,6 +17,9 @@ v13: новий інтерфейс у стилі MoneyPrinterTurbo — таби 
 v14: 💾 пресети налаштувань, 💬 4 стилі субтитрів, 🎨 стилістика картинки (Кіно/Тепло/Ч-Б…),
 🎞 переходи між фрагментами (xfade), 📷 обкладинка YouTube (cover.jpg),
 ✂️ прибрання пауз з озвучки, 📚 батч-генерація (теми з нового рядка), 12 голосів edge-tts.
+v15: 📜 транскрипція YouTube (субтитри без ключів) → стиснення до ~10 хв → сценарій,
+🚫 фрагменти фону без обличчя людей (OpenCV, якщо встановлено),
+📈 SEO-пак для YouTube: назва, опис, теги, ключові слова, хештеги, закріплений коментар.
 """
 import asyncio
 import base64
@@ -31,6 +34,7 @@ import threading
 import tkinter
 import webbrowser
 import zipfile
+from collections import Counter
 from datetime import datetime
 from tkinter import messagebox, filedialog, simpledialog
 from urllib.parse import quote_plus
@@ -43,6 +47,11 @@ try:
     from PIL import Image as PILImage  # кадр-прев'ю готового відео (Pillow іде в комплекті з CustomTkinter)
 except Exception:
     PILImage = None
+
+try:
+    import cv2  # 🚫 v15: фільтр «без обличчя у кадрі» (якщо OpenCV нема — фільтр просто пропускається)
+except Exception:
+    cv2 = None
 
 ctk.set_appearance_mode("dark")  # iOS: темна тема за замовчуванням
 ctk.set_default_color_theme("blue")
@@ -96,6 +105,18 @@ YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
 YT_SEARCH_LIMIT = 12   # скільки результатів пошуку показувати
 YT_CLIP_MAX_SEC = 120  # кожне обране відео — максимум стільки секунд у фоні
 SCRIPT_MAX_SCENES = 12   # максимум частин сценарію у режимі «🎬 за сценарієм»
+# v15 📈📜: українські стоп-слова — для SEO-паків і стиснення транскрипції
+UA_STOPWORDS = frozenset((
+    "і", "та", "у", "в", "з", "зі", "із", "на", "що", "як", "цей", "ця", "це", "ці",
+    "той", "ті", "але", "або", "ж", "бо", "чому", "коли", "щоб", "чи", "не", "так",
+    "також", "ще", "вже", "був", "була", "були", "було", "бути", "нема", "під",
+    "над", "між", "без", "для", "до", "від", "про", "вони", "ми", "ви", "ти", "я",
+    "він", "вона", "воно", "його", "її", "їх", "наш", "наших", "ваш", "ваша",
+    "свій", "своє", "свої", "дуже", "можна", "треба", "потрібно", "які", "який",
+    "яка", "яке", "всі", "все", "усе", "кожен", "ось", "отже", "проте", "однак",
+    "після", "перед", "майже", "лише", "навіть", "якщо", "тому", "тут", "там",
+    "де", "ні", "більше", "менше", "собі", "один", "два", "три", "як", "є",
+))
 TOOLS_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Local", "VideoGenerator")
 FFMPEG_EXE = os.path.join(TOOLS_DIR, "ffmpeg.exe")
 YTDLP_EXE = os.path.join(TOOLS_DIR, "yt-dlp.exe")
@@ -107,7 +128,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.14 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.15 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -517,12 +538,22 @@ def xfade_join(segs, takes, workdir, trans, cross=0.5):
     return bg
 
 
-def build_bg_from_clips(clips, dur, w, h, workdir, transition=""):
+def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False, say=None):
     """Справжній відеоряд: кожен кліп обрізається до свого слота, нормалізується
     і склеюється. Якщо матеріалу менше за озвучку — кліпи йдуть по колу.
-    v14: transition ≠ «» — між фрагментами плавний перехід (xfade)."""
+    v14: transition ≠ «» — між фрагментами плавний перехід (xfade).
+    v15: no_faces=True — спершу збираю з кліпів фрагменти без обличчя (OpenCV)."""
     ff = ffmpeg_path()
     w, h = int(w), int(h)
+    if no_faces and clips:  # 🚫 v15: пул фрагментів без обличчя
+        try:
+            pool = noface_pool(clips, need=max(2, int(dur / 8) + 2),
+                               workdir=workdir, say=say)
+            if pool:
+                clips = pool
+        except Exception as e:
+            if say:
+                say("⚠️ Фільтр обличчя не вийшов ({}), монтую кліпи як є".format(str(e)[:120]))
     usable = []
     for c in clips:
         try:
@@ -883,7 +914,377 @@ def make_cover(workdir, title, say):
         pass
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False):
+def parse_vtt_text(vtt_path):
+    """📜 v15: чистить WebVTT-субтитри: прибирає часові мітки, теги <…>,
+    службові рядки і ковзні дублікати авто-субтитрів (новий рядок, що починається
+    з попереднього, замінює його). Повертає чистий текст в одну лінію."""
+    lines = []
+    with open(vtt_path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            s = raw.strip()
+            if not s or "-->" in s or s.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+                continue
+            if re.match(r"^\d+$", s):  # номери блоків
+                continue
+            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
+            s = re.sub(r"&nbsp;", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            if s:
+                lines.append(s)
+    out = []
+    for s in lines:
+        if out:
+            if s.startswith(out[-1]) or out[-1].startswith(s):
+                out[-1] = s if len(s) >= len(out[-1]) else out[-1]
+                continue
+            if s == out[-1]:
+                continue
+        out.append(s)
+    text = " ".join(out)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_transcript(url, say):
+    """📜 v15: тягне субтитри (авто або ручні) з YouTube-відео через yt-dlp —
+    українською, англійською або російською, без жодних ключів.
+    Повертає (назва відео, текст транскрипції, мова)."""
+    exe = ensure_ytdlp(say)
+    outdir = os.path.join(TOOLS_DIR, "transcripts")
+    os.makedirs(outdir, exist_ok=True)
+    for old in os.listdir(outdir):  # чистимо минулі завантаження, щоб не переплутати відео
+        try:
+            os.remove(os.path.join(outdir, old))
+        except OSError:
+            pass
+    out_tmpl = os.path.join(outdir, "tr.%(ext)s")
+    cmd = [exe, "--no-playlist", "--no-warnings", "--skip-download",
+           "--write-subs", "--write-auto-subs", "--convert-subs", "vtt",
+           "--sub-langs", "uk.*,en.*,ru.*,-live_chat",
+           "--ffmpeg-location", os.path.dirname(os.path.abspath(ffmpeg_path())),
+           "--print", "%(title)s", "-o", out_tmpl, url]
+    say("📜 Тягну субтитри з YouTube (українська → англійська → російська)…")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=240)
+    except Exception as e:
+        raise RuntimeError("yt-dlp не запустився: " + str(e)[:150])
+    title = ""
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("["):
+            title = line
+            break
+    vtt, lang = None, ""
+    for fname in sorted(os.listdir(outdir)):
+        if fname.lower().endswith(".vtt"):
+            vtt = os.path.join(outdir, fname)
+            m = re.search(r"\.([A-Za-z]{2}(?:[-_][A-Za-z0-9]{2,8})?)\.vtt$", fname)
+            if m:
+                lang = m.group(1)
+            break
+    if not vtt:
+        detail = ""
+        for line in ((proc.stderr or "") + (proc.stdout or "")).splitlines():
+            if "ERROR" in line or "no subtitles" in line.lower():
+                detail = line.strip()[:200]
+                break
+        raise RuntimeError("субтитри не знайшов ({}). Спробуй інше відео — транскрипція є не всюди".format(detail or "відео без субтитрів"))
+    text = parse_vtt_text(vtt)
+    if len(text) < 20:
+        raise RuntimeError("субтитри порожні або не читаються — спробуй інше відео")
+    say("📜 Транскрипція готова: {} символів, мова {}".format(len(text), lang or "невідома"))
+    return (title or "YouTube-відео"), text, lang
+
+
+def summarize_to_seconds(text, seconds, wps=2.4):
+    """📜 v15: стискає текст приблизно до потрібної тривалості озвучки
+    (wps — слів на секунду; edge-tts читає українською ~2.4 слова/с).
+    Екстрактивно: лишає найвагоміші речення (частотні слова), перше й останнє — завжди."""
+    budget = max(20, int(seconds * wps))
+    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text or "") if len(s.strip()) > 1]
+    # авто-субтитри часто без крапок: надто довгі куски ріжемо по комах і двокрапках
+    fine = []
+    for s in sents:
+        if len(s.split()) > 40:
+            fine += [p.strip() for p in re.split(r"(?<=[,;:])\s+", s) if len(p.strip()) > 1]
+        else:
+            fine.append(s)
+    sents = fine or sents
+    if not sents:
+        return (text or "").strip()
+    if sum(len(s.split()) for s in sents) <= budget:
+        return " ".join(sents)
+    words = re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ']+", text or "")
+    freq = Counter(w.lower() for w in words if w.lower() not in UA_STOPWORDS and len(w) > 2)
+
+    def weight(s):
+        ws = re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ']+", s.lower())
+        if not ws:
+            return 0.0
+        sc = sum(freq.get(w, 0) for w in ws if len(w) > 2)
+        return sc / ((len(ws) + 2) ** 0.6)
+
+    order = sorted(range(len(sents)), key=lambda i: -weight(sents[i]))
+    keep, used = set(), 0
+    for i in order:
+        n = len(sents[i].split())
+        if used + n > budget and keep:
+            continue
+        keep.add(i)
+        used += n
+        if len(keep) >= 80:
+            break
+    keep.update({0, len(sents) - 1})  # вступ і фінал — завжди лишаємо
+    return " ".join(sents[i] for i in sorted(keep))
+
+
+def chunk_script_parts(text, max_parts=SCRIPT_MAX_SCENES):
+    """🎬 v15: ділить текст на частини сценарію приблизно порівними блоками
+    речень (частина = блок, розділювач частин — порожній рядок).
+    12 частин × ~50 с = відео на ~10 хвилин."""
+    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text or "") if s.strip()]
+    if not sents:
+        return ""
+    n = max(1, min(max_parts, len(sents)))
+    if len(sents) < n:
+        # немає крапок (типово для авто-субтитрів) — ділимо порівно за словами
+        words = " ".join(text.split()).split(" ")
+        per_w = max(10, (len(words) + n - 1) // n)
+        return "\n\n".join(" ".join(words[k:k + per_w]).strip()
+                           for k in range(0, len(words), per_w) if words[k:k + per_w])
+    per = max(1, (len(sents) + n - 1) // n)
+    parts = []
+    for k in range(0, len(sents), per):
+        parts.append(" ".join(sents[k:k + per]))
+    return "\n\n".join(parts)
+
+
+def _face_cascades():
+    """🚫 v15: готові Haar-каскади OpenCV для пошуку обличчя
+    (анфас ×2 + профіль). Порожній список — OpenCV нема або каскади не знайшлись."""
+    if cv2 is None:
+        return []
+    roots = []
+    try:
+        roots.append(cv2.data.haarcascades)
+    except Exception:
+        pass
+    try:
+        roots.append(os.path.join(os.path.dirname(os.path.abspath(cv2.__file__)),
+                                  "data", "haarcascades"))
+    except Exception:
+        pass
+    names = ("haarcascade_frontalface_default.xml",
+             "haarcascade_frontalface_alt2.xml",
+             "haarcascade_profileface.xml")
+    out, seen = [], set()
+    for root in roots:
+        for nm in names:
+            p = os.path.join(root, nm)
+            if p in seen:
+                continue
+            seen.add(p)
+            try:
+                if os.path.isfile(p) and os.path.getsize(p) > 1024:
+                    cc = cv2.CascadeClassifier(p)
+                    if not cc.empty():
+                        out.append(cc)
+            except Exception:
+                continue
+    return out
+
+
+def frame_grab(clip, sec, out_jpg, workdir):
+    """📷 v15: кадр з кліпу на потрібній секунді (для перевірки на обличчя)."""
+    run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-ss", "{:.2f}".format(sec),
+         "-i", clip, "-frames:v", "1", "-q:v", "2", out_jpg], cwd=workdir)
+    return out_jpg
+
+
+def _frame_has_face(jpg, cascades):
+    """🚫 v15: чи є обличчя на кадрі (Haar-каскади OpenCV).
+    Буд-який збій = вважаємо, що обличчя є (консервативно — безпечніше)."""
+    try:
+        img = cv2.imread(jpg)
+        if img is None:
+            return True
+        h, w = img.shape[:2]
+        if w > 480:  # зменшуємо — Haar працює швидше і стабільніше
+            img = cv2.resize(img, (480, max(1, int(h * 480 / w))))
+        gray = cv2.equalizeHist(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+        for cc in cascades:
+            faces = cc.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=5,
+                                        minSize=(48, 48))
+            if len(faces):
+                return True
+        return False
+    except Exception:
+        return True
+
+
+def face_free_windows(clip, cascades, win=6.0, workdir=None):
+    """🚫 v15: шукає у кліпі вікна по win секунд, на яких не видно обличчя:
+    у кожному вікні дивлюся 2 пробні кадри (на 25% і 75% віконця).
+    Повертає список (початок_с, тривалість_с)."""
+    try:
+        total = audio_duration(clip)
+    except Exception:
+        return []
+    workdir = workdir or os.path.dirname(os.path.abspath(clip)) or "."
+    jpg = os.path.join(workdir, "_facechk.jpg")
+    windows = []
+    t = 0.0
+    while t < total - 0.5:
+        dur = min(win, total - t)
+        if dur < 1.0:
+            break
+        clean = True
+        for off in (dur * 0.25, dur * 0.75):
+            try:
+                frame_grab(clip, t + off, jpg, workdir)
+            except Exception:
+                clean = False
+                break
+            if _frame_has_face(jpg, cascades):
+                clean = False
+                break
+        if clean:
+            windows.append((t, dur))
+        t += dur
+    try:
+        os.remove(jpg)
+    except OSError:
+        pass
+    return windows
+
+
+def noface_pool(clips, need, workdir, say=None):
+    """🚫 v15: збирає з кліпів пул фрагментів без обличчя (noface_XX.mp4).
+    З кожного чистого вікна вирізається фрагмент; далі вони монтуються як звичайні
+    кліпи. Повертає список шляхів; порожній — OpenCV нема або чистих вікон не знайшлось
+    (тоді фон монтую зі звичайних кліпів як є)."""
+    cascades = _face_cascades()
+    if not cascades:
+        if say:
+            say("ℹ️ OpenCV не встановлено — фільтр обличчя пропускаю")
+        return []
+    want = min(24, max(int(need * 1.5), need + 4))
+    out = []
+    for clip in clips:
+        if len(out) >= want:
+            break
+        try:
+            wins = face_free_windows(clip, cascades, workdir=workdir)
+        except Exception as e:
+            if say:
+                say("⚠️ Перевірка обличчя не вийшла ({}), кліп пропускаю".format(str(e)[:100]))
+            continue
+        if not wins:
+            if say:
+                say("🚫 {}: скрізь обличчя або чистих вікон не знайшов".format(os.path.basename(clip)))
+            continue
+        for (start, dur) in wins:
+            if len(out) >= want:
+                break
+            frag = os.path.join(workdir, "noface_{:02d}.mp4".format(len(out)))
+            try:
+                run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
+                     "-ss", "{:.2f}".format(start), "-i", clip,
+                     "-t", "{:.2f}".format(dur), "-an",
+                     "-c:v", "libx264", "-crf", "23", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", frag])
+                out.append(frag)
+            except Exception:
+                continue
+    if out and say:
+        say("🚫 Зібрав фрагментів без обличчя: {}".format(len(out)))
+    elif not out and say:
+        say("ℹ️ Чистих фрагментів без обличчя не знайшов — беру кліпи як є")
+    return out
+
+
+def _seo_keywords(text, limit=16):
+    """📈 v15: ключові слова з тексту: фрази-біграми (частота ≥ 2) + частотні слова,
+    без стоп-слів. Чиста логіка, без ключів і сервісів."""
+    tokens = [w for w in re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ][A-Za-zА-Яа-яІіЇїЄєҐґ\-']*",
+                                    (text or "").lower())
+              if len(w) > 2 and w not in UA_STOPWORDS]
+    if not tokens:
+        return []
+    uni = Counter(tokens)
+    bi = Counter()
+    for a, b in zip(tokens, tokens[1:]):
+        if len(b) > 2 and b not in UA_STOPWORDS:
+            bi[a + " " + b] += 1
+    picked = [g for g, c in bi.most_common() if c >= 2][:8]
+    for w, c in uni.most_common():
+        if len(picked) >= limit:
+            break
+        if not any(w == p or w in p.split() for p in picked):
+            picked.append(w)
+    return picked[:limit]
+
+
+def make_seo_pack(theme, text, workdir, say):
+    """📈 v15: SEO-пак для YouTube — файл youtube-seo.txt у робочій папці:
+    3 варіанти назви, опис, теги (лиміт YouTube ~500 символів), ключові слова,
+    хештеги і закріплений коментар. Усе оптимізовано під пошук українською."""
+    theme = " ".join((theme or "").split()) or "Моє відео"
+    kws = _seo_keywords(theme + " " + (text or ""))
+    short_theme = theme if len(theme) <= 55 else theme[:52].rstrip() + "…"
+    titles = [
+        "{} — огляд українською".format(short_theme),
+        "Що варто знати про {}?".format(short_theme[:40]),
+        "{}: усе головне за 10 хвилин".format(short_theme[:40]),
+    ]
+    tags = []
+    for k in kws[:12]:
+        if k not in tags:
+            tags.append(k)
+    for extra in (theme.lower(), "огляд українською", "українською",
+                  "відео огляд", "для початківців"):
+        if extra not in tags:
+            tags.append(extra)
+    tags_line = ", ".join(tags)
+    if len(tags_line) > 480:  # YouTube: теги до 500 символів
+        tags_line = tags_line[:480].rsplit(",", 1)[0]
+    hashtags = []
+    for k in kws[:5]:
+        h = "#" + re.sub(r"[^\w]", "", k.replace(" ", "_"))
+        if len(h) > 1 and h not in hashtags:
+            hashtags.append(h)
+    for h in ("#огляд", "#українською"):
+        if h not in hashtags:
+            hashtags.append(h)
+    desc = [
+        "{} — у цьому відео розбираємо головне простими словами.".format(short_theme),
+        "",
+        "Що всередині:",
+        "• ключові моменти теми «{}»;".format(short_theme),
+        "• з чого почати і на що звернути увагу;",
+        "• короткі висновки, які легко застосувати.",
+        "",
+        "Подобається? Підпишися, щоб не пропустити нові огляди! 🔔",
+        "",
+        "Ключові слова: {}.".format(", ".join(kws[:10]) if kws else theme.lower()),
+        "",
+        " ".join(hashtags),
+    ]
+    pinned = ("Дякую за перегляд! 🙌 Напиши у коментарях, що ще розібрати "
+              "по темі «{}» — читаю всі коментарі.").format(short_theme)
+    lines = ["НАЗВА (обери один із трьох варіантів):"]
+    lines += ["{}. {}".format(i, t) for i, t in enumerate(titles, 1)]
+    lines += ["", "ОПИС:"] + desc
+    lines += ["", "ТЕГИ (у YouTube через кому, лиміт 500 символів):", tags_line]
+    lines += ["", "КЛЮЧОВІ СЛОВА:", ", ".join(kws) if kws else theme.lower()]
+    lines += ["", "ХЕШТЕГИ (додай у кінець опису):", " ".join(hashtags)]
+    lines += ["", "ЗАКРІПЛЕНИЙ КОМЕНТАР:", pinned]
+    with open(os.path.join(workdir, "youtube-seo.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
+
+
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -953,7 +1354,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         if got:
             try:
                 say("✂️ Нарізаю фрагменти з {} відео для компіляції…".format(len(got)))
-                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition)
+                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition,
+                                         no_faces=no_faces, say=say)
                 say("🎬 Фон: компіляція фрагментів твоїх відео з YouTube")
             except Exception as e:
                 say("⚠️ Фрагменти не зібралися ({}), шукаю фон далі…".format(str(e)[:200]))
@@ -980,7 +1382,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     if not bg and bg_files:
         try:
             say("🎞 Монтую фон з твоїх {} відео…".format(len(bg_files)))
-            bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir, transition=transition)
+            bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir, transition=transition,
+                                     no_faces=no_faces, say=say)
             say("🎬 Фон: твоя компіляція з кількох відео")
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
@@ -1011,7 +1414,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         if got:
             try:
                 say("🎞 Монтую фон з {} відео з YouTube по темі…".format(len(got)))
-                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition)
+                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition,
+                                        no_faces=no_faces, say=say)
                 say("🎬 Фон: відео, знайдені на YouTube по словах теми")
             except Exception as e:
                 say("⚠️ YouTube-фон не зібрався ({}), шукаю відкриті кліпи…".format(str(e)[:200]))
@@ -1031,7 +1435,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
                 continue
             say("🎞️ Завантажено кліпів: " + str(len(clips)) + " (" + source_name + ", CC-ліцензії)")
             try:
-                bg = build_bg_from_clips(clips, dur, w, h, workdir)
+                bg = build_bg_from_clips(clips, dur, w, h, workdir,
+                                         no_faces=no_faces, say=say)
                 say("🎬 Відеоряд змонтовано зі справжніх кліпів")
             except Exception as e:
                 say("⚠️ Кліпи не зібралися ({}), пробую далі…".format(str(e)[:200]))
@@ -1108,6 +1513,11 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             make_cover(workdir, query, say)
         except Exception as e:
             say("⚠️ Обкладинка не вийшла: " + str(e)[:120])
+    if seo:  # 📈 v15: SEO-пак для YouTube
+        try:
+            make_seo_pack(query, text, workdir, say)
+        except Exception as e:
+            say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -1147,14 +1557,16 @@ def parse_script(text):
     return scenes
 
 
-def scene_segment(clip, dur, w, h, workdir, idx):
+def scene_segment(clip, dur, w, h, workdir, idx, start=0.0):
     """Фон однієї частини: нормалізується під розмір і триває рівно dur секунд
-    (короткий кліп зациклюється, довгий обрізається)."""
+    (короткий кліп зациклюється, довгий обрізається).
+    v15: start — з якої секунди кліпу брати фрагмент (чисте від обличчя вікно)."""
     ff = ffmpeg_path()
     seg = os.path.join(workdir, "pseg{:02d}.mp4".format(idx))
     vf = ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
           "fps=25,setsar=1,format=yuv420p").format(int(w), int(h), int(w), int(h))
-    run([ff, "-y", "-hide_banner", "-nostdin", "-stream_loop", "-1", "-i", clip,
+    pre = ["-ss", "{:.2f}".format(start)] if start > 0.01 else []
+    run([ff, "-y", "-hide_banner", "-nostdin", *pre, "-stream_loop", "-1", "-i", clip,
          "-t", "{:.2f}".format(dur + 0.2), "-an", "-vf", vf,
          "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
     return seg
@@ -1209,7 +1621,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -1259,6 +1671,9 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
 
     # 3) Фон кожної частини: своє відео («Кліп: …») або авто-пошук YouTube
     segs = []
+    face_cascades = _face_cascades() if no_faces else []  # 🚫 v15
+    if no_faces and not face_cascades:
+        say("ℹ️ OpenCV не встановлено — фільтр обличчя пропускаю")
     for i, sc in enumerate(scenes):
         clip = None
         if sc.get("url"):
@@ -1290,8 +1705,19 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                     say("⚠️ Не завантажилось, пробую наступне: " + str(e)[:120])
                     clip = None
         if clip:
+            start = 0.0
+            if face_cascades:  # 🚫 v15: чисте від обличчя вікно цього кліпу
+                try:
+                    wins = face_free_windows(clip, face_cascades, workdir=workdir)
+                    if wins:
+                        start = wins[0][0]
+                        say("🚫 Частині {}: фрагмент без обличчя з {:.1f} с".format(i + 1, start))
+                    else:
+                        say("ℹ️ Частині {}: чистих вікон без обличчя нема — беру кліп як є".format(i + 1))
+                except Exception as e:
+                    say("⚠️ Перевірка обличчя не вийшла ({}), беру кліп як є".format(str(e)[:100]))
             try:
-                segs.append(scene_segment(clip, durs[i], w, h, workdir, i))
+                segs.append(scene_segment(clip, durs[i], w, h, workdir, i, start=start))
                 say("✅ Фон частини {} змонтовано".format(i + 1))
             except Exception as e:
                 say("⚠️ Кліп частини {} не обробився ({}), буде градієнт".format(i + 1, str(e)[:120]))
@@ -1358,6 +1784,12 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             make_cover(workdir, first_line or "Моє відео", say)
         except Exception as e:
             say("⚠️ Обкладинка не вийшла: " + str(e)[:120])
+    if seo:  # 📈 v15: SEO-пак — тема з першої частини + текст усього сценарію
+        try:
+            make_seo_pack(scenes[0]["q"] if scenes else "Моє відео",
+                          " ".join(sc["text"] for sc in scenes), workdir, say)
+        except Exception as e:
+            say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -1384,7 +1816,7 @@ class App:
         ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз"),
         ("убтитр",),
         ("Фон", "фон", "кліп", "Openverse", "Wikimedia", "градієнт",
-         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення"),
+         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Облич"),
         ("Рендер", "рендер", "ГОТОВО", "Зшиваю"),
     )
 
@@ -1495,7 +1927,7 @@ class App:
         self._build_set_tab()
         self._show_tab("🎬 Генерація")
         # v13: меню правого кліку («📋 Вставити») для всіх текстових полів
-        for w in (self.query, self.script, self.yt_many, self.yt_search_entry):
+        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.tr_entry):
             self.attach_paste_menu(w)
 
     def _show_tab(self, val):
@@ -1683,6 +2115,24 @@ class App:
         ctk.CTkSwitch(yb, text="✂️ Нарізати фрагменти у фон", variable=self.yt_many_bg,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
 
+        trc = self._card(side, fill="x", pady=(0, 8))  # 📜 v15: транскрипція YouTube
+        ctk.CTkLabel(trc, text="📜 Транскрипція YouTube", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
+        ctk.CTkLabel(trc, text="Встав посилання — витягну субтитри, стисну до ~10 хвилин озвучки і зроблю сценарій.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
+        self.tr_entry = ctk.CTkEntry(trc, height=34, font=self._f(12),
+                                    fg_color=self.INSET, corner_radius=10)
+        self.tr_entry.pack(fill="x", padx=14, pady=(0, 4))
+        trrow = ctk.CTkFrame(trc, fg_color="transparent")
+        trrow.pack(fill="x", padx=14, pady=(2, 12))
+        ctk.CTkButton(trrow, text="📋", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=lambda: self.paste_into(self.tr_entry)).pack(side="left")
+        ctk.CTkButton(trrow, text="📜 Отримати", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.transcript_now).pack(side="left", padx=(6, 0))
+
         vc = self._card(side, fill="x", pady=(0, 8))
         ctk.CTkLabel(vc, text="🎙 Голос озвучення", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=14, pady=(12, 2))
@@ -1721,6 +2171,12 @@ class App:
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
         ctk.CTkSwitch(stc, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.no_faces = ctk.BooleanVar(value=False)  # 🚫 v15: фрагменти без обличчя
+        ctk.CTkSwitch(stc, text="🚫 Без обличчя у кадрі (OpenCV)", variable=self.no_faces,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.seo = ctk.BooleanVar(value=True)  # 📈 v15: SEO-пак
+        ctk.CTkSwitch(stc, text="📈 SEO-пак для YouTube (youtube-seo.txt)", variable=self.seo,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
 
         zc = self._card(side, fill="x", pady=(0, 8))
@@ -1851,7 +2307,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v14 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі субтитрів, стилістика, переходи, обкладинка, прибрання пауз, батч — усе без API-ключів.\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v15 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі субтитрів, стилістика, переходи, обкладинка, прибрання пауз, батч,\nтранскрипція YouTube, фрагменти без обличчя і SEO-пак — усе без API-ключів.\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -2237,6 +2693,8 @@ class App:
             "transition": self.transition.get(),
             "trim": bool(self.trim_sil.get()),
             "cover": bool(self.cover_on.get()),
+            "no_faces": bool(self.no_faces.get()),
+            "seo": bool(self.seo.get()),
             "yt_q": self.yt_q.get(),
         }
         try:
@@ -2277,6 +2735,10 @@ class App:
             self.trim_sil.set(bool(data["trim"]))
         if "cover" in data:
             self.cover_on.set(bool(data["cover"]))
+        if "no_faces" in data:
+            self.no_faces.set(bool(data["no_faces"]))
+        if "seo" in data:
+            self.seo.set(bool(data["seo"]))
         if data.get("yt_q") in YT_QUALITY:
             self.yt_q.set(data["yt_q"])
         self.say("📂 Пресет «{}» застосовано".format(name))
@@ -2291,6 +2753,87 @@ class App:
             except OSError as e:
                 self.say("⚠️ Не вдалося видалити: " + str(e)[:120])
         self._refresh_presets()
+
+    def transcript_now(self):
+        """📜 v15: витягнути транскрипцію з YouTube-відео (окремий потік)."""
+        url = self.tr_entry.get().strip()
+        if not url.startswith("http"):
+            messagebox.showwarning("Стоп", "Встав посилання на YouTube-відео у поле транскрипції 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        self.say("📜 Тягну транскрипцію: " + url[:70])
+        threading.Thread(target=self._transcript_thread, args=(url,), daemon=True).start()
+
+    def _transcript_thread(self, url):
+        try:
+            ensure_ffmpeg(self.say)
+            title, text, lang = fetch_transcript(url, self.say)
+            self.q.put(("transcript", title, text))
+        except Exception as e:
+            self.say("❌ Транскрипція не вийшла: " + str(e)[:250])
+        finally:
+            self.q.put(None)
+
+    def _show_transcript(self, title, text):
+        """📜 v15: вікно транскрипції — читати, стиснути до ~10 хв, зробити сценарій."""
+        win = ctk.CTkToplevel(self.root)
+        win.title("📜 Транскрипція")
+        win.geometry("900x640")
+        win.attributes("-topmost", True)
+        win.after(400, lambda: win.attributes("-topmost", False))
+        try:
+            win.grab_set()
+        except Exception:
+            pass
+        ctk.CTkLabel(win, text="📜 " + (title or "YouTube-відео")[:90],
+                     font=self._f(14, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        ctk.CTkLabel(win, text="{} символів".format(len(text)), font=self._f(11),
+                     text_color=self.MUTED, anchor="w").pack(fill="x", padx=16, pady=(0, 4))
+        box = ctk.CTkTextbox(win, font=self._f(12), wrap="word",
+                             fg_color=self.INSET, corner_radius=10)
+        box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        box.insert("1.0", text)
+
+        def do_shorten():
+            short = summarize_to_seconds(box.get("1.0", "end").strip(), 600)
+            box.delete("1.0", "end")
+            box.insert("1.0", short)
+            messagebox.showinfo("Готово", "Стиснув до ~10 хвилин озвучки (≈{} слів)".format(len(short.split())))
+
+        def do_script():
+            short = summarize_to_seconds(box.get("1.0", "end").strip(), 600)
+            parts = chunk_script_parts(short)
+            self.script.delete("1.0", "end")
+            self.script.insert("1.0", parts)
+            self.use_script.set(True)
+            n = len([b for b in parts.split("\n\n") if b.strip()])
+            messagebox.showinfo("Готово", "Сценарій з {} частин вставлено у картку «🎬 Сценарій» —\nперемикач «Генерувати за сценарієм» уже увімкнений ✓".format(n))
+            win.destroy()
+
+        def do_save():
+            path = filedialog.asksaveasfilename(title="Зберегти транскрипцію",
+                                                defaultextension=".txt",
+                                                filetypes=[("Текстові файли", "*.txt")])
+            if path:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(box.get("1.0", "end").strip())
+                self.say("💾 Транскрипцію збережено: " + path)
+
+        row = ctk.CTkFrame(win, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(0, 12))
+        ctk.CTkButton(row, text="✂️ Стиснути до ~10 хв", height=34, corner_radius=17,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=do_shorten).pack(side="left")
+        ctk.CTkButton(row, text="🎬 У сценарій", height=34, corner_radius=17,
+                      fg_color=self.GREEN, hover_color="#0E9F6E", font=self._f(12),
+                      command=do_script).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(row, text="💾 Зберегти .txt", height=34, corner_radius=17,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=do_save).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(row, text="Закрити", height=34, corner_radius=17,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=win.destroy).pack(side="right")
 
     def download_yt_many(self):
         """Завантаження всіх відео з поля посилань (окремий потік)."""
@@ -2437,6 +2980,8 @@ class App:
                 kind = msg[0]
                 if kind == "yt_search_results":
                     self._show_yt_results(msg[1], msg[2])
+                elif kind == "transcript":  # 📜 v15: показати вікно транскрипції
+                    self._show_transcript(msg[1], msg[2])
                 elif kind == "poster":
                     self._set_poster(msg[1])
                 elif kind == "poster_img":
@@ -2523,12 +3068,15 @@ class App:
             trans = self.transition.get() if hasattr(self, "transition") else "Різко"
             trim = bool(self.trim_sil.get()) if hasattr(self, "trim_sil") else False
             cov = bool(self.cover_on.get()) if hasattr(self, "cover_on") else False
+            nf = bool(self.no_faces.get()) if hasattr(self, "no_faces") else False  # 🚫 v15
+            se = bool(self.seo.get()) if hasattr(self, "seo") else False             # 📈 v15
             if getattr(self, "use_script", None) and self.use_script.get():
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
-                                      sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov)
+                                      sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
+                                      no_faces=nf, seo=se)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -2553,7 +3101,7 @@ class App:
                                        on_workdir=lambda wd: setattr(self, "workdir", wd),
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov)
+                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
