@@ -8,7 +8,9 @@ v6: кнопки 📋 «Вставити» в усіх полях для пос�
 v7: сценарій по частинах — кожна частина отримує свій фон з YouTube (авто-пошук).
 v8: свій сценарій — 📂 відкрити з txt-файлу / 💾 зберегти у файл;
 рядок «Кліп: посилання» ставить ТВОЄ конкретне відео у фон частини.
-v9: після теми відео сам шукаю на YouTube відео по словах запиту і монтую їх у фон."""
+v9: після теми відео сам шукаю на YouTube відео по словах запиту і монтую їх у фон.
+v10: кнопка 🌐 «Шукати на YouTube» — відкриває YouTube у браузері, назва вже у полі пошуку.
+v11: ПКМ у будь-якому полі — меню «📋 Вставити» і «🧹 Очистити» (текст з буфера обміну)."""
 import asyncio
 import base64
 import json
@@ -19,9 +21,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import tkinter
+import webbrowser
 import zipfile
 from datetime import datetime
 from tkinter import messagebox, filedialog
+from urllib.parse import quote_plus
 
 import customtkinter as ctk
 import edge_tts
@@ -58,7 +63,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.9 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.11 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -1276,6 +1281,10 @@ class App:
                       corner_radius=16, fg_color=self.INSET, hover_color=self.HOVER,
                       font=ctk.CTkFont(family="Segoe UI", size=12),
                       command=self.score_now).pack(side="right")
+        ctk.CTkButton(srow, text="🌐 Шукати на YouTube", width=170, height=32,
+                      corner_radius=16, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=12),
+                      command=self.open_youtube_search).pack(side="right", padx=(0, 8))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати",
                      font=ctk.CTkFont(family="Segoe UI", size=11),
                      text_color=self.MUTED).pack(anchor="e", padx=20, pady=(2, 12))
@@ -1411,6 +1420,10 @@ class App:
                       corner_radius=20, fg_color=self.INSET,
                       hover_color=self.HOVER, font=ctk.CTkFont(family="Segoe UI", size=13),
                       command=self.yt_search_now).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(srow, text="🌐", width=56, height=40,
+                      corner_radius=20, fg_color=self.INSET, hover_color=self.HOVER,
+                      font=ctk.CTkFont(family="Segoe UI", size=15),
+                      command=lambda: self.open_youtube_search(self.yt_search_entry)).pack(side="left", padx=(8, 0))
         self.yt_results_frame = ctk.CTkScrollableFrame(sc, height=180, fg_color=self.INSET,
                                                        corner_radius=14)
         self.yt_results_frame.pack(fill="x", padx=20, pady=(0, 6))
@@ -1450,6 +1463,9 @@ class App:
                       variable=self.merge_bg,
                       font=ctk.CTkFont(family="Segoe UI", size=12),
                       progress_color=self.ACCENT).pack(anchor="w", padx=20, pady=(0, 14))
+        # v11: меню правого кліку («📋 Вставити») для всіх текстових полів
+        for w in (self.query, self.script, self.yt_url, self.yt_search_entry):
+            self.attach_paste_menu(w)
 
     def paste_into(self, widget):
         """Вставляє текст із буфера обміну в будь-яке поле (кнопки 📋)."""
@@ -1469,6 +1485,30 @@ class App:
             widget.delete(0, "end")
             widget.insert(0, clip)
         self.say("📋 Вставлено: " + clip[:80])
+
+    def attach_paste_menu(self, widget):
+        """🖱 ПКМ у полі — меню «📋 Вставити» / «🧹 Очистити» (текст з буфера обміну)."""
+        menu = tkinter.Menu(widget, tearoff=0, bg="#1C1C1E", fg="#F5F5F7",
+                            activebackground="#3A3A3C", activeforeground="#FFFFFF",
+                            font=("Segoe UI", 11))
+        menu.add_command(label="📋 Вставити", command=lambda: self.paste_into(widget))
+        menu.add_command(label="🧹 Очистити", command=lambda: self.clear_field(widget))
+        widget._paste_menu = menu
+
+        def _popup(event):
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+        widget.bind("<Button-3>", _popup, add="+")
+
+    def clear_field(self, widget):
+        """🧹 Очистити поле (пункт меню ПКМ)."""
+        if isinstance(widget, ctk.CTkTextbox):
+            widget.delete("1.0", "end")
+        else:
+            widget.delete(0, "end")
+        self.say("🧹 Поле очищено")
 
     def paste_query(self):
         """Вставляє текст із буфера обміну в поле запиту."""
@@ -1529,6 +1569,21 @@ class App:
     def score_now(self):
         """🧲 Оцінка заголовка з поля запиту (поради — у журнал)."""
         score_hook(self.query.get("1.0", "end").strip(), self.say)
+
+    def open_youtube_search(self, entry=None):
+        """🌐 Відкриває YouTube у браузері — назва відео вже стоїть у полі пошуку YouTube."""
+        q = ""
+        if entry is not None:
+            q = entry.get().strip()
+        if not q:
+            q = self.query.get("1.0", "end").strip()
+        if not q and getattr(self, "yt_search_entry", None):
+            q = self.yt_search_entry.get().strip()
+        if not q:
+            messagebox.showwarning("Стоп", "Спершу напиши тему або назву відео 🙂")
+            return
+        webbrowser.open("https://www.youtube.com/results?search_query=" + quote_plus(q))
+        self.say("🌐 Відкрив YouTube з пошуком: " + q[:80])
 
     def pick_music(self):
         p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
