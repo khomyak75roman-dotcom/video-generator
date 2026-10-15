@@ -14,6 +14,9 @@ v11: ПКМ у будь-якому полі — меню «📋 Вставити
 v12: простіше поле YouTube — кілька посилань зразу, з них нарізаються фрагменти для компіляції.
 v13: новий інтерфейс у стилі MoneyPrinterTurbo — таби «Генерація / Історія / Налаштування»,
 сайдбар налаштувань, прев'ю готового відео з кадром, кроки пайплайну, журнал збоку.
+v14: 💾 пресети налаштувань, 💬 4 стилі субтитрів, 🎨 стилістика картинки (Кіно/Тепло/Ч-Б…),
+🎞 переходи між фрагментами (xfade), 📷 обкладинка YouTube (cover.jpg),
+✂️ прибрання пауз з озвучки, 📚 батч-генерація (теми з нового рядка), 12 голосів edge-tts.
 """
 import asyncio
 import base64
@@ -29,7 +32,7 @@ import tkinter
 import webbrowser
 import zipfile
 from datetime import datetime
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, simpledialog
 from urllib.parse import quote_plus
 
 import customtkinter as ctk
@@ -49,14 +52,46 @@ ctk.set_default_color_theme("blue")
 VOICES = {
     "Остап": "uk-UA-OstapNeural",
     "Поліна": "uk-UA-PolinaNeural",
-    "Christopher": "en-US-ChristopherNeural",
-    "Jenny": "en-US-JennyNeural",
+    "Christopher (EN)": "en-US-ChristopherNeural",
+    "Jenny (EN)": "en-US-JennyNeural",
+    "Aria (EN)": "en-US-AriaNeural",
+    "Guy (EN)": "en-US-GuyNeural",
+    "Ryan (UK)": "en-GB-RyanNeural",
+    "Sonia (UK)": "en-GB-SoniaNeural",
+    "Marek (PL)": "pl-PL-MarekNeural",
+    "Zofia (PL)": "pl-PL-ZofiaNeural",
+    "Katja (DE)": "de-DE-KatjaNeural",
+    "Conrad (DE)": "de-DE-ConradNeural",
 }
 SIZES = {
     "720p": "1280x720",
     "1080p": "1920x1080",
     "Shorts": "1080x1920 (Shorts)",
 }
+# v14 💬: стилі субтитрів — те саме force_style ffmpeg, що й «Subtitles styles» у CapCut
+SUBTITLE_STYLES = {
+    "Класичні": "FontSize=16",
+    "Жовті з тінню (CapCut)": "FontSize=16,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,Outline=1,Shadow=1,Bold=1",
+    "Білі з підкладкою": "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,Outline=2,Shadow=0,Bold=0",
+    "Неонові великі": "FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00ED3A7C,Outline=2,Shadow=1,Bold=1",
+}
+# v14 🎨: стилістика картинки — фільтри ffmpeg (як «Filters» у модних редакторах)
+VIDEO_STYLES = {
+    "Без стилю": "",
+    "Кіно": "eq=contrast=1.12:saturation=1.05:brightness=-0.03,vignette=PI/5",
+    "Тепло": "eq=saturation=1.1,colorbalance=rs=0.05:ms=0.03",
+    "Чорно-біле": "hue=s=0,eq=contrast=1.1",
+    "Яскраво": "eq=brightness=0.05:saturation=1.2",
+    "Ретро": "noise=alls=6:allf=t,eq=saturation=0.85:contrast=1.05",
+}
+# v14 🎞: переходи між фрагментами компіляції (xfade ffmpeg; «Різко» = без переходу)
+TRANSITIONS = {
+    "Різко": "",
+    "Наплив": "fade",
+    "Затемнення": "fadeblack",
+}
+# v14 💾: папка пресетів налаштувань (JSON, поруч із результатами генерації)
+PRESET_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Generated", "presets")
 YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
 YT_SEARCH_LIMIT = 12   # скільки результатів пошуку показувати
 YT_CLIP_MAX_SEC = 120  # кожне обране відео — максимум стільки секунд у фоні
@@ -72,7 +107,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.13 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.14 (https://github.com/khomyak75roman-dotcom/video-generator)"
 
 
 def ffmpeg_path():
@@ -455,9 +490,37 @@ def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
         return None, "Wikimedia videos: {}".format(e)
 
 
-def build_bg_from_clips(clips, dur, w, h, workdir):
+def xfade_join(segs, takes, workdir, trans, cross=0.5):
+    """🎞 v14: склеює нормалізовані фрагменти з плавним переходом (xfade ffmpeg) —
+    той самий «Наплив/Затемнення», що й у CapCut. Фрагменти вже однакові за
+    розміром/fps, тож xfade проходить без підготовки."""
+    ff = ffmpeg_path()
+    bg = os.path.join(workdir, "bg.mp4")
+    inputs = []
+    for s in segs:
+        inputs += ["-i", s]
+    parts = []
+    prev = "[0:v]"
+    off = max(float(takes[0]) - cross, 0.0)
+    for i in range(1, len(segs)):
+        last = (i == len(segs) - 1)
+        out = "[vout]" if last else "[vx{}]".format(i)
+        parts.append("{}[{}:v]xfade=transition={}:duration={}:offset={:.2f}{}"
+                     .format(prev, i, trans, cross, off, out))
+        prev = out
+        off += max(float(takes[i]) - cross, 0.0)
+    cmd = [ff, "-y", "-hide_banner", "-nostdin", *inputs,
+           "-filter_complex", ";".join(parts), "-map", "[vout]",
+           "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
+           "-pix_fmt", "yuv420p", "-an", bg]
+    run(cmd, cwd=workdir)
+    return bg
+
+
+def build_bg_from_clips(clips, dur, w, h, workdir, transition=""):
     """Справжній відеоряд: кожен кліп обрізається до свого слота, нормалізується
-    і склеюється. Якщо матеріалу менше за озвучку — кліпи йдуть по колу."""
+    і склеюється. Якщо матеріалу менше за озвучку — кліпи йдуть по колу.
+    v14: transition ≠ «» — між фрагментами плавний перехід (xfade)."""
     ff = ffmpeg_path()
     w, h = int(w), int(h)
     usable = []
@@ -476,7 +539,14 @@ def build_bg_from_clips(clips, dur, w, h, workdir):
         c, d = usable[i % len(usable)]
         slots.append((c, min(per, d)))
         i += 1
-    segs = []
+    if transition:  # v14: переходи «з'їдають» по 0.5 с на стик — додаємо матеріал
+        guard = 0
+        while sum(s[1] for s in slots) - 0.5 * max(len(slots) - 1, 0) < dur - 0.5 and guard < 200:
+            c, d = usable[i % len(usable)]
+            slots.append((c, min(per, d)))
+            i += 1
+            guard += 1
+    segs, takes = [], []
     for j, (c, take) in enumerate(slots):
         seg = os.path.join(workdir, "vseg{}.mp4".format(j))
         run([ff, "-y", "-hide_banner", "-nostdin", "-i", c, "-t", "{:.2f}".format(take),
@@ -485,6 +555,12 @@ def build_bg_from_clips(clips, dur, w, h, workdir):
               "fps=25,setsar=1,format=yuv420p").format(w, h, w, h),
              "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
         segs.append(seg)
+        takes.append(take)
+    if transition and len(segs) >= 2:  # v14: спершу пробуємо з переходами
+        try:
+            return xfade_join(segs, takes, workdir, TRANSITIONS.get(transition) or transition)
+        except Exception:
+            pass  # не вийшло — склеюємо різко, відео все одно збереться
     lst = os.path.join(workdir, "vlist.txt")
     with open(lst, "w", encoding="utf-8") as f:
         for s in segs:
@@ -712,7 +788,102 @@ def tts_save(text, voice, out_mp3, say):
          "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None):
+def remove_pauses(mp3_path, out_path, say):
+    """✂️ v14: вирізає з озвучки тихі паузи (довші за 0.7 с) — як «Remove silences»
+    у Pictory/InVideo. Головна фішка модних автонарізок: мовлення стає щільним.
+    Повертає (шлях, тривалість) — або оригінал, якщо прибирати нічого/не вийшло."""
+    ff = ffmpeg_path()
+    try:
+        before = audio_duration(mp3_path)
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", mp3_path, "-af",
+             "silenceremove=stop_periods=-1:stop_duration=0.7:stop_threshold=-38dB",
+             "-c:a", "libmp3lame", "-b:a", "48k", "-ar", "24000", out_path])
+        after = audio_duration(out_path)
+        if after < 1.5 or after >= before - 0.05:
+            say("ℹ️ Довгих пауз в озвучці не знайшов — лишаю як є")
+            return mp3_path, before
+        say("✂️ Прибрав паузи: {:.1f} с → {:.1f} с (−{:.1f} с)".format(before, after, before - after))
+        return out_path, after
+    except Exception as e:
+        say("⚠️ Прибирання пауз не вийшло ({}), лишаю озвучку як є".format(str(e)[:120]))
+        return mp3_path, 0.0
+
+
+def make_cover(workdir, title, say):
+    """📷 v14: обкладинка для YouTube (cover.jpg) — кадр з готового відео + назва теми.
+    Кадр бере ffmpeg, назву накладає Pillow — обидва вже є в застосунку, без нових залежностей."""
+    ff = ffmpeg_path()
+    cover = os.path.join(workdir, "cover.jpg")
+    tmp = os.path.join(workdir, "_cover_frame.jpg")
+    try:
+        run([ff, "-y", "-hide_banner", "-nostdin", "-ss", "0.7", "-i", "final.mp4",
+             "-frames:v", "1", "-q:v", "2", "_cover_frame.jpg"], cwd=workdir)
+    except Exception as e:
+        say("⚠️ Кадр для обкладинки не вийшов: " + str(e)[:120])
+        return
+    if PILImage is None:
+        try:
+            os.replace(tmp, cover)
+            say("📷 Обкладинка: кадр з відео (cover.jpg)")
+        except OSError:
+            pass
+        return
+    try:
+        from PIL import ImageDraw, ImageFont
+        img = PILImage.open(tmp).convert("RGB")
+        W, H = img.size
+        d = ImageDraw.Draw(img, "RGBA")
+        # градієнтна підкладка знизу — текст читається на будь-якому кадрі
+        gh = int(H * 0.45)
+        for k in range(gh):
+            d.line([(0, H - gh + k), (W, H - gh + k)], fill=(10, 10, 18, int(210 * (k + 1) / gh)))
+        font = None
+        fs = max(24, int(W / 14))
+        for fp in ("C:\\Windows\\Fonts\\segoeuib.ttf",
+                   "C:\\Windows\\Fonts\\arialbd.ttf",
+                   "C:\\Windows\\Fonts\\segoeui.ttf"):
+            try:
+                font = ImageFont.truetype(fp, fs)
+                break
+            except Exception:
+                font = None
+        if font is None:
+            raise RuntimeError("системний шрифт не знайшовся")
+        # назва: без емодзі (у шрифті їх нема), перенос по словах, максимум 3 рядки
+        clean = "".join(ch for ch in (title or "Моє відео") if ord(ch) <= 65535)
+        words = " ".join(clean.split()).split(" ")
+        lines, cur = [], ""
+        for wd in words:
+            cand = (cur + " " + wd).strip()
+            if cur and d.textlength(cand, font=font) > W * 0.84:
+                lines.append(cur)
+                cur = wd
+            else:
+                cur = cand
+        if cur:
+            lines.append(cur)
+        lines = lines[:3]
+        lh = int(fs * 1.3)
+        y = H - int(H * 0.06) - lh * len(lines)
+        for ln in lines:
+            tw = d.textlength(ln, font=font)
+            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
+            y += lh
+        img.save(cover, quality=90)
+        say("📷 Обкладинка для YouTube: cover.jpg у робочій папці")
+    except Exception as e:
+        try:
+            os.replace(tmp, cover)
+            say("📷 Обкладинка: кадр без тексту (cover.jpg) — " + str(e)[:80])
+        except OSError:
+            pass
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -730,6 +901,16 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
     tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say)
+    if trim_sil:  # ✂️ v14: прибираємо довгі паузи з озвучки
+        trim_out = os.path.join(workdir, "voice_trim.mp3")
+        p, _ = remove_pauses(os.path.join(workdir, "voice.mp3"), trim_out, say)
+        if os.path.abspath(p) == os.path.abspath(trim_out):
+            try:
+                os.replace(os.path.join(workdir, "voice.mp3"),
+                           os.path.join(workdir, "voice_raw.mp3"))  # оригінал лишаємо поруч
+                os.replace(trim_out, os.path.join(workdir, "voice.mp3"))
+            except OSError:
+                pass
 
     dur = audio_duration(os.path.join(workdir, "voice.mp3"))
     say(f"⏱️ Тривалість: {dur:.1f} с")
@@ -772,7 +953,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         if got:
             try:
                 say("✂️ Нарізаю фрагменти з {} відео для компіляції…".format(len(got)))
-                bg = build_bg_from_clips(got, dur, w, h, workdir)
+                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition)
                 say("🎬 Фон: компіляція фрагментів твоїх відео з YouTube")
             except Exception as e:
                 say("⚠️ Фрагменти не зібралися ({}), шукаю фон далі…".format(str(e)[:200]))
@@ -799,7 +980,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     if not bg and bg_files:
         try:
             say("🎞 Монтую фон з твоїх {} відео…".format(len(bg_files)))
-            bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir)
+            bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir, transition=transition)
             say("🎬 Фон: твоя компіляція з кількох відео")
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
@@ -830,7 +1011,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         if got:
             try:
                 say("🎞 Монтую фон з {} відео з YouTube по темі…".format(len(got)))
-                bg = build_bg_from_clips(got, dur, w, h, workdir)
+                bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition)
                 say("🎬 Фон: відео, знайдені на YouTube по словах теми")
             except Exception as e:
                 say("⚠️ YouTube-фон не зібрався ({}), шукаю відкриті кліпи…".format(str(e)[:200]))
@@ -883,20 +1064,27 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         vf_in = ["-f", "lavfi", "-i", f"gradients=s={w}x{h}:c0=0x0f2027:c1=0x2c5364:speed=0.03"]
         say("🖼️ Генерую анімований градієнтний фон")
 
+    # v14: стиль субтитрів (💬) і стилістика картинки (🎨) — один рядок фільтрів ffmpeg
+    stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"
+    vfx = VIDEO_STYLES.get(vid_style) or ""
+    vf_base = f"scale={w}:{h}:force_original_aspect_ratio=cover"
+    if vfx:
+        vf_base += "," + vfx
+
     cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3"]
     if music:
         cmd += ["-i", music]
 
     if music:
         cmd += ["-filter_complex",
-                f"[0:v]scale={w}:{h}:force_original_aspect_ratio=cover,"
-                f"subtitles=sub.srt:force_style='FontSize=16'[v];"
+                f"[0:v]{vf_base},"
+                f"subtitles=sub.srt:force_style='{stl}'[v];"
                 f"[1:a][2:a]amix=inputs=2:duration=first:weights='1 0.15'[a]",
                 "-map", "[v]", "-map", "[a]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest", "-vf",
-                f"scale={w}:{h}:force_original_aspect_ratio=cover,"
-                f"subtitles=sub.srt:force_style='FontSize=16'"]
+                f"{vf_base},"
+                f"subtitles=sub.srt:force_style='{stl}'"]
 
     cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
@@ -908,11 +1096,18 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         say("⚠️ Рендер із субтитрами не вдався — спробую простіший, без субтитрів…")
         say("📝 Причина: " + str(err)[:400])
         cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
-                "-map", "0:v", "-map", "1:a", "-shortest",
-                "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+                "-map", "0:v", "-map", "1:a", "-shortest"]
+        if vfx:
+            cmd2 += ["-vf", vf_base]
+        cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
         say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    if cover:  # 📷 v14: обкладинка для YouTube
+        try:
+            make_cover(workdir, query, say)
+        except Exception as e:
+            say("⚠️ Обкладинка не вийшла: " + str(e)[:120])
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -1014,7 +1209,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -1042,6 +1237,14 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     for i, sc in enumerate(scenes):
         m = os.path.join(workdir, "voice_{:02d}.mp3".format(i))
         tts_save(sc["text"], voice, m, say)
+        if trim_sil:  # ✂️ v14: прибираємо паузи в кожній частині окремо
+            t_out = os.path.join(workdir, "vtrim_{:02d}.mp3".format(i))
+            p, _ = remove_pauses(m, t_out, say)
+            if os.path.abspath(p) == os.path.abspath(t_out):
+                try:
+                    os.replace(t_out, m)
+                except OSError:
+                    pass
         d = audio_duration(m)
         mp3s.append(m)
         durs.append(max(d, 1.0))
@@ -1115,19 +1318,24 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     # 5) Фінальний рендер: фон + озвучка + субтитри (+ музика)
     music = (music or "").strip()
     vf_in = ["-stream_loop", "-1", "-i", "bg.mp4"]
+    stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"  # v14 💬: стиль субтитрів
+    vfx = VIDEO_STYLES.get(vid_style) or ""               # v14 🎨: стилістика картинки
+    vf_base = f"scale={w}:{h}:force_original_aspect_ratio=cover"
+    if vfx:
+        vf_base += "," + vfx
     cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3"]
     if music:
         cmd += ["-i", music]
     if music:
         cmd += ["-filter_complex",
-                f"[0:v]scale={w}:{h}:force_original_aspect_ratio=cover,"
-                f"subtitles=sub.srt:force_style='FontSize=16'[v];"
+                f"[0:v]{vf_base},"
+                f"subtitles=sub.srt:force_style='{stl}'[v];"
                 f"[1:a][2:a]amix=inputs=2:duration=first:weights='1 0.15'[a]",
                 "-map", "[v]", "-map", "[a]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest", "-vf",
-                f"scale={w}:{h}:force_original_aspect_ratio=cover,"
-                f"subtitles=sub.srt:force_style='FontSize=16'"]
+                f"{vf_base},"
+                f"subtitles=sub.srt:force_style='{stl}'"]
     cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
     say("🚀 Рендерю відео…")
@@ -1137,11 +1345,19 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         say("⚠️ Рендер із субтитрами не вдався — рендерю без субтитрів…")
         say("📝 Причина: " + str(err)[:400])
         cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
-                "-map", "0:v", "-map", "1:a", "-shortest",
-                "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+                "-map", "0:v", "-map", "1:a", "-shortest"]
+        if vfx:
+            cmd2 += ["-vf", vf_base]
+        cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
         say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    if cover:  # 📷 v14: обкладинка — назва з першої частини сценарію
+        try:
+            first_line = scenes[0]["text"].splitlines()[0].strip() if scenes else ""
+            make_cover(workdir, first_line or "Моє відео", say)
+        except Exception as e:
+            say("⚠️ Обкладинка не вийшла: " + str(e)[:120])
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -1165,7 +1381,7 @@ class App:
     STEPS = ("📝 Текст", "🎙 Озвучка", "💬 Субтитри", "🎬 Фон", "⚙️ Рендер")
     STEP_KEYS = (
         ("Запит:", "Сценар", "Робоча папка", "Перевіряю ffmpeg"),
-        ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість"),
+        ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз"),
         ("убтитр",),
         ("Фон", "фон", "кліп", "Openverse", "Wikimedia", "градієнт",
          "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення"),
@@ -1255,7 +1471,7 @@ class App:
         head.configure(height=56)
         ctk.CTkLabel(head, text="🎬 Генератор відео", font=self._f(16, "bold"),
                      text_color="#FFFFFF").pack(side="left", padx=(16, 0))
-        ctk.CTkLabel(head, text="v13", font=self._f(11, "bold"),
+        ctk.CTkLabel(head, text="v14", font=self._f(11, "bold"),
                      text_color=self.ACCENT_H).pack(side="left", padx=(8, 0))
         self.tabs = ctk.CTkSegmentedButton(
             head, values=["🎬 Генерація", "🗂 Історія", "⚙️ Налаштування"],
@@ -1400,6 +1616,9 @@ class App:
         ctk.CTkButton(qrow, text="🌐 YouTube", width=100, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.open_youtube_search).pack(side="left", padx=(8, 0))
+        self.batch = ctk.BooleanVar(value=False)  # 📚 v14: батч-генерація
+        ctk.CTkSwitch(qc, text="📚 Батч: кожна тема з нового рядка", variable=self.batch,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w", padx=14, pady=(2, 12))
 
@@ -1473,6 +1692,37 @@ class App:
         self.voice.set("Остап")
         self.voice.pack(fill="x", padx=14, pady=(0, 12))
 
+        stc = self._card(side, fill="x", pady=(0, 8))  # 🎨 v14: стилі відео
+        ctk.CTkLabel(stc, text="🎨 Стиль відео", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
+        ctk.CTkLabel(stc, text="💬 Стиль субтитрів", font=self._f(11),
+                     text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
+        self.sub_style = ctk.CTkOptionMenu(stc, values=list(SUBTITLE_STYLES), height=32,
+                                          fg_color=self.INSET, button_color=self.HOVER,
+                                          button_hover_color=self.HOVER, font=self._f(12))
+        self.sub_style.set("Класичні")
+        self.sub_style.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(stc, text="🎨 Стилістика картинки", font=self._f(11),
+                     text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
+        self.vid_style = ctk.CTkOptionMenu(stc, values=list(VIDEO_STYLES), height=32,
+                                           fg_color=self.INSET, button_color=self.HOVER,
+                                           button_hover_color=self.HOVER, font=self._f(12))
+        self.vid_style.set("Без стилю")
+        self.vid_style.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(stc, text="🎞 Переходи між фрагментами", font=self._f(11),
+                     text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
+        self.transition = ctk.CTkOptionMenu(stc, values=list(TRANSITIONS), height=32,
+                                            fg_color=self.INSET, button_color=self.HOVER,
+                                            button_hover_color=self.HOVER, font=self._f(12))
+        self.transition.set("Різко")
+        self.transition.pack(fill="x", padx=14, pady=(0, 6))
+        self.trim_sil = ctk.BooleanVar(value=False)  # ✂️ v14: паузи з озвучки
+        ctk.CTkSwitch(stc, text="✂️ Прибирати паузи з озвучки", variable=self.trim_sil,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
+        ctk.CTkSwitch(stc, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
+
         zc = self._card(side, fill="x", pady=(0, 8))
         ctk.CTkLabel(zc, text="📐 Розмір відео", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=14, pady=(12, 2))
@@ -1493,6 +1743,29 @@ class App:
         ctk.CTkButton(mrow, text="Обрати файл…", width=110, height=34, corner_radius=17,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.pick_music).pack(side="left")
+
+        prc = self._card(side, fill="x", pady=(0, 8))  # 💾 v14: пресети налаштувань
+        ctk.CTkLabel(prc, text="💾 Пресети налаштувань", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
+        ctk.CTkLabel(prc, text="Зберігають голос, розмір, стилі субтитрів, стилістику, переходи і перемикачі — щоб не налаштовувати щоразу.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
+        self.preset_menu = ctk.CTkOptionMenu(prc, values=["(порожньо)"], height=32,
+                                             fg_color=self.INSET, button_color=self.HOVER,
+                                             button_hover_color=self.HOVER, font=self._f(12))
+        self.preset_menu.pack(fill="x", padx=14, pady=(0, 4))
+        prow2 = ctk.CTkFrame(prc, fg_color="transparent")
+        prow2.pack(fill="x", padx=14, pady=(0, 2))
+        ctk.CTkButton(prow2, text="💾 Зберегти", width=92, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.save_preset).pack(side="left")
+        ctk.CTkButton(prow2, text="📂 Застосувати", width=104, height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.apply_preset).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(prow2, text="🗑", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.delete_preset).pack(side="left", padx=(6, 0))
+        self._refresh_presets()
 
         gc = self._card(side, fill="x", pady=(0, 8))
         ctk.CTkLabel(gc, text="🎞 Компіляція з кількох відео", font=self._f(13, "bold"),
@@ -1578,7 +1851,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v13 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v14 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі субтитрів, стилістика, переходи, обкладинка, прибрання пауз, батч — усе без API-ключів.\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -1931,6 +2204,94 @@ class App:
             self.music_lbl.configure(text=os.path.basename(p), text_color="#FFFFFF")
             self.music_path = p
 
+    # === 💾 ПРЕСЕТИ НАЛАШТУВАНЬ (v14) ===
+
+    def _preset_dir(self):
+        os.makedirs(PRESET_DIR, exist_ok=True)
+        return PRESET_DIR
+
+    def _preset_list(self):
+        try:
+            return sorted(f[:-5] for f in os.listdir(self._preset_dir()) if f.endswith(".json"))
+        except OSError:
+            return []
+
+    def _refresh_presets(self):
+        vals = self._preset_list() or ["(порожньо)"]
+        try:
+            self.preset_menu.configure(values=vals)
+            self.preset_menu.set(vals[0])
+        except Exception:
+            pass
+
+    def save_preset(self):
+        name = simpledialog.askstring("Пресет", "Назва пресету:")
+        if not name or not name.strip():
+            return
+        name = re.sub(r"[^\w\- ]", "_", name.strip())
+        data = {
+            "voice": self.voice.get(),
+            "size": self.size.get(),
+            "sub_style": self.sub_style.get(),
+            "vid_style": self.vid_style.get(),
+            "transition": self.transition.get(),
+            "trim": bool(self.trim_sil.get()),
+            "cover": bool(self.cover_on.get()),
+            "yt_q": self.yt_q.get(),
+        }
+        try:
+            with open(os.path.join(self._preset_dir(), name + ".json"), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.say("💾 Пресет «{}» збережено".format(name))
+            self._refresh_presets()
+            self.preset_menu.set(name)
+        except Exception as e:
+            self.say("⚠️ Пресет не вдалося зберегти: " + str(e)[:120])
+
+    def apply_preset(self):
+        name = self.preset_menu.get()
+        if not name or name == "(порожньо)":
+            self.say("ℹ️ Пресетів ще нема — спершу збережи свій 💾")
+            return
+        path = os.path.join(self._preset_dir(), name + ".json")
+        if not os.path.isfile(path):
+            self.say("ℹ️ Такого пресету нема")
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            self.say("⚠️ Пресет не читається: " + str(e)[:120])
+            return
+        if data.get("voice") in VOICES:
+            self.voice.set(data["voice"])
+        if data.get("size") in SIZES:
+            self.size.set(data["size"])
+        if data.get("sub_style") in SUBTITLE_STYLES:
+            self.sub_style.set(data["sub_style"])
+        if data.get("vid_style") in VIDEO_STYLES:
+            self.vid_style.set(data["vid_style"])
+        if data.get("transition") in TRANSITIONS:
+            self.transition.set(data["transition"])
+        if "trim" in data:
+            self.trim_sil.set(bool(data["trim"]))
+        if "cover" in data:
+            self.cover_on.set(bool(data["cover"]))
+        if data.get("yt_q") in YT_QUALITY:
+            self.yt_q.set(data["yt_q"])
+        self.say("📂 Пресет «{}» застосовано".format(name))
+
+    def delete_preset(self):
+        name = self.preset_menu.get()
+        path = os.path.join(self._preset_dir(), name + ".json")
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                self.say("🗑 Пресет «{}» видалено".format(name))
+            except OSError as e:
+                self.say("⚠️ Не вдалося видалити: " + str(e)[:120])
+        self._refresh_presets()
+
     def download_yt_many(self):
         """Завантаження всіх відео з поля посилань (окремий потік)."""
         links = self.parse_yt_links(self.yt_many.get("1.0", "end"))
@@ -2084,6 +2445,8 @@ class App:
                     self._apply_hist_thumb(msg[1], msg[2])
                 elif kind == "tools":
                     self._apply_tools_status(msg[1], msg[2])
+                elif kind == "batch_reset":  # 📚 v14: нова тема батчу — кроки починаються заново
+                    self._reset_steps()
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -2154,22 +2517,53 @@ class App:
             sel = [u for u, v in getattr(self, "yt_checked", {}).items() if v.get()]
             if sel:
                 self.say("🎬 У фон піде {} обраних відео з пошуку".format(len(sel)))
+            # v14: налаштування стилів/пауз/обкладинки з сайдбара
+            sub = self.sub_style.get() if hasattr(self, "sub_style") else "Класичні"
+            vid = self.vid_style.get() if hasattr(self, "vid_style") else "Без стилю"
+            trans = self.transition.get() if hasattr(self, "transition") else "Різко"
+            trim = bool(self.trim_sil.get()) if hasattr(self, "trim_sil") else False
+            cov = bool(self.cover_on.get()) if hasattr(self, "cover_on") else False
             if getattr(self, "use_script", None) and self.use_script.get():
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
-                                      on_workdir=lambda wd: setattr(self, "workdir", wd))
+                                      on_workdir=lambda wd: setattr(self, "workdir", wd),
+                                      sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov)
+                ok = True
+                if self.workdir and os.path.isdir(self.workdir):
+                    f = os.path.join(self.workdir, "final.mp4")
+                    if os.path.isfile(f):
+                        self.final_path = f
+                        self.q.put(("poster", f))
             else:
-                generate_video(query, self.voice.get(), SIZES[self.size.get()],
-                               getattr(self, "music_path", "").strip(), self.say,
-                               on_workdir=lambda wd: setattr(self, "workdir", wd),
-                               bg_files=files, yt_search_urls=sel, yt_many=many)
-            ok = True
-            if self.workdir and os.path.isdir(self.workdir):
-                f = os.path.join(self.workdir, "final.mp4")
-                if os.path.isfile(f):
-                    self.final_path = f
-                    self.q.put(("poster", f))  # одразу показати готове відео в прев'ю
+                # 📚 v14: батч — кожен рядок поля «Тема» стає окремим відео
+                themes = [query]
+                if getattr(self, "batch", None) and self.batch.get():
+                    themes = [t.strip() for t in query.splitlines() if len(t.strip()) >= 3] or [query]
+                if len(themes) > 1:
+                    self.say("📚 Батч: {} тем — генерую по черзі".format(len(themes)))
+                done = 0
+                for idx, th in enumerate(themes, 1):
+                    if len(themes) > 1:
+                        self.say("▶️ Батч {}/{}: «{}»".format(idx, len(themes), th[:60]))
+                        self.q.put(("batch_reset", None))
+                    try:
+                        generate_video(th, self.voice.get(), SIZES[self.size.get()],
+                                       getattr(self, "music_path", "").strip(), self.say,
+                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
+                                       bg_files=files, yt_search_urls=sel, yt_many=many,
+                                       sub_style=sub, vid_style=vid, transition=trans,
+                                       trim_sil=trim, cover=cov)
+                        done += 1
+                        if self.workdir and os.path.isdir(self.workdir):
+                            f = os.path.join(self.workdir, "final.mp4")
+                            if os.path.isfile(f):
+                                self.final_path = f
+                                self.q.put(("poster", f))
+                    except Exception as e:
+                        self.say("❌ Тема «{}» не вийшла: {}".format(th[:40], str(e)[:150]))
+                ok = done > 0
+            if ok and self.workdir and os.path.isdir(self.workdir):
                 try:
                     os.startfile(self.workdir)  # Windows: одразу показати результат
                     self.say("📂 Відкрив папку з готовим відео")
