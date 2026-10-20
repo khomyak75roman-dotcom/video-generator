@@ -20,6 +20,10 @@ v14: 💾 пресети налаштувань, 💬 4 стилі субтит�
 v15: 📜 транскрипція YouTube (субтитри без ключів) → стиснення до ~10 хв → сценарій,
 🚫 фрагменти фону без обличчя людей (OpenCV, якщо встановлено),
 📈 SEO-пак для YouTube: назва, опис, теги, ключові слова, хештеги, закріплений коментар.
+v16: 🎧 мікс-режим для YouTube-каналу: пошук музики Pixabay (ключ зберігається
+лише на твоєму комп'ютері — у код і GitHub не потрапляє), завантаження обраних
+треків у папку MixTracks → годинний мікс з кросфейдами, гучністю за стандартом
+YouTube (-14 LUFS), фон-петлею, обкладинкою і SEO-паком із треклистом.
 """
 import asyncio
 import base64
@@ -128,7 +132,11 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.15 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.16 (https://github.com/khomyak75roman-dotcom/video-generator)"
+# v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
+MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
+PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
+MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 
 
 def ffmpeg_path():
@@ -1794,6 +1802,242 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     return workdir
 
 
+def load_pixabay_key():
+    """🎵 v16: ключ Pixabay живе лише на цьому комп'ютері (у папці інструментів)."""
+    try:
+        with open(PIXABAY_KEY_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def save_pixabay_key(key):
+    """Зберігає ключ локально — у код і GitHub він не потрапляє."""
+    os.makedirs(TOOLS_DIR, exist_ok=True)
+    with open(PIXABAY_KEY_FILE, "w", encoding="utf-8") as f:
+        f.write(key.strip())
+
+
+def pixabay_music_search(key, query, limit, say):
+    """🎵 v16: пошук безкоштовної музики Pixabay (Content License: комерційне
+    використання без згадки автора). Ключ користувача — не частина програми."""
+    try:
+        r = requests.get("https://pixabay.com/api/music/",
+                         params={"key": key, "q": query, "per_page": min(int(limit), 20)},
+                         headers={"User-Agent": UA_STRING}, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return [], "Pixabay не відповів: " + str(e)[:120]
+    results = []
+    for h in (data.get("hits") or []):
+        url = h.get("audio") or h.get("audio_url") or h.get("download_url") or ""
+        if not url:
+            continue
+        results.append({
+            "url": url,
+            "title": " ".join(((h.get("title") or "трек")).split()),
+            "dur": int(h.get("duration") or 0),
+            "author": " ".join(((h.get("user") or "")).split()),
+        })
+    return results, ""
+
+
+def pixabay_download(url, outdir, say):
+    """⬇️ v16: один mp3 з Pixabay у папку треків (пряме посилання, без ключа)."""
+    os.makedirs(outdir, exist_ok=True)
+    name = re.sub(r"[^\w\-. ]", "_", (url.rsplit("?", 1)[0].rsplit("/", 1)[-1] or "track"))[:60]
+    if not name.lower().endswith(".mp3"):
+        name += ".mp3"
+    path = os.path.join(outdir, name)
+    base, n = path[:-4], 1
+    while os.path.exists(path):
+        path = "{}_{}.mp3".format(base, n)
+        n += 1
+    with requests.get(url, stream=True, timeout=180,
+                      headers={"User-Agent": UA_STRING}) as r:
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(65536):
+                if chunk:
+                    f.write(chunk)
+    return path
+
+
+def mix_plan(tracks_dir, target_sec, say):
+    """📋 v16: які треки з папки йдуть у мікс і в якому порядку (до ~target_sec)."""
+    plan = []
+    try:
+        names = sorted(os.listdir(tracks_dir))
+    except OSError:
+        return []
+    for name in names:
+        if not name.lower().endswith((".mp3", ".wav", ".m4a")):
+            continue
+        p = os.path.join(tracks_dir, name)
+        d = audio_duration(p)
+        if d >= 5:
+            plan.append((p, d))
+    if not plan:
+        return []
+    out, t = [], 0.0
+    for p, d in plan:
+        out.append((p, d))
+        t += max(1.0, d - MIX_CROSSFADE)
+        if t >= target_sec:
+            break
+    return out
+
+
+def mix_render_audio(plan, workdir, say):
+    """🎚 v16: зшиваю треки в одну доріжку — кросфейди + гучність -14 LUFS
+    (стандарт YouTube). Повертає (шлях, тривалість, треклист із таймкодами)."""
+    ff = ffmpeg_path()
+    tracklist, cur, act = [], None, 0.0
+    for i, (p, d) in enumerate(plan):
+        norm = os.path.join(workdir, "mixnorm{}.mp3".format(i))
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", p,
+             "-af", "loudnorm=I=-14:TP=-1.5:LRA=11",
+             "-ar", "44100", "-ac", "2", "-b:a", "192k", norm])
+        say("🎚 Гучність вирівняно: " + os.path.basename(p)[:50])
+        if cur is None:
+            cur = norm
+            act = audio_duration(cur)
+            tracklist.append((0.0, os.path.splitext(os.path.basename(p))[0]))
+        else:
+            tracklist.append((max(0.0, act - MIX_CROSSFADE),
+                              os.path.splitext(os.path.basename(p))[0]))
+            joined = os.path.join(workdir, "mixjoin{}.mp3".format(i))
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", cur, "-i", norm,
+                 "-filter_complex",
+                 "acrossfade=d={:.2f}:c1=tri:c2=tri".format(MIX_CROSSFADE),
+                 "-ar", "44100", "-ac", "2", "-b:a", "192k", joined])
+            try:
+                os.remove(cur)  # проміжні файли не потрібні
+            except OSError:
+                pass
+            cur = joined
+            act = audio_duration(cur)
+    return cur, act, tracklist
+
+
+def make_mix_seo_pack(title, tracklist, workdir, say):
+    """📈 v16: SEO-пак для музичного міксу + треклист із таймкодами (сердце
+    описів у ніші chill-міксів)."""
+    theme = " ".join((title or "Chill Mix").split()) or "Chill Mix"
+    short = theme if len(theme) <= 55 else theme[:52].rstrip() + "…"
+    tl = []
+    for start, name in tracklist:
+        mm, ss = divmod(int(start), 60)
+        tl.append("{:02d}:{:02d} — {}".format(mm, ss, name.replace("_", " ")))
+    titles = [
+        "{} — Chill Mix 2026 | Deep House for Relax & Study".format(short),
+        "{} | 1 Hour Chill Vibes • Deep House Mix".format(short),
+        "{} — Night Chill Mix • Music for Stress Relief".format(short),
+    ]
+    tags = [theme.lower(), "chill mix", "deep house mix", "chill house",
+            "relaxing music", "study music", "night vibes", "stress relief",
+            "music for work", "long mix", "chill music", "background music"]
+    tags_line = ", ".join(dict.fromkeys(tags))[:480]
+    hashtags = "#chillmix #deephouse #nightvibes #relaxingmusic #studymusic"
+    desc = ["{} — атмосферний мікс: м'який chill/deep house для відпочинку, роботи й навчання.".format(short),
+            "Включай і розслабляйся 🎧",
+            "",
+            "ТРЕКЛИСТ:"] + tl + [
+        "",
+        "Подобається? Підпишися — нові мікси щотижня! 🔔",
+        "",
+        "Ключові слова: {}.".format(tags_line[:200]),
+        "",
+        hashtags]
+    pinned = "🎵 Який трек сподобався найбільше? Напиши таймкод у коментарях!"
+    lines = ["НАЗВА (обери один із трьох варіантів):"]
+    lines += ["{}. {}".format(i, t) for i, t in enumerate(titles, 1)]
+    lines += ["", "ОПИС:"] + desc
+    lines += ["", "ТЕГИ (через кому, лиміт 500 символів):", tags_line]
+    lines += ["", "ХЕШТЕГИ (додай у кінець опису):", hashtags]
+    lines += ["", "ЗАКРІПЛЕНИЙ КОМЕНТАР:", pinned]
+    with open(os.path.join(workdir, "youtube-seo.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    say("📈 SEO-пак міксу з треклистом і таймкодами — youtube-seo.txt")
+
+
+def generate_mix(title, minutes, size_str, say, on_workdir=None,
+                 bg_files=None, yt_search_urls=None, cover=True, seo=True):
+    """🎧 v16: музичний мікс — треки з папки MixTracks зшиваються з кросфейдами
+    у одну доріжку (гучність -14 LUFS), фон — петля з кліпів або градієнт,
+    плюс обкладинка і SEO-пак із треклистом. Повертає робочу папку."""
+    base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
+    workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S")
+                           + "_mix_" + re.sub(r'[^\w-]', '_', (title or "mix")[:30]))
+    os.makedirs(workdir, exist_ok=True)
+    if on_workdir:
+        on_workdir(workdir)
+    say("🎧 Мікс: " + (title or "Night Chill Mix"))
+    say("🔍 Перевіряю ffmpeg (якщо немає — встановлю сам, один раз)…")
+    ensure_ffmpeg(say)
+    ff = ffmpeg_path()
+    w, h = size_str.split(" ")[0].split("x")
+    say("📁 Робоча папка створена")
+    target_sec = max(10, min(180, int(minutes))) * 60
+    say("🎵 Збираю треки з папки MixTracks (мета ~{} хв)…".format(int(target_sec // 60)))
+    plan = mix_plan(MIX_TRACKS_DIR, target_sec, say)
+    if not plan:
+        raise RuntimeError("у папці MixTracks нема придатних треків")
+    say("🎵 Треків у міксі: {}".format(len(plan)))
+    mix_path, dur, tracklist = mix_render_audio(plan, workdir, say)
+    say("⏱ Тривалість міксу: {}:{:02d}".format(int(dur // 60), int(dur % 60)))
+    say("📝 Треклист з таймкодами — у youtube-seo.txt")
+    # Фон: свої файли → обрані з YouTube-пошуку → градієнт
+    bg = None
+    clips = [c for c in (bg_files or []) if os.path.isfile(c)]
+    if not clips and yt_search_urls:
+        say("🔎 Шукаю відео для фону на YouTube…")
+        try:
+            ensure_ytdlp(say)
+            got = []
+            for u in yt_search_urls[:4]:
+                p = youtube_download(u, workdir, int(h), say,
+                                    fixed_name="mixbg{:02d}".format(len(got)),
+                                    max_sec=YT_CLIP_MAX_SEC)
+                if p and os.path.isfile(p):
+                    got.append(p)
+            clips = got
+        except Exception as e:
+            say("⚠️ Фон з YouTube не вийшов ({}), буде градієнт".format(str(e)[:150]))
+    if clips:
+        try:
+            bg = build_bg_from_clips(clips, dur, w, h, workdir)
+            say("🎬 Фон змонтовано з кліпів")
+        except Exception as e:
+            say("⚠️ Кліпи не зібралися ({}), буде градієнт".format(str(e)[:150]))
+            bg = None
+    if bg:
+        vf_in = ["-stream_loop", "-1", "-i", "bg.mp4"]
+        say("🖼️ Фон: петля з кліпів")
+    else:
+        vf_in = ["-f", "lavfi", "-i", f"gradients=s={w}x{h}:c0=0x0f2027:c1=0x2c5364:speed=0.03"]
+        say("🖼️ Генерую анімований градієнтний фон")
+    say("🚀 Рендерю мікс (це найдовший крок, ~10–20 хв)…")
+    cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", mix_path,
+           "-map", "0:v", "-map", "1:a", "-shortest",
+           "-c:v", "libx264", "-crf", "23", "-preset", "veryfast", "-r", "25",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4"]
+    run(cmd, cwd=workdir)
+    if cover:  # 📷 обкладинка для YouTube
+        try:
+            make_cover(workdir, title or "Night Chill Mix", say)
+        except Exception as e:
+            say("⚠️ Обкладинка не вийшла: " + str(e)[:120])
+    if seo:  # 📈 SEO-пак із треклистом
+        try:
+            make_mix_seo_pack(title or "Night Chill Mix", tracklist, workdir, say)
+        except Exception as e:
+            say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
+    say("✅ ГОТОВО: {}".format(os.path.join(workdir, "final.mp4")))
+    return workdir
+
+
 class App:
     """Інтерфейс у стилі MoneyPrinterTurbo (harry0703): темна тема з фіолетовим
     акцентом, таби «Генерація / Історія / Налаштування», сайдбар налаштувань,
@@ -1812,9 +2056,9 @@ class App:
     GEN_BASE = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     STEPS = ("📝 Текст", "🎙 Озвучка", "💬 Субтитри", "🎬 Фон", "⚙️ Рендер")
     STEP_KEYS = (
-        ("Запит:", "Сценар", "Робоча папка", "Перевіряю ffmpeg"),
-        ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз"),
-        ("убтитр",),
+        ("Запит:", "Сценар", "Робоча папка", "Перевіряю ffmpeg", "Мікс"),
+        ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз", "Трек", "треки"),
+        ("убтитр", "Треклист"),
         ("Фон", "фон", "кліп", "Openverse", "Wikimedia", "градієнт",
          "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Облич"),
         ("Рендер", "рендер", "ГОТОВО", "Зшиваю"),
@@ -1927,7 +2171,7 @@ class App:
         self._build_set_tab()
         self._show_tab("🎬 Генерація")
         # v13: меню правого кліку («📋 Вставити») для всіх текстових полів
-        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.tr_entry):
+        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.tr_entry, self.px_key, self.px_query):
             self.attach_paste_menu(w)
 
     def _show_tab(self, val):
@@ -2188,6 +2432,57 @@ class App:
         self.size.set("720p")
         self.size.pack(fill="x", padx=14, pady=(0, 12))
 
+        xc = self._card(side, fill="x", pady=(0, 8))  # 🎧 v16: мікс з безкоштовних треків
+        ctk.CTkLabel(xc, text="🎧 Мікс з безкоштовних треків", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
+        ctk.CTkLabel(xc, text="Pixabay Music: ліцензія дозволяє комерційне використання без згадки автора. Ключ Pixabay зберігається лише на цьому комп'ютері — у код і GitHub не потрапляє.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
+        self.px_key = ctk.CTkEntry(xc, placeholder_text="Ключ Pixabay (pixabay.com/api/docs)",
+                                   height=34, corner_radius=10, fg_color=self.INSET,
+                                   font=self._f(12))
+        self.px_key.pack(fill="x", padx=14, pady=(0, 4))
+        self.px_key.insert(0, load_pixabay_key())
+        xrow = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow.pack(fill="x", padx=14, pady=(0, 4))
+        self.px_query = ctk.CTkEntry(xrow, placeholder_text="Жанр/настрій (deep house, chill)",
+                                     height=34, corner_radius=10, fg_color=self.INSET,
+                                     font=self._f(12))
+        self.px_query.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(xrow, text="🎵", width=48, height=34, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(14),
+                      command=self.px_search_now).pack(side="left", padx=(8, 0))
+        self.px_results_frame = ctk.CTkScrollableFrame(xc, height=150, fg_color=self.INSET,
+                                                       corner_radius=12)
+        self.px_results_frame.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.px_results_frame, text="Тут з'являться знайдені треки",
+                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
+        xrow2 = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow2.pack(fill="x", padx=14, pady=(0, 4))
+        self.px_tracks_lbl = ctk.CTkLabel(xrow2, text="Треків у папці: 0",
+                                          font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.px_tracks_lbl.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(xrow2, text="⬇️ Завантажити обране", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.px_download_now).pack(side="right")
+        xrow3 = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow3.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(xrow3, text="⏱ Хвилин:", font=self._f(12),
+                     text_color=self.MUTED).pack(side="left")
+        self.mix_minutes = ctk.CTkEntry(xrow3, width=64, height=32, corner_radius=10,
+                                        fg_color=self.INSET, font=self._f(12), justify="center")
+        self.mix_minutes.insert(0, "60")
+        self.mix_minutes.pack(side="left", padx=(6, 0))
+        ctk.CTkButton(xrow3, text="📂 Папка", width=84, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.open_mix_folder).pack(side="right")
+        self.use_mix = ctk.BooleanVar(value=False)  # 🎧 v16: мікс-режим
+        ctk.CTkSwitch(xc, text="🎧 Згенерувати мікс (тема = назва)", variable=self.use_mix,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w",
+                                                                          padx=14, pady=(2, 12))
+        self.px_checked = {}
+        self._refresh_mix_count()
+
         mc = self._card(side, fill="x", pady=(0, 8))
         ctk.CTkLabel(mc, text="🎵 Фонова музика (не обов'язково)", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=14, pady=(12, 2))
@@ -2307,7 +2602,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v15 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі субтитрів, стилістика, переходи, обкладинка, прибрання пауз, батч,\nтранскрипція YouTube, фрагменти без обличчя і SEO-пак — усе без API-ключів.\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v16 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі, переходи, обкладинка, паузи, батч, транскрипція, SEO-пак,\n🎧 мікс з безкоштовних треків Pixabay (ключ — лише на твоєму ПК, у код не потрапляє).\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -2928,6 +3223,126 @@ class App:
         self.say("✅ Знайдено {} відео — познач потрібні і тисни ЗГЕНЕРУВАТИ".format(len(results)))
 
 
+    def _refresh_mix_count(self):
+        """🎧 v16: скільки придатних треків у папці MixTracks."""
+        n = 0
+        if os.path.isdir(MIX_TRACKS_DIR):
+            n = sum(1 for f in os.listdir(MIX_TRACKS_DIR)
+                    if f.lower().endswith((".mp3", ".wav", ".m4a")))
+        try:
+            self.px_tracks_lbl.configure(text="Треків у папці: {}".format(n))
+        except Exception:
+            pass
+
+    def open_mix_folder(self):
+        os.makedirs(MIX_TRACKS_DIR, exist_ok=True)
+        os.startfile(MIX_TRACKS_DIR)  # Windows
+
+    def px_search_now(self):
+        """🎵 v16: пошук музики Pixabay у фоновому потоці."""
+        key = self.px_key.get().strip()
+        q = self.px_query.get().strip()
+        if len(key) < 10:
+            messagebox.showwarning("Стоп", "Встав ключ Pixabay 🙂 (безкоштовний — на сторінці pixabay.com/api/docs після входу в акаунт)")
+            return
+        if len(q) < 2:
+            messagebox.showwarning("Стоп", "Напиши, яку музику шукати 🙂 (наприклад: deep house)")
+            return
+        save_pixabay_key(key)
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        self.say("🎵 Шукаю музику на Pixabay: " + q + "…")
+        threading.Thread(target=self._px_search_thread, args=(key, q), daemon=True).start()
+
+    def _px_search_thread(self, key, q):
+        try:
+            results, err = pixabay_music_search(key, q, 20, self.say)
+            self.q.put(("px_results", results, err))
+        except Exception as e:
+            self.q.put(("px_results", [], "помилка: " + str(e)[:150]))
+        finally:
+            self.q.put(None)
+
+    def _show_px_results(self, results, err):
+        """Малює знайдені треки з чекбоксами (тільки з головного потоку)."""
+        for w in self.px_results_frame.winfo_children():
+            w.destroy()
+        self.px_checked = {}
+        if not results:
+            ctk.CTkLabel(self.px_results_frame, text=(err or "Нічого не знайшов") + " — спробуй інший запит",
+                         font=ctk.CTkFont(family="Segoe UI", size=12),
+                         text_color=self.MUTED).pack(anchor="w", pady=6)
+            return
+        for r in results:
+            mm, ss = divmod(int(r["dur"]), 60)
+            var = ctk.BooleanVar(value=False)
+            self.px_checked[r["url"]] = var
+            row = ctk.CTkFrame(self.px_results_frame, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            ctk.CTkCheckBox(row, variable=var, text="",
+                            checkbox_width=22, checkbox_height=22,
+                            fg_color=self.ACCENT, hover_color=self.ACCENT_H).pack(side="left", padx=(4, 6))
+            ctk.CTkLabel(row, text="{} • {:02d}:{:02d} • {}".format(r["title"], mm, ss, r["author"]),
+                         font=ctk.CTkFont(family="Segoe UI", size=12), anchor="w",
+                         justify="left", wraplength=220).pack(side="left", fill="x", expand=True)
+        self.say("✅ Знайдено {} треків — познач потрібні і натисни «⬇️ Завантажити обране»".format(len(results)))
+
+    def px_download_now(self):
+        """⬇️ v16: обрані треки з Pixabay → папка MixTracks."""
+        sel = [u for u, v in self.px_checked.items() if v.get()]
+        if not sel:
+            messagebox.showwarning("Стоп", "Спершу познач треки в результатах пошуку 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        self.say("⬇️ Завантажую {} треків у папку MixTracks…".format(len(sel)))
+        threading.Thread(target=self._px_download_thread, args=(sel,), daemon=True).start()
+
+    def _px_download_thread(self, sel):
+        try:
+            for i, u in enumerate(sel, 1):
+                try:
+                    p = pixabay_download(u, MIX_TRACKS_DIR, self.say)
+                    self.say("✔️ {}/{}: {}".format(i, len(sel), os.path.basename(p)))
+                except Exception as e:
+                    self.say("⚠️ Трек не завантажився: " + str(e)[:120])
+            self.q.put(("mix_tracks", 0))
+        finally:
+            self.q.put(None)
+
+    def pipeline_mix(self, title):
+        """🎧 v16: пайплайн міксу — окремий від класичного, щоб не плутались."""
+        ok = False
+        try:
+            minutes = 60
+            try:
+                minutes = max(10, min(180, int(float(self.mix_minutes.get()))))
+            except Exception:
+                minutes = 60
+            files = None
+            if getattr(self, "merge_bg", None) and self.merge_bg.get() and self.merge_files:
+                files = list(self.merge_files)
+            sel = [u for u, v in getattr(self, "yt_checked", {}).items() if v.get()]
+            generate_mix(title, minutes, SIZES[self.size.get()], self.say,
+                         on_workdir=lambda wd: setattr(self, "workdir", wd),
+                         bg_files=files, yt_search_urls=sel,
+                         cover=bool(self.cover_on.get()), seo=bool(self.seo.get()))
+            ok = True
+            if self.workdir and os.path.isdir(self.workdir):
+                f = os.path.join(self.workdir, "final.mp4")
+                if os.path.isfile(f):
+                    self.final_path = f
+                    self.q.put(("poster", f))
+                try:
+                    os.startfile(self.workdir)
+                    self.say("📂 Відкрив папку з готовим міксом")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.say("❌ Помилка міксу: " + str(e)[:300])
+        finally:
+            self.q.put(("gen_end", ok))
+
     def pick_merge_files(self):
         """Вибір кількох відео для компіляції."""
         ps = filedialog.askopenfilenames(filetypes=[("Відео", "*.mp4 *.mov *.mkv *.avi *.webm")])
@@ -2980,6 +3395,10 @@ class App:
                 kind = msg[0]
                 if kind == "yt_search_results":
                     self._show_yt_results(msg[1], msg[2])
+                elif kind == "px_results":  # 🎵 v16: результати пошуку Pixabay
+                    self._show_px_results(msg[1], msg[2])
+                elif kind == "mix_tracks":  # 🎧 v16: оновити лічильник треків
+                    self._refresh_mix_count()
                 elif kind == "transcript":  # 📜 v15: показати вікно транскрипції
                     self._show_transcript(msg[1], msg[2])
                 elif kind == "poster":
@@ -3029,7 +3448,15 @@ class App:
 
     def start(self):
         query = self.query.get("1.0", "end").strip()
-        if getattr(self, "use_script", None) and self.use_script.get():
+        if getattr(self, "use_mix", None) and self.use_mix.get():  # 🎧 v16: мікс-режим
+            if not query:
+                query = "Night Chill Mix"
+            if not os.path.isdir(MIX_TRACKS_DIR) or not any(
+                    n.lower().endswith((".mp3", ".wav", ".m4a"))
+                    for n in os.listdir(MIX_TRACKS_DIR)):
+                messagebox.showwarning("Стоп", "У папці MixTracks нема треків 🙂 Знайди їх через «🎵» у картці «🎧 Мікс» або поклади свої mp3 у папку.")
+                return
+        elif getattr(self, "use_script", None) and self.use_script.get():
             script = self.script.get("1.0", "end").strip()
             if len(script) < 10:
                 messagebox.showwarning("Стоп", "Режим сценарію увімкнений — напиши сценарій у картці «🎬 Сценарій» 🙂")
@@ -3044,7 +3471,7 @@ class App:
         self._gen_running = True
         self._reset_steps()
         self.status_lbl.configure(text="● Генерується…", text_color="#F59E0B")
-        threading.Thread(target=self.pipeline, args=(query,), daemon=True).start()
+        threading.Thread(target=(self.pipeline_mix if (getattr(self, "use_mix", None) and self.use_mix.get()) else self.pipeline), args=(query,), daemon=True).start()
 
     def pipeline(self, query):
         ok = False
