@@ -29,6 +29,9 @@ v17: простий інтерфейс — один вибір режиму на
 рідкі налаштування згорнуті в «⚙️ Додатково», рідкі інструменти — в «🧰 Інструменти»
 (інструменти поруч із місцем використання: пошук фону — у режимі Відео,
 транскрипція — у Сценарії); 🖼 пошук зображень Pinterest для фону (без ключів).
+v18: 🖼 пошук фото для фону у трьох джерелах — Openverse (відкриті ліцензії,
+без ключа), Pixabay (офіційний API, той самий локальний ключ, що для музики)
+і Pinterest; автори та джерела фото пишуться у credits.txt біля скачаних файлів.
 """
 import asyncio
 import base64
@@ -137,12 +140,13 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.17 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.18 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
+# v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
 PINS_DIR = os.path.join(TOOLS_DIR, "pins")
 
 
@@ -1403,11 +1407,11 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
             bg = None
-    if not bg and pin_images:  # 🖼 v17: зображення, обрані в пошуку Pinterest
+    if not bg and pin_images:  # 🖼 v18: зображення, обрані у пошуку (Openverse / Pixabay / Pinterest)
         try:
-            say("🖼 Монтую фон з {} зображень Pinterest…".format(len(pin_images)))
+            say("🖼 Монтую фон з {} обраних зображень…".format(len(pin_images)))
             bg = build_bg_from_images(list(pin_images), dur, w, h, workdir)
-            say("🖼 Фон: твої зображення з Pinterest")
+            say("🖼 Фон: твої обрані зображення")
         except Exception as e:
             say("⚠️ Зображення не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
             bg = None
@@ -1930,7 +1934,7 @@ def pinterest_search(query, limit, say):
 
 
 def pinterest_download(url, say):
-    """⬇️ v17: одне зображення з Pinterest у папку інструментів (без ключів)."""
+    """⬇️ v18: одне обране зображення пошуку (Openverse / Pixabay / Pinterest) у папку інструментів."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     outdir = os.path.join(PINS_DIR, ts)
     os.makedirs(outdir, exist_ok=True)
@@ -1949,6 +1953,63 @@ def pinterest_download(url, say):
                 if chunk:
                     f.write(chunk)
     return path
+
+
+def openverse_images_search(query, limit, say):
+    """🌍 v18: пошук фото Openverse — відкриті ліцензії, БЕЗ ключа (як і кліпи)."""
+    try:
+        r = requests.get(
+            "https://api.openverse.org/v1/images/",
+            params={"q": query, "page_size": min(limit, 20),
+                    "license_type": "commercial,modification"},
+            headers={"User-Agent": UA_STRING, "Api-User-Agent": UA_STRING}, timeout=25)
+        if r.status_code != 200:
+            return [], "Openverse: HTTP {}".format(r.status_code)
+        out = []
+        for it in r.json().get("results", []):
+            u = it.get("url")
+            if not u or (it.get("width") or 0) < 800:
+                continue
+            out.append({
+                "url": u,
+                "title": (it.get("title") or "фото Openverse")[:70],
+                "credit": "🖼 {} — ліцензія {} — {} — {}".format(
+                    (it.get("title") or "?")[:60], it.get("license") or "?",
+                    it.get("creator") or "?", it.get("foreign_landing_url") or "")})
+        if not out:
+            return [], "Openverse: нічого підходящого за запитом"
+        return out, None
+    except Exception as e:
+        return [], ("Openverse: {}".format(e))[:150]
+
+
+def pixabay_images_search(key, query, limit, say):
+    """🖼 v18: пошук фото Pixabay — офіційний API; той самий локальний ключ, що для музики.
+    Ліцензія Pixabay: вільне використання, атрибуція не потрібна."""
+    try:
+        r = requests.get(
+            "https://pixabay.com/api/",
+            params={"key": key, "q": query, "per_page": min(limit, 24),
+                    "image_type": "photo", "orientation": "horizontal",
+                    "min_width": 1280, "safesearch": "true"},
+            headers={"User-Agent": UA_STRING}, timeout=25)
+        if r.status_code != 200:
+            return [], "Pixabay: HTTP {} — {}".format(r.status_code, r.text[:140])
+        out = []
+        for h in r.json().get("hits", []):
+            u = h.get("largeImageURL") or h.get("fullHDURL") or h.get("webformatURL")
+            if not u:
+                continue
+            out.append({
+                "url": u,
+                "title": (h.get("tags") or "фото Pixabay")[:70],
+                "credit": "🖼 Pixabay — {} — {}".format(
+                    h.get("user") or "?", h.get("pageURL") or "")})
+        if not out:
+            return [], "Pixabay: нічого не знайшов за запитом"
+        return out, None
+    except Exception as e:
+        return [], ("Pixabay: {}".format(e))[:150]
 
 
 def mix_plan(tracks_dir, target_sec, say):
@@ -2147,7 +2208,7 @@ class App:
         ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз", "Трек", "треки"),
         ("убтитр", "Треклист"),
         ("Фон", "фон", "кліп", "Openverse", "Wikimedia", "градієнт",
-         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Pinterest", "Облич"),
+         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Pinterest", "Pixabay", "Облич"),
         ("Рендер", "рендер", "ГОТОВО", "Зшиваю"),
     )
 
@@ -2339,13 +2400,14 @@ class App:
         bc = self._card(self.frame_video, fill="x", pady=(0, 8))  # 🔍 Свій фон
         ctk.CTkLabel(bc, text="🔍 Свій фон (не обов'язково)", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        self.bg_src = ctk.CTkSegmentedButton(bc, values=["🎬 Відео YouTube", "🖼 Pinterest"],
+        self.bg_src = ctk.CTkSegmentedButton(bc, values=["🎬 Відео YouTube", "🌍 Openverse", "🖼 Pixabay", "📌 Pinterest"],
                                               font=self._f(12), height=32,
                                               fg_color=self.INSET, selected_color=self.ACCENT,
                                               selected_hover_color=self.ACCENT_H,
                                               unselected_color=self.HOVER,
                                               command=self._switch_bg_src)
         self.bg_src.set("🎬 Відео YouTube")
+        self.bg_kind = "yt"  # 🖼 v18: поточне джерело фону: yt / ov / px / pin
         self.bg_src.pack(fill="x", padx=16, pady=(0, 6))
         self.yt_bg_row = ctk.CTkFrame(bc, fg_color="transparent")
         self.yt_bg_row.pack(fill="x", padx=16, pady=(0, 6))
@@ -2359,7 +2421,7 @@ class App:
         ctk.CTkButton(self.yt_bg_row, text="🔎 Шукати", width=110, height=38, corner_radius=10,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
                       command=self.yt_search_now).pack(side="left", padx=(8, 0))
-        self.pins_row = ctk.CTkFrame(bc, fg_color="transparent")  # 🖼 v17: Pinterest
+        self.pins_row = ctk.CTkFrame(bc, fg_color="transparent")  # 🖼 v18: Openverse / Pixabay / Pinterest
         self.pins_entry = ctk.CTkEntry(
             self.pins_row, placeholder_text="Які зображення? (наприклад: neon city night)",
             height=38, corner_radius=10, fg_color=self.INSET, font=self._f(13))
@@ -2697,32 +2759,52 @@ class App:
             self.tools_toggle.configure(text="🧰 Інструменти (рідко потрібні)  ▾")
 
     def _switch_bg_src(self, val):
-        """🔍: перемикання джерела фону — Відео YouTube / Pinterest."""
-        if "Pinterest" in val:
-            self.yt_bg_row.pack_forget()
-            self.yt_results_frame.pack_forget()
-            self.pins_row.pack(fill="x", padx=16, pady=(0, 6))
-            self.pins_results_frame.pack(fill="x", padx=16, pady=(0, 6))
-        else:
+        """🔍: перемикання джерела фону — Відео YouTube / Openverse / Pixabay / Pinterest."""
+        if "YouTube" in val:
+            self.bg_kind = "yt"
             self.pins_row.pack_forget()
             self.pins_results_frame.pack_forget()
             self.yt_bg_row.pack(fill="x", padx=16, pady=(0, 6))
             self.yt_results_frame.pack(fill="x", padx=16, pady=(0, 6))
-
+            return
+        if "Pixabay" in val:
+            self.bg_kind = "px"
+        elif "Pinterest" in val:
+            self.bg_kind = "pin"
+        else:
+            self.bg_kind = "ov"
+        self.yt_bg_row.pack_forget()
+        self.yt_results_frame.pack_forget()
+        self.pins_row.pack(fill="x", padx=16, pady=(0, 6))
+        self.pins_results_frame.pack(fill="x", padx=16, pady=(0, 6))
+        if self.bg_kind == "pin":
+            self.say("📌 Pinterest: зображення належать авторам — ок для особистих відео")
+        elif self.bg_kind == "ov":
+            self.say("🌍 Openverse: відкриті ліцензії, автори пишуться у credits.txt")
     def pins_search_now(self):
-        """🖼 v17: пошук зображень Pinterest у фоновому потоці."""
+        """🖼 v18: пошук фото (Openverse / Pixabay / Pinterest) у фоновому потоці."""
         q = self.pins_entry.get().strip()
         if len(q) < 2:
             messagebox.showwarning("Стоп", "Напиши, які зображення шукати 🙂 (наприклад: neon city)")
             return
+        kind = getattr(self, "bg_kind", "ov")
+        if kind == "px" and not load_pixabay_key():
+            self.say("⚠️ Pixabay: спершу встав ключ у картці 🎧 Мікс (режим Мікс) — він один для музики і фото")
+            return
         self.btn.configure(state="disabled")
         self.bar.start()
-        self.say("🖼 Шукаю зображення в Pinterest: " + q + "…")
-        threading.Thread(target=self._pins_search_thread, args=(q,), daemon=True).start()
+        self.say("🖼 Шукаю зображення ({}): {}…".format(
+            {"ov": "Openverse", "px": "Pixabay", "pin": "Pinterest"}.get(kind, "Openverse"), q))
+        threading.Thread(target=self._pins_search_thread, args=(q, kind), daemon=True).start()
 
-    def _pins_search_thread(self, q):
+    def _pins_search_thread(self, q, kind):
         try:
-            results, err = pinterest_search(q, 12, self.say)
+            if kind == "px":
+                results, err = pixabay_images_search(load_pixabay_key() or "", q, 12, self.say)
+            elif kind == "pin":
+                results, err = pinterest_search(q, 12, self.say)
+            else:
+                results, err = openverse_images_search(q, 12, self.say)
             self.q.put(("pins_results", results, err))
         except Exception as e:
             self.q.put(("pins_results", [], "помилка: " + str(e)[:150]))
@@ -2734,6 +2816,7 @@ class App:
         for w in self.pins_results_frame.winfo_children():
             w.destroy()
         self.pins_checked = {}
+        self.pins_info = {}
         if not results:
             ctk.CTkLabel(self.pins_results_frame, text=(err or "Нічого не знайшов") + " — спробуй інший запит",
                          font=ctk.CTkFont(family="Segoe UI", size=12),
@@ -2742,6 +2825,7 @@ class App:
         for r in results:
             var = ctk.BooleanVar(value=False)
             self.pins_checked[r["url"]] = var
+            self.pins_info[r["url"]] = r.get("credit", "")
             row = ctk.CTkFrame(self.pins_results_frame, fg_color="transparent")
             row.pack(fill="x", pady=2)
             ctk.CTkCheckBox(row, variable=var, text="",
@@ -2814,7 +2898,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v17 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube/Pinterest) → рендер. Додатково: стилі, пресети, транскрипція, SEO-пак.\nУсе без API-ключів (ключ Pixabay — лише локально). Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v18 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -3706,13 +3790,17 @@ class App:
             if sel:
                 self.say("🎬 У фон піде {} обраних відео з пошуку".format(len(sel)))
             # v14: налаштування стилів/пауз/обкладинки з сайдбара
-            pins = [u for u, v in getattr(self, "pins_checked", {}).items() if v.get()]  # 🖼 v17
+            pins = [u for u, v in getattr(self, "pins_checked", {}).items() if v.get()]  # 🖼 v18
             if pins:
-                self.say("🖼 Завантажую {} зображення з Pinterest…".format(len(pins)))
+                self.say("🖼 Завантажую {} обраних зображень…".format(len(pins)))
                 dl = []
                 for u in pins:
                     try:
-                        dl.append(pinterest_download(u, self.say))
+                        p = pinterest_download(u, self.say)
+                        dl.append(p)
+                        cr = getattr(self, "pins_info", {}).get(u)
+                        if cr:
+                            append_credit(os.path.dirname(p), cr)
                     except Exception as e:
                         self.say("⚠️ Зображення не завантажилось: " + str(e)[:120])
                 pins = dl if dl else None
