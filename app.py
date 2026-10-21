@@ -24,6 +24,11 @@ v16: 🎧 мікс-режим для YouTube-каналу: пошук музик
 лише на твоєму комп'ютері — у код і GitHub не потрапляє), завантаження обраних
 треків у папку MixTracks → годинний мікс з кросфейдами, гучністю за стандартом
 YouTube (-14 LUFS), фон-петлею, обкладинкою і SEO-паком із треклистом.
+v17: простий інтерфейс — один вибір режиму нагорі (🎬 Відео / 📜 Сценарій / 🎧 Мікс)
+замість розкиданих перемикачів; поля показуються лише для обраного режиму;
+рідкі налаштування згорнуті в «⚙️ Додатково», рідкі інструменти — в «🧰 Інструменти»
+(інструменти поруч із місцем використання: пошук фону — у режимі Відео,
+транскрипція — у Сценарії); 🖼 пошук зображень Pinterest для фону (без ключів).
 """
 import asyncio
 import base64
@@ -132,11 +137,13 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.16 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.17 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
+# v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
+PINS_DIR = os.path.join(TOOLS_DIR, "pins")
 
 
 def ffmpeg_path():
@@ -1292,7 +1299,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -1395,6 +1402,14 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             say("🎬 Фон: твоя компіляція з кількох відео")
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
+            bg = None
+    if not bg and pin_images:  # 🖼 v17: зображення, обрані в пошуку Pinterest
+        try:
+            say("🖼 Монтую фон з {} зображень Pinterest…".format(len(pin_images)))
+            bg = build_bg_from_images(list(pin_images), dur, w, h, workdir)
+            say("🖼 Фон: твої зображення з Pinterest")
+        except Exception as e:
+            say("⚠️ Зображення не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
             bg = None
     if not bg and auto_yt:
         # v9: сам шукаю на YouTube відео по словах теми (нуль ключів) і монтую у фон
@@ -1864,6 +1879,78 @@ def pixabay_download(url, outdir, say):
     return path
 
 
+def pinterest_search(query, limit, say):
+    """🖼 v17: пошук зображень Pinterest по запиту — публічний веб-ендпоінт
+    пошуку, без жодних ключів. Зображення на Pinterest належать їхнім авторам:
+    для особистих відео — ок, для монетизації — лише свої або вільні."""
+    q = " ".join((query or "").split())
+    if not q:
+        return [], "порожній запит"
+    data = json.dumps({"options": {"query": q, "bookmarks": None,
+                                   "auto_correction_disabled": False,
+                                   "redux_normalize_feed": True},
+                       "context": {}}, separators=(",", ":"))
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*, q=0.01",
+        "Referer": "https://www.pinterest.com/",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    try:
+        r = requests.get("https://www.pinterest.com/resource/BaseSearchResource/get/",
+                         params={"source_url": "/search/pins/?q=" + quote_plus(q),
+                                 "data": data},
+                         headers=headers, timeout=30)
+        r.raise_for_status()
+        js = r.json()
+    except Exception as e:
+        return [], "Pinterest не відповів: " + str(e)[:120]
+    raw = []
+    try:
+        raw = (js.get("resource_response", {}).get("data", {})
+                .get("results") or [])
+    except Exception:
+        raw = []
+    out = []
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        imgs = p.get("images") or {}
+        big = imgs.get("orig") or imgs.get("736x") or imgs.get("474x") or {}
+        u = big.get("url") or p.get("image_large_url") or ""
+        if not u:
+            continue
+        title = " ".join(((p.get("grid_title") or p.get("title")
+                           or p.get("description") or "зображення")[:60]).split())
+        out.append({"url": u, "title": title})
+        if len(out) >= int(limit):
+            break
+    return out, ""
+
+
+def pinterest_download(url, say):
+    """⬇️ v17: одне зображення з Pinterest у папку інструментів (без ключів)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    outdir = os.path.join(PINS_DIR, ts)
+    os.makedirs(outdir, exist_ok=True)
+    ext = ".jpg"
+    low = url.rsplit("?", 1)[0].lower()
+    for e in (".png", ".webp", ".gif"):
+        if low.endswith(e):
+            ext = e
+            break
+    path = os.path.join(outdir, "pin{:03d}{}".format(len(os.listdir(outdir)) + 1, ext))
+    with requests.get(url, stream=True, timeout=120,
+                      headers={"User-Agent": "Mozilla/5.0"}) as r:
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(65536):
+                if chunk:
+                    f.write(chunk)
+    return path
+
+
 def mix_plan(tracks_dir, target_sec, say):
     """📋 v16: які треки з папки йдуть у мікс і в якому порядку (до ~target_sec)."""
     plan = []
@@ -2060,7 +2147,7 @@ class App:
         ("Озвуч", "озвуч", "Голосів немає", "системним голосом", "Тривалість", "Прибрав пауз", "Трек", "треки"),
         ("убтитр", "Треклист"),
         ("Фон", "фон", "кліп", "Openverse", "Wikimedia", "градієнт",
-         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Облич"),
+         "відеоряд", "YouTube", "Посилання", "пошуку", "Шукаю", "зображення", "Pinterest", "Облич"),
         ("Рендер", "рендер", "ГОТОВО", "Зшиваю"),
     )
 
@@ -2171,7 +2258,7 @@ class App:
         self._build_set_tab()
         self._show_tab("🎬 Генерація")
         # v13: меню правого кліку («📋 Вставити») для всіх текстових полів
-        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.tr_entry, self.px_key, self.px_query):
+        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.pins_entry, self.tr_entry, self.px_key, self.px_query):
             self.attach_paste_menu(w)
 
     def _show_tab(self, val):
@@ -2197,31 +2284,197 @@ class App:
                                   wrap="word", fg_color=self.BG, corner_radius=10)
         self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        # === ЦЕНТР: прев'ю → кнопка → пайплайн → пошук YouTube ===
+        # === ЦЕНТР ===
         center = ctk.CTkScrollableFrame(self.tab_gen, fg_color="transparent")
         center.pack(side="right", fill="both", expand=True, padx=(8, 0), pady=(8, 8))
 
-        pc = self._card(center, fill="x", pady=(0, 8))
-        ctk.CTkLabel(pc, text="Прев'ю", font=self._f(13, "bold"),
+        # --- Картка «Що робимо?» — один вибір режиму (v17) ---
+        mc = self._card(center, fill="x", pady=(0, 8))
+        ctk.CTkLabel(mc, text="Що робимо?", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        self.poster_lbl = ctk.CTkLabel(
-            pc, text="🎞\nТут з'явиться кадр твого відео", width=560, height=315,
-            font=self._f(14), text_color=self.MUTED, fg_color=self.INSET, corner_radius=12)
-        self.poster_lbl.pack(padx=16, pady=(4, 2))
-        self.poster_title = ctk.CTkLabel(pc, text="Ще нічого не згенеровано",
-                                         font=self._f(13, "bold"), text_color=self.MUTED,
-                                         anchor="w")
-        self.poster_title.pack(fill="x", padx=16, pady=(2, 0))
-        prow = ctk.CTkFrame(pc, fg_color="transparent")
-        prow.pack(fill="x", padx=16, pady=(4, 12))
-        ctk.CTkButton(prow, text="▶️ Відкрити відео", height=36, corner_radius=18,
-                      font=self._f(13, "bold"), fg_color=self.ACCENT,
-                      hover_color=self.ACCENT_H, command=self.open_final).pack(side="left")
-        ctk.CTkButton(prow, text="📂 Папка", width=110, height=36, corner_radius=18,
-                      font=self._f(13), fg_color="transparent", border_width=1,
-                      border_color=self.SEP, hover_color=self.HOVER,
-                      command=self.open_folder).pack(side="left", padx=(8, 0))
+        mrow = ctk.CTkFrame(mc, fg_color="transparent")
+        mrow.pack(fill="x", padx=16, pady=(2, 12))
+        self.mode_btns = {}
+        for mid, txt in (("video", "🎬\nВідео"), ("script", "📜\nСценарій"),
+                         ("mix", "🎧\nМікс")):
+            b = ctk.CTkButton(mrow, text=txt, height=64, font=self._f(14, "bold"),
+                              corner_radius=12, command=lambda m=mid: self._set_mode(m))
+            b.pack(side="left", fill="x", expand=True, padx=3)
+            self.mode_btns[mid] = b
+        ctk.CTkLabel(mc, text="🎬 Відео — напиши тему, зроблю все сам • 📜 Сценарій — своє текстом по частинах • 🎧 Мікс — годинна музика з безкоштовних треків",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 12))
 
+        # --- Режимні фрейми ---
+        self.frame_video = ctk.CTkFrame(center, fg_color="transparent")
+        self.frame_script = ctk.CTkFrame(center, fg_color="transparent")
+        self.frame_mix = ctk.CTkFrame(center, fg_color="transparent")
+
+        # === РЕЖИМ 🎬 ВІДЕО ===
+        qc = self._card(self.frame_video, fill="x", pady=(0, 8))
+        ctk.CTkLabel(qc, text="Про що зняти відео?", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
+                                    fg_color=self.INSET, corner_radius=10)
+        self.query.pack(fill="x", padx=16, pady=(0, 4))
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.query.bind(seq, self._paste_event)
+        self.query.bind("<Control-Return>", self._ctrl_enter)
+        qrow = ctk.CTkFrame(qc, fg_color="transparent")
+        qrow.pack(fill="x", padx=16, pady=(2, 2))
+        ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.score_now).pack(side="left")
+        ctk.CTkButton(qrow, text="🌐 YouTube", width=100, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.open_youtube_search).pack(side="left", padx=(8, 0))
+        self.batch = ctk.BooleanVar(value=False)  # 📚 v14: батч-генерація
+        ctk.CTkSwitch(qc, text="📚 Кілька відео батчем (кожен рядок теми — окреме відео)",
+                      variable=self.batch, font=self._f(12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(2, 0))
+        ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
+                     font=self._f(10), text_color=self.MUTED).pack(anchor="w",
+                                                                    padx=16, pady=(2, 12))
+
+        bc = self._card(self.frame_video, fill="x", pady=(0, 8))  # 🔍 Свій фон
+        ctk.CTkLabel(bc, text="🔍 Свій фон (не обов'язково)", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.bg_src = ctk.CTkSegmentedButton(bc, values=["🎬 Відео YouTube", "🖼 Pinterest"],
+                                              font=self._f(12), height=32,
+                                              fg_color=self.INSET, selected_color=self.ACCENT,
+                                              selected_hover_color=self.ACCENT_H,
+                                              unselected_color=self.HOVER,
+                                              command=self._switch_bg_src)
+        self.bg_src.set("🎬 Відео YouTube")
+        self.bg_src.pack(fill="x", padx=16, pady=(0, 6))
+        self.yt_bg_row = ctk.CTkFrame(bc, fg_color="transparent")
+        self.yt_bg_row.pack(fill="x", padx=16, pady=(0, 6))
+        self.yt_search_entry = ctk.CTkEntry(
+            self.yt_bg_row, placeholder_text="Що шукати? (наприклад: нічне місто 4k)",
+            height=38, corner_radius=10, fg_color=self.INSET, font=self._f(13))
+        self.yt_search_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(self.yt_bg_row, text="📋", width=48, height=38, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(15),
+                      command=lambda: self.paste_into(self.yt_search_entry)).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(self.yt_bg_row, text="🔎 Шукати", width=110, height=38, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.yt_search_now).pack(side="left", padx=(8, 0))
+        self.pins_row = ctk.CTkFrame(bc, fg_color="transparent")  # 🖼 v17: Pinterest
+        self.pins_entry = ctk.CTkEntry(
+            self.pins_row, placeholder_text="Які зображення? (наприклад: neon city night)",
+            height=38, corner_radius=10, fg_color=self.INSET, font=self._f(13))
+        self.pins_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(self.pins_row, text="📋", width=48, height=38, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(15),
+                      command=lambda: self.paste_into(self.pins_entry)).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(self.pins_row, text="🖼 Шукати", width=110, height=38, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.pins_search_now).pack(side="left", padx=(8, 0))
+        self.pins_results_frame = ctk.CTkScrollableFrame(bc, height=170, fg_color=self.INSET,
+                                                         corner_radius=12)
+        ctk.CTkLabel(self.pins_results_frame, text="Тут з'являться знайдені зображення",
+                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
+        self.yt_results_frame = ctk.CTkScrollableFrame(bc, height=170, fg_color=self.INSET,
+                                                       corner_radius=12)
+        self.yt_results_frame.pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkLabel(self.yt_results_frame, text="Тут з'являться результати пошуку",
+                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
+        ctk.CTkLabel(bc, text="обране піде у фон • нічого не обрав — підберу сам по темі • 🖼 Pinterest: зображення належать авторам — ок для особистих відео",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 12))
+
+        # === РЕЖИМ 📜 СЦЕНАРІЙ ===
+        tc = self._card(self.frame_script, fill="x", pady=(0, 8))
+        ctk.CTkLabel(tc, text="📜 Сценарій (по частинах)", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        ctk.CTkLabel(tc, text="Частини через порожній рядок. «Пошук: запит» задає пошук фону, «Кліп: посилання» — твоє конкретне відео.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 4))
+        self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
+                                     fg_color=self.INSET, corner_radius=10)
+        self.script.pack(fill="x", padx=16, pady=(0, 4))
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.script.bind(seq, self._paste_script_event)
+        self.script.bind("<Control-Return>", self._ctrl_enter)
+        trow = ctk.CTkFrame(tc, fg_color="transparent")
+        trow.pack(fill="x", padx=16, pady=(2, 2))
+        ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=lambda: self.paste_into(self.script)).pack(side="left")
+        ctk.CTkButton(trow, text="📂", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.load_script_file).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(trow, text="💾", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.save_script_file).pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(tc, text="Ctrl+Enter згенерувати",
+                     font=self._f(10), text_color=self.MUTED).pack(anchor="w",
+                                                                    padx=16, pady=(2, 0))
+        trc = self._card(self.frame_script, fill="x", pady=(0, 8))  # 📜 транскрипція поруч
+        ctk.CTkLabel(trc, text="📜 З YouTube в сценарій (не обов'язково)",
+                     font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        ctk.CTkLabel(trc, text="Встав посилання — витягну субтитри, стисну до ~10 хвилин озвучки і зроблю сценарій.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 4))
+        self.tr_entry = ctk.CTkEntry(trc, placeholder_text="Посилання на відео YouTube…",
+                                    height=38, corner_radius=10, fg_color=self.INSET,
+                                    font=self._f(13))
+        self.tr_entry.pack(side="left", fill="x", expand=True, padx=16)
+        ctk.CTkButton(trc, text="📜 Витягнути", height=38, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.transcript_now).pack(side="left", padx=(8, 0), pady=(0, 4))
+        ctk.CTkLabel(trc, text="", font=self._f(10)).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # === РЕЖИМ 🎧 МІКС ===
+        xc = self._card(self.frame_mix, fill="x", pady=(0, 8))
+        ctk.CTkLabel(xc, text="🎧 Музика для міксу (Pixabay — безкоштовно, без авторських прав)",
+                     font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        ctk.CTkLabel(xc, text="Тема відео вище стане назвою міксу (порожня — «Night Chill Mix»).",
+                     font=self._f(10), text_color=self.MUTED, anchor="w",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 4))
+        self.px_key = ctk.CTkEntry(xc, placeholder_text="Ключ Pixabay (pixabay.com/api/docs)",
+                                   height=34, corner_radius=10, fg_color=self.INSET,
+                                   font=self._f(12))
+        self.px_key.pack(fill="x", padx=16, pady=(0, 4))
+        self.px_key.insert(0, load_pixabay_key())
+        xrow = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow.pack(fill="x", padx=16, pady=(0, 4))
+        self.px_query = ctk.CTkEntry(xrow, placeholder_text="Жанр/настрій (deep house, chill)",
+                                     height=34, corner_radius=10, fg_color=self.INSET,
+                                     font=self._f(12))
+        self.px_query.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(xrow, text="🎵", width=48, height=34, corner_radius=10,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(14),
+                      command=self.px_search_now).pack(side="left", padx=(8, 0))
+        self.px_results_frame = ctk.CTkScrollableFrame(xc, height=150, fg_color=self.INSET,
+                                                       corner_radius=12)
+        self.px_results_frame.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkLabel(self.px_results_frame, text="Тут з'являться знайдені треки",
+                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
+        xrow2 = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow2.pack(fill="x", padx=16, pady=(0, 4))
+        self.px_tracks_lbl = ctk.CTkLabel(xrow2, text="Треків у папці: 0",
+                                          font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.px_tracks_lbl.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(xrow2, text="⬇️ Завантажити обране", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.px_download_now).pack(side="right")
+        xrow3 = ctk.CTkFrame(xc, fg_color="transparent")
+        xrow3.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkLabel(xrow3, text="⏱ Хвилин міксу:", font=self._f(12),
+                     text_color=self.MUTED).pack(side="left")
+        self.mix_minutes = ctk.CTkEntry(xrow3, width=64, height=32, corner_radius=10,
+                                        fg_color=self.INSET, font=self._f(12), justify="center")
+        self.mix_minutes.insert(0, "60")
+        self.mix_minutes.pack(side="left", padx=(6, 0))
+        ctk.CTkButton(xrow3, text="📂 Папка з треками", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.open_mix_folder).pack(side="right")
+        ctk.CTkLabel(xc, text="Ключ Pixabay зберігається лише на цьому комп'ютері — у код і GitHub не потрапляє.",
+                     font=self._f(10), text_color=self.MUTED, wraplength=560,
+                     justify="left").pack(fill="x", padx=16, pady=(2, 12))
+
+        # --- Головна кнопка + кроки + прев'ю ---
         self.btn = ctk.CTkButton(center, text="🎬  ЗГЕНЕРУВАТИ ВІДЕО",
                                  height=54, corner_radius=27, font=self._f(16, "bold"),
                                  fg_color=self.ACCENT, hover_color=self.ACCENT_H,
@@ -2245,269 +2498,158 @@ class App:
             lbl.pack(side="left", padx=4)
             self.step_lbls.append(lbl)
 
-        sc = self._card(center, fill="x", pady=(0, 8))
-        ctk.CTkLabel(sc, text="🔍 Пошук на YouTube (без ключів)", font=self._f(13, "bold"),
+        pc = self._card(center, fill="x", pady=(0, 8))
+        ctk.CTkLabel(pc, text="Прев'ю", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        srow = ctk.CTkFrame(sc, fg_color="transparent")
-        srow.pack(fill="x", padx=16, pady=(0, 6))
-        self.yt_search_entry = ctk.CTkEntry(
-            srow, placeholder_text="Що шукати? (наприклад: космос 4k короткі)",
-            height=38, corner_radius=10, fg_color=self.INSET, font=self._f(13))
-        self.yt_search_entry.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(srow, text="📋", width=48, height=38, corner_radius=10,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(15),
-                      command=lambda: self.paste_into(self.yt_search_entry)).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(srow, text="🔎 Шукати", width=110, height=38, corner_radius=10,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=self.yt_search_now).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(srow, text="🌐", width=48, height=38, corner_radius=10,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(15),
-                      command=lambda: self.open_youtube_search(self.yt_search_entry)).pack(side="left", padx=(8, 0))
-        self.yt_results_frame = ctk.CTkScrollableFrame(sc, height=170, fg_color=self.INSET,
-                                                       corner_radius=12)
-        self.yt_results_frame.pack(fill="x", padx=16, pady=(0, 6))
-        ctk.CTkLabel(self.yt_results_frame, text="Тут з'являться результати пошуку",
-                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
-        ctk.CTkLabel(sc, text="обрані відео підуть кліпами у фон • нічого не обрав — я сам знайду на YouTube по словах теми",
-                     font=self._f(10), text_color=self.MUTED).pack(anchor="w", padx=16, pady=(0, 12))
+        self.poster_lbl = ctk.CTkLabel(
+            pc, text="🎞\nТут з'явиться кадр твого відео", width=560, height=315,
+            font=self._f(14), text_color=self.MUTED, fg_color=self.INSET, corner_radius=12)
+        self.poster_lbl.pack(padx=16, pady=(4, 2))
+        self.poster_title = ctk.CTkLabel(pc, text="Ще нічого не згенеровано",
+                                         font=self._f(13, "bold"), text_color=self.MUTED,
+                                         anchor="w")
+        self.poster_title.pack(fill="x", padx=16, pady=(2, 0))
+        prow = ctk.CTkFrame(pc, fg_color="transparent")
+        prow.pack(fill="x", padx=16, pady=(4, 12))
+        ctk.CTkButton(prow, text="▶️ Відкрити відео", height=36, corner_radius=18,
+                      font=self._f(13, "bold"), fg_color=self.ACCENT,
+                      hover_color=self.ACCENT_H, command=self.open_final).pack(side="left")
+        ctk.CTkButton(prow, text="📂 Папка", width=110, height=36, corner_radius=18,
+                      font=self._f(13), fg_color="transparent", border_width=1,
+                      border_color=self.SEP, hover_color=self.HOVER,
+                      command=self.open_folder).pack(side="left", padx=(8, 0))
 
-        # === САЙДБАР НАЛАШТУВАНЬ (лівий, скролінг) ===
+        # === САЙДБАР (3 картки) ===
         side = ctk.CTkScrollableFrame(self.tab_gen, width=310, fg_color="transparent")
         side.pack(side="left", fill="y", padx=(8, 0), pady=(8, 0))
 
-        qc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(qc, text="Тема відео", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
-                                    fg_color=self.INSET, corner_radius=10)
-        self.query.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
-            self.query.bind(seq, self._paste_event)
-        self.query.bind("<Control-Return>", self._ctrl_enter)
-        qrow = ctk.CTkFrame(qc, fg_color="transparent")
-        qrow.pack(fill="x", padx=14, pady=(2, 2))
-        ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.score_now).pack(side="left")
-        ctk.CTkButton(qrow, text="🌐 YouTube", width=100, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.open_youtube_search).pack(side="left", padx=(8, 0))
-        self.batch = ctk.BooleanVar(value=False)  # 📚 v14: батч-генерація
-        ctk.CTkSwitch(qc, text="📚 Батч: кожна тема з нового рядка", variable=self.batch,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
-        ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати",
-                     font=self._f(10), text_color=self.MUTED).pack(anchor="w", padx=14, pady=(2, 12))
-
-        tc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(tc, text="🎬 Сценарій (по частинах)", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(tc, text="Частини через порожній рядок. «Пошук: запит» задає пошук фону, «Кліп: посилання» — твоє конкретне відео.",
-                     font=self._f(10), text_color=self.MUTED, justify="left",
-                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
-        self.script = ctk.CTkTextbox(tc, height=96, font=self._f(13), wrap="word",
-                                     fg_color=self.INSET, corner_radius=10)
-        self.script.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
-            self.script.bind(seq, self._paste_script_event)
-        self.script.bind("<Control-Return>", self._ctrl_enter)
-        trow = ctk.CTkFrame(tc, fg_color="transparent")
-        trow.pack(fill="x", padx=14, pady=(2, 2))
-        ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=lambda: self.paste_into(self.script)).pack(side="left")
-        ctk.CTkButton(trow, text="📂", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=self.load_script_file).pack(side="left", padx=(6, 0))
-        ctk.CTkButton(trow, text="💾", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=self.save_script_file).pack(side="left", padx=(6, 0))
-        self.use_script = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(tc, text="🎬 Генерувати за сценарієм", variable=self.use_script,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
-
-        yb = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(yb, text="🔗 Відео з YouTube (кілька посилань)",
-                     font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(yb, text="Кожне посилання з нового рядка — з них наріжу фрагменти і змонтую компіляцію у фон.",
-                     font=self._f(10), text_color=self.MUTED, justify="left",
-                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
-        self.yt_many = ctk.CTkTextbox(yb, height=72, font=self._f(12), wrap="word",
-                                     fg_color=self.INSET, corner_radius=10)
-        self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
-            self.yt_many.bind(seq, self._paste_many_event)
-        yrow = ctk.CTkFrame(yb, fg_color="transparent")
-        yrow.pack(fill="x", padx=14, pady=(2, 2))
-        ctk.CTkButton(yrow, text="📋", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=lambda: self.paste_into(self.yt_many)).pack(side="left")
-        ctk.CTkButton(yrow, text="⬇️", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=self.download_yt_many).pack(side="left", padx=(6, 0))
-        ctk.CTkButton(yrow, text="🧹", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=lambda: self.clear_field(self.yt_many)).pack(side="left", padx=(6, 0))
-        yqrow = ctk.CTkFrame(yb, fg_color="transparent")
-        yqrow.pack(fill="x", padx=14, pady=(2, 2))
-        ctk.CTkLabel(yqrow, text="Якість", font=self._f(11), text_color=self.MUTED).pack(side="left")
-        self.yt_q = ctk.CTkOptionMenu(yqrow, values=list(YT_QUALITY), width=130, height=32,
-                                      fg_color=self.INSET, button_color=self.HOVER,
-                                      button_hover_color=self.HOVER, font=self._f(12))
-        self.yt_q.set("720p")
-        self.yt_q.pack(side="left", padx=(8, 0))
-        self.yt_many_bg = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(yb, text="✂️ Нарізати фрагменти у фон", variable=self.yt_many_bg,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
-
-        trc = self._card(side, fill="x", pady=(0, 8))  # 📜 v15: транскрипція YouTube
-        ctk.CTkLabel(trc, text="📜 Транскрипція YouTube", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(trc, text="Встав посилання — витягну субтитри, стисну до ~10 хвилин озвучки і зроблю сценарій.",
-                     font=self._f(10), text_color=self.MUTED, justify="left",
-                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
-        self.tr_entry = ctk.CTkEntry(trc, height=34, font=self._f(12),
-                                    fg_color=self.INSET, corner_radius=10)
-        self.tr_entry.pack(fill="x", padx=14, pady=(0, 4))
-        trrow = ctk.CTkFrame(trc, fg_color="transparent")
-        trrow.pack(fill="x", padx=14, pady=(2, 12))
-        ctk.CTkButton(trrow, text="📋", width=48, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
-                      command=lambda: self.paste_into(self.tr_entry)).pack(side="left")
-        ctk.CTkButton(trrow, text="📜 Отримати", height=32, corner_radius=16,
-                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
-                      command=self.transcript_now).pack(side="left", padx=(6, 0))
-
         vc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(vc, text="🎙 Голос озвучення", font=self._f(13, "bold"),
+        ctk.CTkLabel(vc, text="🎙 Голос озвучки", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=14, pady=(12, 2))
         self.voice = ctk.CTkOptionMenu(vc, values=list(VOICES), height=36,
                                        fg_color=self.INSET, button_color=self.HOVER,
                                        button_hover_color=self.HOVER, font=self._f(12))
         self.voice.set("Остап")
         self.voice.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkLabel(vc, text="Потрібен лише для 🎬 Відео та 📜 Сценарій",
+                     font=self._f(10), text_color=self.MUTED).pack(anchor="w",
+                                                                    padx=14, pady=(0, 12))
 
-        stc = self._card(side, fill="x", pady=(0, 8))  # 🎨 v14: стилі відео
-        ctk.CTkLabel(stc, text="🎨 Стиль відео", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(stc, text="💬 Стиль субтитрів", font=self._f(11),
+        # ⚙️ Додатково (згорнуто за замовчуванням)
+        ec = self._card(side, fill="x", pady=(0, 8))
+        self.extra_toggle = ctk.CTkButton(ec, text="⚙️ Додатково (стилі, розмір, музика)  ▸",
+                                          height=36, corner_radius=12, anchor="w",
+                                          fg_color="transparent", hover_color=self.HOVER,
+                                          font=self._f(12, "bold"),
+                                          command=self._toggle_extra)
+        self.extra_toggle.pack(fill="x", padx=8, pady=(8, 0))
+        self.extra_body = ctk.CTkFrame(ec, fg_color="transparent")
+        ctk.CTkLabel(self.extra_body, text="Дефолти вже гарні — міняй, лише якщо хочеш.",
+                     font=self._f(10), text_color=self.MUTED).pack(anchor="w", padx=14, pady=(8, 0))
+        ctk.CTkLabel(self.extra_body, text="Розмір відео", font=self._f(11),
+                     text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(6, 0))
+        self.size = ctk.CTkOptionMenu(self.extra_body, values=list(SIZES), height=32,
+                                      fg_color=self.INSET, button_color=self.HOVER,
+                                      button_hover_color=self.HOVER, font=self._f(12))
+        self.size.set("720p")
+        self.size.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.extra_body, text="💬 Стиль субтитрів", font=self._f(11),
                      text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
-        self.sub_style = ctk.CTkOptionMenu(stc, values=list(SUBTITLE_STYLES), height=32,
+        self.sub_style = ctk.CTkOptionMenu(self.extra_body, values=list(SUBTITLE_STYLES), height=32,
                                           fg_color=self.INSET, button_color=self.HOVER,
                                           button_hover_color=self.HOVER, font=self._f(12))
         self.sub_style.set("Класичні")
         self.sub_style.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(stc, text="🎨 Стилістика картинки", font=self._f(11),
+        ctk.CTkLabel(self.extra_body, text="🎨 Стилістика картинки", font=self._f(11),
                      text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
-        self.vid_style = ctk.CTkOptionMenu(stc, values=list(VIDEO_STYLES), height=32,
+        self.vid_style = ctk.CTkOptionMenu(self.extra_body, values=list(VIDEO_STYLES), height=32,
                                            fg_color=self.INSET, button_color=self.HOVER,
                                            button_hover_color=self.HOVER, font=self._f(12))
         self.vid_style.set("Без стилю")
         self.vid_style.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(stc, text="🎞 Переходи між фрагментами", font=self._f(11),
+        ctk.CTkLabel(self.extra_body, text="🎞 Переходи між фрагментами", font=self._f(11),
                      text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(4, 0))
-        self.transition = ctk.CTkOptionMenu(stc, values=list(TRANSITIONS), height=32,
+        self.transition = ctk.CTkOptionMenu(self.extra_body, values=list(TRANSITIONS), height=32,
                                             fg_color=self.INSET, button_color=self.HOVER,
                                             button_hover_color=self.HOVER, font=self._f(12))
         self.transition.set("Різко")
         self.transition.pack(fill="x", padx=14, pady=(0, 6))
-        self.trim_sil = ctk.BooleanVar(value=False)  # ✂️ v14: паузи з озвучки
-        ctk.CTkSwitch(stc, text="✂️ Прибирати паузи з озвучки", variable=self.trim_sil,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
-        self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
-        ctk.CTkSwitch(stc, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
-        self.no_faces = ctk.BooleanVar(value=False)  # 🚫 v15: фрагменти без обличчя
-        ctk.CTkSwitch(stc, text="🚫 Без обличчя у кадрі (OpenCV)", variable=self.no_faces,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
-        self.seo = ctk.BooleanVar(value=True)  # 📈 v15: SEO-пак
-        ctk.CTkSwitch(stc, text="📈 SEO-пак для YouTube (youtube-seo.txt)", variable=self.seo,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
-
-        zc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(zc, text="📐 Розмір відео", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        self.size = ctk.CTkOptionMenu(zc, values=list(SIZES), height=36,
-                                      fg_color=self.INSET, button_color=self.HOVER,
-                                      button_hover_color=self.HOVER, font=self._f(12))
-        self.size.set("720p")
-        self.size.pack(fill="x", padx=14, pady=(0, 12))
-
-        xc = self._card(side, fill="x", pady=(0, 8))  # 🎧 v16: мікс з безкоштовних треків
-        ctk.CTkLabel(xc, text="🎧 Мікс з безкоштовних треків", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(xc, text="Pixabay Music: ліцензія дозволяє комерційне використання без згадки автора. Ключ Pixabay зберігається лише на цьому комп'ютері — у код і GitHub не потрапляє.",
-                     font=self._f(10), text_color=self.MUTED, justify="left",
-                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
-        self.px_key = ctk.CTkEntry(xc, placeholder_text="Ключ Pixabay (pixabay.com/api/docs)",
-                                   height=34, corner_radius=10, fg_color=self.INSET,
-                                   font=self._f(12))
-        self.px_key.pack(fill="x", padx=14, pady=(0, 4))
-        self.px_key.insert(0, load_pixabay_key())
-        xrow = ctk.CTkFrame(xc, fg_color="transparent")
-        xrow.pack(fill="x", padx=14, pady=(0, 4))
-        self.px_query = ctk.CTkEntry(xrow, placeholder_text="Жанр/настрій (deep house, chill)",
-                                     height=34, corner_radius=10, fg_color=self.INSET,
-                                     font=self._f(12))
-        self.px_query.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(xrow, text="🎵", width=48, height=34, corner_radius=10,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(14),
-                      command=self.px_search_now).pack(side="left", padx=(8, 0))
-        self.px_results_frame = ctk.CTkScrollableFrame(xc, height=150, fg_color=self.INSET,
-                                                       corner_radius=12)
-        self.px_results_frame.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(self.px_results_frame, text="Тут з'являться знайдені треки",
-                     font=self._f(11), text_color=self.MUTED).pack(anchor="w")
-        xrow2 = ctk.CTkFrame(xc, fg_color="transparent")
-        xrow2.pack(fill="x", padx=14, pady=(0, 4))
-        self.px_tracks_lbl = ctk.CTkLabel(xrow2, text="Треків у папці: 0",
-                                          font=self._f(11), text_color=self.MUTED, anchor="w")
-        self.px_tracks_lbl.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(xrow2, text="⬇️ Завантажити обране", height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.px_download_now).pack(side="right")
-        xrow3 = ctk.CTkFrame(xc, fg_color="transparent")
-        xrow3.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(xrow3, text="⏱ Хвилин:", font=self._f(12),
-                     text_color=self.MUTED).pack(side="left")
-        self.mix_minutes = ctk.CTkEntry(xrow3, width=64, height=32, corner_radius=10,
-                                        fg_color=self.INSET, font=self._f(12), justify="center")
-        self.mix_minutes.insert(0, "60")
-        self.mix_minutes.pack(side="left", padx=(6, 0))
-        ctk.CTkButton(xrow3, text="📂 Папка", width=84, height=32, corner_radius=16,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.open_mix_folder).pack(side="right")
-        self.use_mix = ctk.BooleanVar(value=False)  # 🎧 v16: мікс-режим
-        ctk.CTkSwitch(xc, text="🎧 Згенерувати мікс (тема = назва)", variable=self.use_mix,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w",
-                                                                          padx=14, pady=(2, 12))
-        self.px_checked = {}
-        self._refresh_mix_count()
-
-        mc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(mc, text="🎵 Фонова музика (не обов'язково)", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        mrow = ctk.CTkFrame(mc, fg_color="transparent")
-        mrow.pack(fill="x", padx=14, pady=(0, 12))
-        self.music_lbl = ctk.CTkLabel(mrow, text="Не обрано — буде лише голос",
+        mrow = ctk.CTkFrame(self.extra_body, fg_color="transparent")
+        mrow.pack(fill="x", padx=14, pady=(0, 6))
+        self.music_lbl = ctk.CTkLabel(mrow, text="🎵 Музика: не обрано",
                                       font=self._f(11), text_color=self.MUTED, anchor="w")
         self.music_lbl.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(mrow, text="Обрати файл…", width=110, height=34, corner_radius=17,
+        ctk.CTkButton(mrow, text="Обрати…", width=90, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.pick_music).pack(side="left")
+        self.trim_sil = ctk.BooleanVar(value=False)  # ✂️ v14: паузи з озвучки
+        ctk.CTkSwitch(self.extra_body, text="✂️ Прибирати паузи з озвучки", variable=self.trim_sil,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
+        ctk.CTkSwitch(self.extra_body, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.no_faces = ctk.BooleanVar(value=False)  # 🚫 v15: фрагменти без обличчя
+        ctk.CTkSwitch(self.extra_body, text="🚫 Без обличчя у кадрі (OpenCV)", variable=self.no_faces,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.seo = ctk.BooleanVar(value=True)  # 📈 v15: SEO-пак
+        ctk.CTkSwitch(self.extra_body, text="📈 SEO-пак для YouTube (youtube-seo.txt)", variable=self.seo,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
 
-        prc = self._card(side, fill="x", pady=(0, 8))  # 💾 v14: пресети налаштувань
-        ctk.CTkLabel(prc, text="💾 Пресети налаштувань", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        ctk.CTkLabel(prc, text="Зберігають голос, розмір, стилі субтитрів, стилістику, переходи і перемикачі — щоб не налаштовувати щоразу.",
-                     font=self._f(10), text_color=self.MUTED, justify="left",
-                     wraplength=250).pack(fill="x", padx=14, pady=(0, 4))
-        self.preset_menu = ctk.CTkOptionMenu(prc, values=["(порожньо)"], height=32,
+        # 🧰 Інструменти (згорнуто за замовчуванням)
+        ic = self._card(side, fill="x", pady=(0, 8))
+        self.tools_toggle = ctk.CTkButton(ic, text="🧰 Інструменти (рідко потрібні)  ▸",
+                                          height=36, corner_radius=12, anchor="w",
+                                          fg_color="transparent", hover_color=self.HOVER,
+                                          font=self._f(12, "bold"),
+                                          command=self._toggle_tools)
+        self.tools_toggle.pack(fill="x", padx=8, pady=(8, 0))
+        self.tools_body = ctk.CTkFrame(ic, fg_color="transparent")
+        ctk.CTkLabel(self.tools_body, text="🔗 Відео з YouTube у фон (кілька посилань)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(10, 2))
+        self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
+                                     fg_color=self.INSET, corner_radius=10)
+        self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.yt_many.bind(seq, self._paste_many_event)
+        yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        yrow.pack(fill="x", padx=14, pady=(2, 4))
+        ctk.CTkButton(yrow, text="📋", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=lambda: self.paste_into(self.yt_many)).pack(side="left")
+        ctk.CTkButton(yrow, text="⬇️ Завантажити все", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.download_yt_many).pack(side="left", padx=(8, 0))
+        self.yt_many_bg = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(self.tools_body, text="✂️ Нарізати фрагменти у фон", variable=self.yt_many_bg,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 4))
+        ctk.CTkLabel(self.tools_body, text="🎞 Компіляція з кількох відео",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.merge_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано жодного відео",
+                                      font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.merge_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        grow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        grow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(grow, text="➕ Додати", width=84, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_merge_files).pack(side="left")
+        ctk.CTkButton(grow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_merge_files).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(grow, text="🎞 Зшити", width=84, height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.merge_now).pack(side="right")
+        self.merge_bg = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(self.tools_body, text="🎬 Ці відео у фон генерації", variable=self.merge_bg,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 4))
+        ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
                                              fg_color=self.INSET, button_color=self.HOVER,
                                              button_hover_color=self.HOVER, font=self._f(12))
         self.preset_menu.pack(fill="x", padx=14, pady=(0, 4))
-        prow2 = ctk.CTkFrame(prc, fg_color="transparent")
-        prow2.pack(fill="x", padx=14, pady=(0, 2))
-        ctk.CTkButton(prow2, text="💾 Зберегти", width=92, height=32, corner_radius=16,
+        prow2 = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        prow2.pack(fill="x", padx=14, pady=(0, 8))
+        ctk.CTkButton(prow2, text="💾", width=44, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.save_preset).pack(side="left")
         ctk.CTkButton(prow2, text="📂 Застосувати", width=104, height=32, corner_radius=16,
@@ -2518,26 +2660,96 @@ class App:
                       command=self.delete_preset).pack(side="left", padx=(6, 0))
         self._refresh_presets()
 
-        gc = self._card(side, fill="x", pady=(0, 8))
-        ctk.CTkLabel(gc, text="🎞 Компіляція з кількох відео", font=self._f(13, "bold"),
-                     anchor="w").pack(fill="x", padx=14, pady=(12, 2))
-        self.merge_lbl = ctk.CTkLabel(gc, text="Не обрано жодного відео",
-                                      font=self._f(11), text_color=self.MUTED, anchor="w")
-        self.merge_lbl.pack(fill="x", padx=14, pady=(0, 4))
-        grow = ctk.CTkFrame(gc, fg_color="transparent")
-        grow.pack(fill="x", padx=14, pady=(0, 2))
-        ctk.CTkButton(grow, text="➕ Додати", width=90, height=34, corner_radius=17,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.pick_merge_files).pack(side="left")
-        ctk.CTkButton(grow, text="✖️", width=44, height=34, corner_radius=17,
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.clear_merge_files).pack(side="left", padx=(6, 0))
-        ctk.CTkButton(grow, text="🎞 Зшити", width=90, height=34, corner_radius=17,
-                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
-                      command=self.merge_now).pack(side="right")
-        self.merge_bg = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(gc, text="🎬 Ці відео у фон генерації", variable=self.merge_bg,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
+        self._set_mode("video")
+
+    def _set_mode(self, mode):
+        """v17: перемикання режиму — показую лише потрібні поля."""
+        self.mode = mode
+        for m, b in self.mode_btns.items():
+            if m == mode:
+                b.configure(fg_color=self.ACCENT, hover_color=self.ACCENT_H)
+            else:
+                b.configure(fg_color=self.INSET, hover_color=self.HOVER)
+        self.frame_video.pack_forget()
+        self.frame_script.pack_forget()
+        self.frame_mix.pack_forget()
+        frame = {"video": self.frame_video, "script": self.frame_script,
+                 "mix": self.frame_mix}.get(mode, self.frame_video)
+        # фрейми режимів стоять одразу за карткою «Що робимо?» — пакуємо вручну
+        frame.pack(fill="x", pady=(0, 2), before=self.btn)
+
+    def _toggle_extra(self):
+        """⚙️: розгорнути/згорнути додаткові налаштування."""
+        if self.extra_body.winfo_ismapped():
+            self.extra_body.pack_forget()
+            self.extra_toggle.configure(text="⚙️ Додатково (стилі, розмір, музика)  ▸")
+        else:
+            self.extra_body.pack(fill="x")
+            self.extra_toggle.configure(text="⚙️ Додатково (стилі, розмір, музика)  ▾")
+
+    def _toggle_tools(self):
+        """🧰: розгорнути/згорнути інструменти."""
+        if self.tools_body.winfo_ismapped():
+            self.tools_body.pack_forget()
+            self.tools_toggle.configure(text="🧰 Інструменти (рідко потрібні)  ▸")
+        else:
+            self.tools_body.pack(fill="x")
+            self.tools_toggle.configure(text="🧰 Інструменти (рідко потрібні)  ▾")
+
+    def _switch_bg_src(self, val):
+        """🔍: перемикання джерела фону — Відео YouTube / Pinterest."""
+        if "Pinterest" in val:
+            self.yt_bg_row.pack_forget()
+            self.yt_results_frame.pack_forget()
+            self.pins_row.pack(fill="x", padx=16, pady=(0, 6))
+            self.pins_results_frame.pack(fill="x", padx=16, pady=(0, 6))
+        else:
+            self.pins_row.pack_forget()
+            self.pins_results_frame.pack_forget()
+            self.yt_bg_row.pack(fill="x", padx=16, pady=(0, 6))
+            self.yt_results_frame.pack(fill="x", padx=16, pady=(0, 6))
+
+    def pins_search_now(self):
+        """🖼 v17: пошук зображень Pinterest у фоновому потоці."""
+        q = self.pins_entry.get().strip()
+        if len(q) < 2:
+            messagebox.showwarning("Стоп", "Напиши, які зображення шукати 🙂 (наприклад: neon city)")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        self.say("🖼 Шукаю зображення в Pinterest: " + q + "…")
+        threading.Thread(target=self._pins_search_thread, args=(q,), daemon=True).start()
+
+    def _pins_search_thread(self, q):
+        try:
+            results, err = pinterest_search(q, 12, self.say)
+            self.q.put(("pins_results", results, err))
+        except Exception as e:
+            self.q.put(("pins_results", [], "помилка: " + str(e)[:150]))
+        finally:
+            self.q.put(None)
+
+    def _show_pins_results(self, results, err):
+        """Малює знайдені зображення з чекбоксами (головний потік)."""
+        for w in self.pins_results_frame.winfo_children():
+            w.destroy()
+        self.pins_checked = {}
+        if not results:
+            ctk.CTkLabel(self.pins_results_frame, text=(err or "Нічого не знайшов") + " — спробуй інший запит",
+                         font=ctk.CTkFont(family="Segoe UI", size=12),
+                         text_color=self.MUTED).pack(anchor="w", pady=6)
+            return
+        for r in results:
+            var = ctk.BooleanVar(value=False)
+            self.pins_checked[r["url"]] = var
+            row = ctk.CTkFrame(self.pins_results_frame, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            ctk.CTkCheckBox(row, variable=var, text="",
+                            checkbox_width=22, checkbox_height=22,
+                            fg_color=self.ACCENT, hover_color=self.ACCENT_H).pack(side="left", padx=(4, 6))
+            ctk.CTkLabel(row, text=r["title"][:70], font=ctk.CTkFont(family="Segoe UI", size=12),
+                         anchor="w", justify="left", wraplength=520).pack(side="left", fill="x", expand=True)
+        self.say("✅ Знайдено {} зображень — познач потрібні і генеруй (скачаю сам)".format(len(results)))
 
     def _build_hist_tab(self):
         htop = ctk.CTkFrame(self.tab_hist, fg_color="transparent")
@@ -2602,7 +2814,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v16 — тема → озвучка (edge-tts) → субтитри → фон → рендер (ffmpeg).\nПресети, стилі, переходи, обкладинка, паузи, батч, транскрипція, SEO-пак,\n🎧 мікс з безкоштовних треків Pixabay (ключ — лише на твоєму ПК, у код не потрапляє).\nДизайн інтерфейсу надихався MoneyPrinterTurbo (harry0703). Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v17 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube/Pinterest) → рендер. Додатково: стилі, пресети, транскрипція, SEO-пак.\nУсе без API-ключів (ключ Pixabay — лише локально). Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -2907,7 +3119,7 @@ class App:
             return
         self.script.delete("1.0", "end")
         self.script.insert("1.0", text.strip())
-        self.use_script.set(True)
+        self._set_mode("script")
         self.say("📂 Сценарій відкрито: {} — {} частин".format(
             os.path.basename(path), len(parse_script(text))))
 
@@ -3101,7 +3313,7 @@ class App:
             parts = chunk_script_parts(short)
             self.script.delete("1.0", "end")
             self.script.insert("1.0", parts)
-            self.use_script.set(True)
+            self._set_mode("script")
             n = len([b for b in parts.split("\n\n") if b.strip()])
             messagebox.showinfo("Готово", "Сценарій з {} частин вставлено у картку «🎬 Сценарій» —\nперемикач «Генерувати за сценарієм» уже увімкнений ✓".format(n))
             win.destroy()
@@ -3399,6 +3611,8 @@ class App:
                     self._show_px_results(msg[1], msg[2])
                 elif kind == "mix_tracks":  # 🎧 v16: оновити лічильник треків
                     self._refresh_mix_count()
+                elif kind == "pins_results":  # 🖼 v17: результати пошуку Pinterest
+                    self._show_pins_results(msg[1], msg[2])
                 elif kind == "transcript":  # 📜 v15: показати вікно транскрипції
                     self._show_transcript(msg[1], msg[2])
                 elif kind == "poster":
@@ -3448,22 +3662,24 @@ class App:
 
     def start(self):
         query = self.query.get("1.0", "end").strip()
-        if getattr(self, "use_mix", None) and self.use_mix.get():  # 🎧 v16: мікс-режим
+        mode = getattr(self, "mode", "video")
+        if mode == "mix":  # 🎧 мікс: тема = назва, треки в папці
             if not query:
                 query = "Night Chill Mix"
             if not os.path.isdir(MIX_TRACKS_DIR) or not any(
                     n.lower().endswith((".mp3", ".wav", ".m4a"))
                     for n in os.listdir(MIX_TRACKS_DIR)):
-                messagebox.showwarning("Стоп", "У папці MixTracks нема треків 🙂 Знайди їх через «🎵» у картці «🎧 Мікс» або поклади свої mp3 у папку.")
+                messagebox.showwarning("Стоп", "У папці MixTracks нема треків 🙂 Знайди їх через «🎵» у режимі 🎧 Мікс або поклади свої mp3 у папку.")
                 return
-        elif getattr(self, "use_script", None) and self.use_script.get():
+        elif mode == "script":  # 📜 сценарій
             script = self.script.get("1.0", "end").strip()
             if len(script) < 10:
-                messagebox.showwarning("Стоп", "Режим сценарію увімкнений — напиши сценарій у картці «🎬 Сценарій» 🙂")
+                messagebox.showwarning("Стоп", "Напиши сценарій у режимі «📜 Сценарій» 🙂 Частини — через порожній рядок.")
                 return
-        elif len(query) < 3:
-            messagebox.showwarning("Стоп", "Спершу встав запит 🙂")
-            return
+        else:  # 🎬 відео
+            if len(query) < 3:
+                messagebox.showwarning("Стоп", "Спершу напиши тему відео 🙂")
+                return
         if not hasattr(self, "music_path"):
             self.music_path = ""
         self.btn.configure(state="disabled")
@@ -3471,8 +3687,8 @@ class App:
         self._gen_running = True
         self._reset_steps()
         self.status_lbl.configure(text="● Генерується…", text_color="#F59E0B")
-        threading.Thread(target=(self.pipeline_mix if (getattr(self, "use_mix", None) and self.use_mix.get()) else self.pipeline), args=(query,), daemon=True).start()
-
+        target = self.pipeline_mix if mode == "mix" else self.pipeline
+        threading.Thread(target=target, args=(query,), daemon=True).start()
     def pipeline(self, query):
         ok = False
         try:
@@ -3490,6 +3706,18 @@ class App:
             if sel:
                 self.say("🎬 У фон піде {} обраних відео з пошуку".format(len(sel)))
             # v14: налаштування стилів/пауз/обкладинки з сайдбара
+            pins = [u for u, v in getattr(self, "pins_checked", {}).items() if v.get()]  # 🖼 v17
+            if pins:
+                self.say("🖼 Завантажую {} зображення з Pinterest…".format(len(pins)))
+                dl = []
+                for u in pins:
+                    try:
+                        dl.append(pinterest_download(u, self.say))
+                    except Exception as e:
+                        self.say("⚠️ Зображення не завантажилось: " + str(e)[:120])
+                pins = dl if dl else None
+            else:
+                pins = None
             sub = self.sub_style.get() if hasattr(self, "sub_style") else "Класичні"
             vid = self.vid_style.get() if hasattr(self, "vid_style") else "Без стилю"
             trans = self.transition.get() if hasattr(self, "transition") else "Різко"
@@ -3497,7 +3725,7 @@ class App:
             cov = bool(self.cover_on.get()) if hasattr(self, "cover_on") else False
             nf = bool(self.no_faces.get()) if hasattr(self, "no_faces") else False  # 🚫 v15
             se = bool(self.seo.get()) if hasattr(self, "seo") else False             # 📈 v15
-            if getattr(self, "use_script", None) and self.use_script.get():
+            if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
@@ -3527,6 +3755,7 @@ class App:
                                        getattr(self, "music_path", "").strip(), self.say,
                                        on_workdir=lambda wd: setattr(self, "workdir", wd),
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
+                                       pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
                                        trim_sil=trim, cover=cov, no_faces=nf, seo=se)
                         done += 1
