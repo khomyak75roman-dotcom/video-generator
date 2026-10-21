@@ -1,4 +1,60 @@
-# -*- coding: utf-8 -*-
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>app.py v21 — вставка у GitHub</title>
+<style>
+  :root { font-family: "Segoe UI", system-ui, sans-serif; color: #F5F5F7; background: #0B0B12; }
+  body { margin: 0; padding: 24px; }
+  .card { background: #15151F; border-radius: 16px; padding: 20px 24px; margin-bottom: 16px; max-width: 980px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  p, li { font-size: 14px; line-height: 1.55; color: #C7C7D1; }
+  ol li { margin: 6px 0; }
+  code { background: #20202E; padding: 2px 7px; border-radius: 6px; font-size: 13px; }
+  .btn { display: inline-block; background: #7C3AED; color: #fff; border: none; padding: 12px 22px;
+         border-radius: 22px; font-size: 15px; font-weight: 600; cursor: pointer; margin: 10px 0; }
+  .btn:hover { background: #8B5CF6; }
+  pre { background: #101018; border: 1px solid #2A2A38; border-radius: 12px; padding: 14px;
+        font-size: 12px; line-height: 1.45; overflow: auto; max-height: 420px; white-space: pre; }
+  .ok { color: #10B981; font-weight: 600; }
+  .warn { color: #F59E0B; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📦 app.py v21 — 🎨 BT.709 + ⚡ апаратний кодек + 🎧 дакінг музики</h1>
+  <p>Одна вставка: цей файл повністю замінює старий <code>app.py</code> (v21 включає все з v20 — 🚫 без
+     спливаючих консольних вікон, 🎼 Suno AI, фото фону, мікс — і раніших). <code>requirements.txt</code>
+     і <code>build.yml</code> не змінюються.</p>
+  <button class="btn" onclick="copyCode()">📋 Копіювати весь код</button>
+  <span id="copied" class="ok"></span>
+  <h2>Що нового у v21</h2>
+  <p><b>🎨 BT.709 — правильні кольори на YouTube.</b> Фінальне відео тепер явно позначене як BT.709
+     (стандарт телебачення/HDTV) з правильним діапазоном яскравості — YouTube при своєму ре-енкоді
+     перестає «вимивати» відтінки й зсувати кольори. Працює у всіх режимах, включно з фолбеком.</p>
+  <p><b>⚡ Апаратний кодек — швидший рендер.</b> При старті програма один раз питає у ffmpeg список
+     енкодерів; якщо є GPU (NVIDIA nvenc / AMD amf / Intel qsv) — фінальний рендер автоматично йде
+     на апаратний кодек. GPU нема → тихо лишається libx264, нічого налаштовувати не треба.
+     Перевірка: у журналі під час рендеру рядок <b>«⚡ Апаратний кодек: …»</b>.</p>
+  <p><b>🎧 Дакінг музики.</b> Фонова музика тепер сама притихає, коли говорить голос озвучки,
+     і повертається в паузах (sidechaincompress). Голос чутно чітко без ручного зниження гучності
+     фону; у роликах із музикою звучить як у професійному монтажі.</p>
+  <h2>Як вставити</h2>
+  <ol>
+    <li>Натисни <b>«📋 Копіювати весь код»</b> (знизу під інструкцією — той самий код).</li>
+    <li>Відкрий репозиторій → <code>app.py</code> → ✏️ олівець (редагувати).</li>
+    <li>Виділи усе у файлі (<b>Ctrl+A</b>) → <b>Delete</b> → <b>Ctrl+V</b> (вставити v21).</li>
+    <li><b>Commit changes</b> → зачекай зелену збірку (~15–20 хв, у Actions).</li>
+    <li><b>Releases</b> → скачай свіжий <code>VideoGenerator-Setup.exe</code> → переінсталюй.</li>
+  </ol>
+  <p>Перша перевірка: «⚙️ Додатково» (внизу) → «Про застосунок» — має писати <b>v21</b>;
+     потім згенеруй відео з музикою — фон притихає під голосом; якщо є GPU — у журналі буде
+     рядок «⚡ Апаратний кодек».</p>
+</div>
+<h2 style="margin-left:4px">Код app.py v21 (4212 рядків)</h2>
+<pre id="c1"># -*- coding: utf-8 -*-
 """Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg).
 UI у стилі iPhone (CustomTkinter, dark mode iOS). v3: скролінг, авто-ffmpeg, YouTube-фон.
 v4: пошук YouTube без ключів — обрані знайдені відео йдуть кліпами у фон.
@@ -32,6 +88,18 @@ v17: простий інтерфейс — один вибір режиму на
 v18: 🖼 пошук фото для фону у трьох джерелах — Openverse (відкриті ліцензії,
 без ключа), Pixabay (офіційний API, той самий локальний ключ, що для музики)
 і Pinterest; автори та джерела фото пишуться у credits.txt біля скачаних файлів.
+v19: 🎼 генерація музики через Suno AI — опиши трек звичайною мовою
+(«заспокійливий lo-fi про вечірній Київ»), і Suno зробить 2 варіанти,
+а програма скачає готові mp3 у папку MixTracks (для міксу або фону).
+Доступ — через cookie сесії з браузера; зберігається лише на цьому
+комп'ютері (як ключ Pixabay). Офіційного публічного API у Suno нема,
+тому це неформальний клієнт — для власного акаунта з малим обсягом.
+v20: 🚫 усі зовнішні запуски (yt-dlp, ffmpeg, powershell) тепер без спливаючих
+чорних консольних вікон — під час генерації нічого не з'являється поза вікном
+програми (CREATE_NO_WINDOW автоматично для кожного subprocess-виклику).
+v21: 🎨 BT.709 — правильні кольори після YouTube-ре-енкоду (без «вимитих» відтінків);
+⚡ апаратний кодек, якщо є GPU (nvenc/amf/qsv, інакше libx264) — швидший фінальний рендер;
+🎧 дакінг музики — фон сам притихає під голосом і повертається в паузах (sidechaincompress).
 """
 import asyncio
 import base64
@@ -44,6 +112,8 @@ import subprocess
 import sys
 import threading
 import tkinter
+import time
+import uuid
 import webbrowser
 import zipfile
 from collections import Counter
@@ -54,6 +124,26 @@ from urllib.parse import quote_plus
 import customtkinter as ctk
 import edge_tts
 import requests
+# 🚫 v20: усі зовнішні запуски (yt-dlp, ffmpeg, ffprobe, powershell) — БЕЗ
+# спливаючих чорних консольних вікон: підмінюємо subprocess.run/Popen так,
+# щоб кожен виклик автоматично отримував CREATE_NO_WINDOW (на Windows).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_RUN_REAL = subprocess.run
+_POPEN_REAL = subprocess.Popen
+
+
+def _run_no_window(*args, **kwargs):
+    kwargs.setdefault("creationflags", _NO_WINDOW)
+    return _RUN_REAL(*args, **kwargs)
+
+
+def _popen_no_window(*args, **kwargs):
+    kwargs.setdefault("creationflags", _NO_WINDOW)
+    return _POPEN_REAL(*args, **kwargs)
+
+
+subprocess.run = _run_no_window
+subprocess.Popen = _popen_no_window
 
 try:
     from PIL import Image as PILImage  # кадр-прев'ю готового відео (Pillow іде в комплекті з CustomTkinter)
@@ -92,9 +182,9 @@ SIZES = {
 # v14 💬: стилі субтитрів — те саме force_style ffmpeg, що й «Subtitles styles» у CapCut
 SUBTITLE_STYLES = {
     "Класичні": "FontSize=16",
-    "Жовті з тінню (CapCut)": "FontSize=16,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,Outline=1,Shadow=1,Bold=1",
-    "Білі з підкладкою": "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,Outline=2,Shadow=0,Bold=0",
-    "Неонові великі": "FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00ED3A7C,Outline=2,Shadow=1,Bold=1",
+    "Жовті з тінню (CapCut)": "FontSize=16,PrimaryColour=&amp;H0000FFFF,OutlineColour=&amp;H00000000,Outline=1,Shadow=1,Bold=1",
+    "Білі з підкладкою": "FontSize=16,PrimaryColour=&amp;H00FFFFFF,OutlineColour=&amp;H00101010,Outline=2,Shadow=0,Bold=0",
+    "Неонові великі": "FontSize=22,PrimaryColour=&amp;H00FFFFFF,OutlineColour=&amp;H00ED3A7C,Outline=2,Shadow=1,Bold=1",
 }
 # v14 🎨: стилістика картинки — фільтри ffmpeg (як «Filters» у модних редакторах)
 VIDEO_STYLES = {
@@ -140,7 +230,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.18 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.21 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -148,6 +238,13 @@ MIX_CROSSFADE = 7.0   # секунди перехресного затуханн
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
 # v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
 PINS_DIR = os.path.join(TOOLS_DIR, "pins")
+# v19 🎼: Suno AI — неофіційний клієнт (офіційного API у Suno нема);
+# cookie сесії зберігається локально, як ключ Pixabay — у код і GitHub не потрапляє
+SUNO_COOKIE_FILE = os.path.join(TOOLS_DIR, "suno.cookie")
+SUNO_API = "https://studio-api.prod.suno.com"
+SUNO_AUTH = "https://auth.suno.com"
+SUNO_CLERK_V = "5.117.0"
+
 
 
 def ffmpeg_path():
@@ -190,12 +287,12 @@ def ensure_ffmpeg(say):
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length") or 0)
                 done, last_pct = 0, -1
-                for chunk in r.iter_content(1 << 18):
+                for chunk in r.iter_content(1 &lt;&lt; 18):
                     f.write(chunk)
                     done += len(chunk)
                     if total:
                         pct = int(done * 100 / total)
-                        if pct >= last_pct + 20:
+                        if pct &gt;= last_pct + 20:
                             last_pct = pct
                             say("⬇️ ffmpeg: {}%".format(pct))
             with zipfile.ZipFile(zip_path) as z:
@@ -211,7 +308,7 @@ def ensure_ffmpeg(say):
             os.remove(zip_path)
         except OSError:
             pass
-        if os.path.exists(FFMPEG_EXE) and os.path.getsize(FFMPEG_EXE) > 10_000_000:
+        if os.path.exists(FFMPEG_EXE) and os.path.getsize(FFMPEG_EXE) &gt; 10_000_000:
             say("✅ ffmpeg встановлено — можна генерувати!")
             return
     raise RuntimeError("не вдалося встановити ffmpeg — перевір інтернет і спробуй ще раз")
@@ -230,6 +327,36 @@ def run(cmd, cwd=None):
         tail = "\n".join((r.stderr or r.stdout or "?").strip().splitlines()[-20:])
         raise RuntimeError(tail)
     return r
+
+
+_HW_ENC_CACHE = None
+
+
+def best_video_encoder_args():
+    """v21: апаратний h264-кодек (nvenc/amf/qsv) якщо є; інакше libx264."""
+    global _HW_ENC_CACHE
+    if _HW_ENC_CACHE is None:
+        _HW_ENC_CACHE = []
+        try:
+            r = subprocess.run([ffmpeg_path(), "-hide_banner", "-encoders"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="ignore", timeout=20)
+            encs = (r.stdout or "") + (r.stderr or "")
+            for name, args in (
+                ("h264_nvenc", ["-c:v", "h264_nvenc", "-preset", "p4",
+                                "-rc", "vbr", "-cq", "20", "-b:v", "0"]),
+                ("h264_amf", ["-c:v", "h264_amf", "-quality", "balanced",
+                              "-b:v", "5M"]),
+                ("h264_qsv", ["-c:v", "h264_qsv", "-global_quality", "20",
+                              "-preset", "veryfast"]),
+            ):
+                if re.search(r"\b" + name + r"\b", encs):
+                    _HW_ENC_CACHE = args
+                    break
+        except Exception:
+            _HW_ENC_CACHE = []
+    return list(_HW_ENC_CACHE) or ["-c:v", "libx264", "-crf", "20",
+                                   "-preset", "veryfast"]
 
 
 def audio_duration(path):
@@ -251,7 +378,7 @@ def make_srt(sentences, total, workdir):
     lines, start = [], 0.0
     for s, w in zip(sentences, weights):
         end = min(start + w * scale, total)
-        lines.append(f"{len(lines)+1}\n{fmt(start)} --> {fmt(end)}\n{s}\n")
+        lines.append(f"{len(lines)+1}\n{fmt(start)} --&gt; {fmt(end)}\n{s}\n")
         start = end
     with open(os.path.join(workdir, "sub.srt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -275,7 +402,7 @@ def score_hook(text, say):
     Компактна українська адаптація 21 формули з відкритого youtube-скіла
     (чиста логіка, без ключів і без інтернету)."""
     t = " ".join((text or "").split())
-    if len(t) < 3:
+    if len(t) &lt; 3:
         say("🧲 Спершу встав заголовок у поле запиту 🙂")
         return
     score, tips = 50, []
@@ -295,17 +422,17 @@ def score_hook(text, say):
         score += 10
     else:
         tips.append("покажи вигоду глядача: «…без досвіду», «…і заощадиш годину»")
-    if len(t) > 80:
+    if len(t) &gt; 80:
         score -= 12
         tips.append("заголовок довгий — скороти до 40–70 символів, лиш одну обіцянку")
-    elif len(t) >= 15:
+    elif len(t) &gt;= 15:
         score += 10
     else:
         tips.append("занадто коротко — додай, що саме отримає глядач")
     score = max(0, min(100, score))
-    if score >= 80:
+    if score &gt;= 80:
         verdict = "сильно! Такий заголовок кличе"
-    elif score >= 60:
+    elif score &gt;= 60:
         verdict = "непогано, але є куди рости"
     else:
         verdict = "слабко — перероби за порадами нижче"
@@ -363,13 +490,13 @@ def fetch_openverse_videos(query, workdir, need=30.0, max_clips=6):
         # duration у мілісекундах; беремо придатні кліпи
         good = [it for it in res
                 if it.get("url")
-                and 3000 <= (it.get("duration") or 0) <= 300000
-                and (it.get("width") or 0) >= 480]
+                and 3000 &lt;= (it.get("duration") or 0) &lt;= 300000
+                and (it.get("width") or 0) &gt;= 480]
         if not good:
             return None, "Openverse videos: підходящих кліпів немає за запитом"
         paths, total = [], 0.0
         for i, it in enumerate(good):
-            if len(paths) >= max_clips or total >= need:
+            if len(paths) &gt;= max_clips or total &gt;= need:
                 break
             ext = os.path.splitext(it["url"].split("?")[0])[1].lstrip(".") or "mp4"
             p = os.path.join(workdir, "clip{}.{}".format(i, ext))
@@ -378,10 +505,10 @@ def fetch_openverse_videos(query, workdir, need=30.0, max_clips=6):
                                   headers={"User-Agent": "VideoGenerator/1.1"}) as d:
                     d.raise_for_status()
                     size = int(d.headers.get("Content-Length") or 0)
-                    if size > 120 * 1024 * 1024:
+                    if size &gt; 120 * 1024 * 1024:
                         continue  # пропускаємо надто великі файли
                     with open(p, "wb") as out:
-                        for chunk in d.iter_content(1 << 16):
+                        for chunk in d.iter_content(1 &lt;&lt; 16):
                             out.write(chunk)
                 paths.append(p)
                 total += (it.get("duration") or 0) / 1000.0
@@ -424,10 +551,10 @@ def fetch_wikimedia_images(query, workdir, count=3):
         items = sorted(pages.values(), key=lambda p: p.get("index", 999))
         paths = []
         for p in items:
-            if len(paths) >= count:
+            if len(paths) &gt;= count:
                 break
             ii = (p.get("imageinfo") or [{}])[0]
-            if (ii.get("width") or 0) < 640 or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
+            if (ii.get("width") or 0) &lt; 640 or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
                 continue
             u = ii.get("thumburl") or ii.get("url")
             if not u:
@@ -443,7 +570,7 @@ def fetch_wikimedia_images(query, workdir, count=3):
                 continue
             paths.append(path)
             meta = ii.get("extmetadata") or {}
-            author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
+            author = re.sub(r"&lt;[^&gt;]+&gt;", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
             page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
             append_credit(workdir, "🖼️ {} — {} — {} — {}".format(
                 (p.get("title") or "?")[:60],
@@ -469,7 +596,7 @@ def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
                 if not h and m:
                     h = int(m.group(1))
                 cands.append((h, src))
-        ok = [c for c in cands if 0 < c[0] <= 720]
+        ok = [c for c in cands if 0 &lt; c[0] &lt;= 720]
         if ok:
             return max(ok, key=lambda c: c[0])[1]
         if cands:
@@ -493,28 +620,28 @@ def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
         items = sorted(pages.values(), key=lambda p: p.get("index", 999))
         paths = []
         for p in items:
-            if len(paths) >= max_clips:
+            if len(paths) &gt;= max_clips:
                 break
             vi = (p.get("videoinfo") or [{}])[0]
             src = pick_webm(vi)
             if not src:
                 continue
             d = vi.get("duration") or 0
-            if d and not 3 <= d <= 300:
+            if d and not 3 &lt;= d &lt;= 300:
                 continue
             path = os.path.join(workdir, "wclip{}.webm".format(len(paths)))
             try:
                 with requests.get(src, stream=True, timeout=120, headers={"User-Agent": UA_STRING}) as resp:
                     resp.raise_for_status()
                     size = int(resp.headers.get("Content-Length") or 0)
-                    if size > 120 * 1024 * 1024:
+                    if size &gt; 120 * 1024 * 1024:
                         continue
                     with open(path, "wb") as out:
-                        for chunk in resp.iter_content(1 << 16):
+                        for chunk in resp.iter_content(1 &lt;&lt; 16):
                             out.write(chunk)
                 paths.append(path)
                 meta = vi.get("extmetadata") or {}
-                author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
+                author = re.sub(r"&lt;[^&gt;]+&gt;", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
                 page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
                 append_credit(workdir, "🎬 {} — {} — {} — {}".format(
                     (p.get("title") or "?")[:60],
@@ -577,7 +704,7 @@ def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False
     for c in clips:
         try:
             d = audio_duration(c)
-            if d and d >= 1.0:
+            if d and d &gt;= 1.0:
                 usable.append((c, d))
         except Exception:
             pass
@@ -585,13 +712,13 @@ def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False
         raise RuntimeError("жоден кліп не читається ffmpeg")
     per = max(dur / len(usable), 2.0)
     slots, i = [], 0
-    while sum(s[1] for s in slots) < dur - 0.5:
+    while sum(s[1] for s in slots) &lt; dur - 0.5:
         c, d = usable[i % len(usable)]
         slots.append((c, min(per, d)))
         i += 1
     if transition:  # v14: переходи «з'їдають» по 0.5 с на стик — додаємо матеріал
         guard = 0
-        while sum(s[1] for s in slots) - 0.5 * max(len(slots) - 1, 0) < dur - 0.5 and guard < 200:
+        while sum(s[1] for s in slots) - 0.5 * max(len(slots) - 1, 0) &lt; dur - 0.5 and guard &lt; 200:
             c, d = usable[i % len(usable)]
             slots.append((c, min(per, d)))
             i += 1
@@ -606,7 +733,7 @@ def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False
              "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
         segs.append(seg)
         takes.append(take)
-    if transition and len(segs) >= 2:  # v14: спершу пробуємо з переходами
+    if transition and len(segs) &gt;= 2:  # v14: спершу пробуємо з переходами
         try:
             return xfade_join(segs, takes, workdir, TRANSITIONS.get(transition) or transition)
         except Exception:
@@ -655,7 +782,7 @@ def ensure_ytdlp(say):
                       headers={"User-Agent": UA_STRING}) as r, \
          open(YTDLP_EXE + ".part", "wb") as f:
         r.raise_for_status()
-        for chunk in r.iter_content(1 << 16):
+        for chunk in r.iter_content(1 &lt;&lt; 16):
             f.write(chunk)
     os.replace(YTDLP_EXE + ".part", YTDLP_EXE)
     say("✅ yt-dlp встановлено")
@@ -705,7 +832,7 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
     else:
         out_tmpl = os.path.join(outdir, "%(title).100B.%(ext)s")
     cmd = [exe, "--no-playlist", "--no-warnings", "--newline",
-           "-f", "bv*[ext=mp4][height<={0}]+ba[ext=m4a]/b[ext=mp4][height<={0}]/b[height<={0}]".format(height),
+           "-f", "bv*[ext=mp4][height&lt;={0}]+ba[ext=m4a]/b[ext=mp4][height&lt;={0}]/b[height&lt;={0}]".format(height),
            "--merge-output-format", "mp4",
            "--ffmpeg-location", os.path.dirname(os.path.abspath(ffmpeg_path())),
            "-o", out_tmpl, "--no-simulate", "--print", "after_move:filepath", url]
@@ -727,7 +854,7 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
         if "[download]" in line and "%" in line:
             try:
                 pct = float(line.split("%")[0].split()[-1].replace(",", "."))
-                if pct - last_pct >= 25 or pct >= 99.9:
+                if pct - last_pct &gt;= 25 or pct &gt;= 99.9:
                     last_pct = pct
                     say("⬇️ " + str(int(pct)) + "%")
             except ValueError:
@@ -798,7 +925,7 @@ def tts_save(text, voice, out_mp3, say):
     for attempt in (1, 2):
         try:
             asyncio.run(edge_tts.Communicate(text, voice).save(out_mp3))
-            if os.path.exists(out_mp3) and os.path.getsize(out_mp3) > 500:
+            if os.path.exists(out_mp3) and os.path.getsize(out_mp3) &gt; 500:
                 return
         except Exception as e:
             say(f"ℹ️ edge-tts не відповів (спроба {attempt}): {e}")
@@ -821,7 +948,7 @@ def tts_save(text, voice, out_mp3, say):
         )
         subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                        capture_output=True, timeout=300)
-        if os.path.exists(wav) and os.path.getsize(wav) > 2000:
+        if os.path.exists(wav) and os.path.getsize(wav) &gt; 2000:
             run([ff, "-y", "-hide_banner", "-nostdin", "-i", wav,
                  "-c:a", "libmp3lame", "-b:a", "48k", "-ar", "24000", out_mp3])
             os.remove(wav)
@@ -849,7 +976,7 @@ def remove_pauses(mp3_path, out_path, say):
              "silenceremove=stop_periods=-1:stop_duration=0.7:stop_threshold=-38dB",
              "-c:a", "libmp3lame", "-b:a", "48k", "-ar", "24000", out_path])
         after = audio_duration(out_path)
-        if after < 1.5 or after >= before - 0.05:
+        if after &lt; 1.5 or after &gt;= before - 0.05:
             say("ℹ️ Довгих пауз в озвучці не знайшов — лишаю як є")
             return mp3_path, before
         say("✂️ Прибрав паузи: {:.1f} с → {:.1f} с (−{:.1f} с)".format(before, after, before - after))
@@ -900,12 +1027,12 @@ def make_cover(workdir, title, say):
         if font is None:
             raise RuntimeError("системний шрифт не знайшовся")
         # назва: без емодзі (у шрифті їх нема), перенос по словах, максимум 3 рядки
-        clean = "".join(ch for ch in (title or "Моє відео") if ord(ch) <= 65535)
+        clean = "".join(ch for ch in (title or "Моє відео") if ord(ch) &lt;= 65535)
         words = " ".join(clean.split()).split(" ")
         lines, cur = [], ""
         for wd in words:
             cand = (cur + " " + wd).strip()
-            if cur and d.textlength(cand, font=font) > W * 0.84:
+            if cur and d.textlength(cand, font=font) &gt; W * 0.84:
                 lines.append(cur)
                 cur = wd
             else:
@@ -934,19 +1061,19 @@ def make_cover(workdir, title, say):
 
 
 def parse_vtt_text(vtt_path):
-    """📜 v15: чистить WebVTT-субтитри: прибирає часові мітки, теги <…>,
+    """📜 v15: чистить WebVTT-субтитри: прибирає часові мітки, теги &lt;…&gt;,
     службові рядки і ковзні дублікати авто-субтитрів (новий рядок, що починається
     з попереднього, замінює його). Повертає чистий текст в одну лінію."""
     lines = []
     with open(vtt_path, encoding="utf-8", errors="replace") as f:
         for raw in f:
             s = raw.strip()
-            if not s or "-->" in s or s.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+            if not s or "--&gt;" in s or s.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
                 continue
             if re.match(r"^\d+$", s):  # номери блоків
                 continue
-            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
-            s = re.sub(r"&nbsp;", " ", s)
+            s = re.sub(r"&lt;[^&gt;]*&gt;", " ", s)  # теги &lt;c&gt;, &lt;00:00:01.000&gt; тощо
+            s = re.sub(r"&amp;nbsp;", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
             if s:
                 lines.append(s)
@@ -954,7 +1081,7 @@ def parse_vtt_text(vtt_path):
     for s in lines:
         if out:
             if s.startswith(out[-1]) or out[-1].startswith(s):
-                out[-1] = s if len(s) >= len(out[-1]) else out[-1]
+                out[-1] = s if len(s) &gt;= len(out[-1]) else out[-1]
                 continue
             if s == out[-1]:
                 continue
@@ -1009,7 +1136,7 @@ def fetch_transcript(url, say):
                 break
         raise RuntimeError("субтитри не знайшов ({}). Спробуй інше відео — транскрипція є не всюди".format(detail or "відео без субтитрів"))
     text = parse_vtt_text(vtt)
-    if len(text) < 20:
+    if len(text) &lt; 20:
         raise RuntimeError("субтитри порожні або не читаються — спробуй інше відео")
     say("📜 Транскрипція готова: {} символів, мова {}".format(len(text), lang or "невідома"))
     return (title or "YouTube-відео"), text, lang
@@ -1020,38 +1147,38 @@ def summarize_to_seconds(text, seconds, wps=2.4):
     (wps — слів на секунду; edge-tts читає українською ~2.4 слова/с).
     Екстрактивно: лишає найвагоміші речення (частотні слова), перше й останнє — завжди."""
     budget = max(20, int(seconds * wps))
-    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text or "") if len(s.strip()) > 1]
+    sents = [s.strip() for s in re.split(r"(?&lt;=[.!?…])\s+", text or "") if len(s.strip()) &gt; 1]
     # авто-субтитри часто без крапок: надто довгі куски ріжемо по комах і двокрапках
     fine = []
     for s in sents:
-        if len(s.split()) > 40:
-            fine += [p.strip() for p in re.split(r"(?<=[,;:])\s+", s) if len(p.strip()) > 1]
+        if len(s.split()) &gt; 40:
+            fine += [p.strip() for p in re.split(r"(?&lt;=[,;:])\s+", s) if len(p.strip()) &gt; 1]
         else:
             fine.append(s)
     sents = fine or sents
     if not sents:
         return (text or "").strip()
-    if sum(len(s.split()) for s in sents) <= budget:
+    if sum(len(s.split()) for s in sents) &lt;= budget:
         return " ".join(sents)
     words = re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ']+", text or "")
-    freq = Counter(w.lower() for w in words if w.lower() not in UA_STOPWORDS and len(w) > 2)
+    freq = Counter(w.lower() for w in words if w.lower() not in UA_STOPWORDS and len(w) &gt; 2)
 
     def weight(s):
         ws = re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ']+", s.lower())
         if not ws:
             return 0.0
-        sc = sum(freq.get(w, 0) for w in ws if len(w) > 2)
+        sc = sum(freq.get(w, 0) for w in ws if len(w) &gt; 2)
         return sc / ((len(ws) + 2) ** 0.6)
 
     order = sorted(range(len(sents)), key=lambda i: -weight(sents[i]))
     keep, used = set(), 0
     for i in order:
         n = len(sents[i].split())
-        if used + n > budget and keep:
+        if used + n &gt; budget and keep:
             continue
         keep.add(i)
         used += n
-        if len(keep) >= 80:
+        if len(keep) &gt;= 80:
             break
     keep.update({0, len(sents) - 1})  # вступ і фінал — завжди лишаємо
     return " ".join(sents[i] for i in sorted(keep))
@@ -1061,11 +1188,11 @@ def chunk_script_parts(text, max_parts=SCRIPT_MAX_SCENES):
     """🎬 v15: ділить текст на частини сценарію приблизно порівними блоками
     речень (частина = блок, розділювач частин — порожній рядок).
     12 частин × ~50 с = відео на ~10 хвилин."""
-    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text or "") if s.strip()]
+    sents = [s.strip() for s in re.split(r"(?&lt;=[.!?…])\s+", text or "") if s.strip()]
     if not sents:
         return ""
     n = max(1, min(max_parts, len(sents)))
-    if len(sents) < n:
+    if len(sents) &lt; n:
         # немає крапок (типово для авто-субтитрів) — ділимо порівно за словами
         words = " ".join(text.split()).split(" ")
         per_w = max(10, (len(words) + n - 1) // n)
@@ -1104,7 +1231,7 @@ def _face_cascades():
                 continue
             seen.add(p)
             try:
-                if os.path.isfile(p) and os.path.getsize(p) > 1024:
+                if os.path.isfile(p) and os.path.getsize(p) &gt; 1024:
                     cc = cv2.CascadeClassifier(p)
                     if not cc.empty():
                         out.append(cc)
@@ -1128,7 +1255,7 @@ def _frame_has_face(jpg, cascades):
         if img is None:
             return True
         h, w = img.shape[:2]
-        if w > 480:  # зменшуємо — Haar працює швидше і стабільніше
+        if w &gt; 480:  # зменшуємо — Haar працює швидше і стабільніше
             img = cv2.resize(img, (480, max(1, int(h * 480 / w))))
         gray = cv2.equalizeHist(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
         for cc in cascades:
@@ -1153,9 +1280,9 @@ def face_free_windows(clip, cascades, win=6.0, workdir=None):
     jpg = os.path.join(workdir, "_facechk.jpg")
     windows = []
     t = 0.0
-    while t < total - 0.5:
+    while t &lt; total - 0.5:
         dur = min(win, total - t)
-        if dur < 1.0:
+        if dur &lt; 1.0:
             break
         clean = True
         for off in (dur * 0.25, dur * 0.75):
@@ -1190,7 +1317,7 @@ def noface_pool(clips, need, workdir, say=None):
     want = min(24, max(int(need * 1.5), need + 4))
     out = []
     for clip in clips:
-        if len(out) >= want:
+        if len(out) &gt;= want:
             break
         try:
             wins = face_free_windows(clip, cascades, workdir=workdir)
@@ -1203,7 +1330,7 @@ def noface_pool(clips, need, workdir, say=None):
                 say("🚫 {}: скрізь обличчя або чистих вікон не знайшов".format(os.path.basename(clip)))
             continue
         for (start, dur) in wins:
-            if len(out) >= want:
+            if len(out) &gt;= want:
                 break
             frag = os.path.join(workdir, "noface_{:02d}.mp4".format(len(out)))
             try:
@@ -1227,17 +1354,17 @@ def _seo_keywords(text, limit=16):
     без стоп-слів. Чиста логіка, без ключів і сервісів."""
     tokens = [w for w in re.findall(r"[A-Za-zА-Яа-яІіЇїЄєҐґ][A-Za-zА-Яа-яІіЇїЄєҐґ\-']*",
                                     (text or "").lower())
-              if len(w) > 2 and w not in UA_STOPWORDS]
+              if len(w) &gt; 2 and w not in UA_STOPWORDS]
     if not tokens:
         return []
     uni = Counter(tokens)
     bi = Counter()
     for a, b in zip(tokens, tokens[1:]):
-        if len(b) > 2 and b not in UA_STOPWORDS:
+        if len(b) &gt; 2 and b not in UA_STOPWORDS:
             bi[a + " " + b] += 1
-    picked = [g for g, c in bi.most_common() if c >= 2][:8]
+    picked = [g for g, c in bi.most_common() if c &gt;= 2][:8]
     for w, c in uni.most_common():
-        if len(picked) >= limit:
+        if len(picked) &gt;= limit:
             break
         if not any(w == p or w in p.split() for p in picked):
             picked.append(w)
@@ -1250,7 +1377,7 @@ def make_seo_pack(theme, text, workdir, say):
     хештеги і закріплений коментар. Усе оптимізовано під пошук українською."""
     theme = " ".join((theme or "").split()) or "Моє відео"
     kws = _seo_keywords(theme + " " + (text or ""))
-    short_theme = theme if len(theme) <= 55 else theme[:52].rstrip() + "…"
+    short_theme = theme if len(theme) &lt;= 55 else theme[:52].rstrip() + "…"
     titles = [
         "{} — огляд українською".format(short_theme),
         "Що варто знати про {}?".format(short_theme[:40]),
@@ -1265,12 +1392,12 @@ def make_seo_pack(theme, text, workdir, say):
         if extra not in tags:
             tags.append(extra)
     tags_line = ", ".join(tags)
-    if len(tags_line) > 480:  # YouTube: теги до 500 символів
+    if len(tags_line) &gt; 480:  # YouTube: теги до 500 символів
         tags_line = tags_line[:480].rsplit(",", 1)[0]
     hashtags = []
     for k in kws[:5]:
         h = "#" + re.sub(r"[^\w]", "", k.replace(" ", "_"))
-        if len(h) > 1 and h not in hashtags:
+        if len(h) &gt; 1 and h not in hashtags:
             hashtags.append(h)
     for h in ("#огляд", "#українською"):
         if h not in hashtags:
@@ -1335,7 +1462,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     dur = audio_duration(os.path.join(workdir, "voice.mp3"))
     say(f"⏱️ Тривалість: {dur:.1f} с")
 
-    make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
+    make_srt([s.strip() for s in re.split(r"(?&lt;=[.!?])\s+", text) if s.strip()], dur, workdir)
     say("💬 Субтитри готові")
 
     bg = None
@@ -1423,10 +1550,10 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         if not results:
             say("ℹ️ YouTube: " + (err or "нічого") + " — шукаю відкриті кліпи")
         for r in (results or [])[:4]:
-            if len(got) >= 3:
+            if len(got) &gt;= 3:
                 break
             d = int(r.get("dur") or 0)
-            if d and (d < 10 or d > 3600):
+            if d and (d &lt; 10 or d &gt; 3600):
                 say("↩️ Пропускаю (тривалість {} с): {}".format(d, r["title"][:50]))
                 continue
             try:
@@ -1499,7 +1626,9 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     # v14: стиль субтитрів (💬) і стилістика картинки (🎨) — один рядок фільтрів ffmpeg
     stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"
     vfx = VIDEO_STYLES.get(vid_style) or ""
-    vf_base = f"scale={w}:{h}:force_original_aspect_ratio=cover"
+    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=cover,"
+               "scale=out_color_matrix=bt709:out_range=tv,"
+               "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv")
     if vfx:
         vf_base += "," + vfx
 
@@ -1511,15 +1640,19 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         cmd += ["-filter_complex",
                 f"[0:v]{vf_base},"
                 f"subtitles=sub.srt:force_style='{stl}'[v];"
-                f"[1:a][2:a]amix=inputs=2:duration=first:weights='1 0.15'[a]",
+                f"[2:a]volume=0.5[duck];"
+                f"[duck][1:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[duck2];"
+                f"[1:a][duck2]amix=inputs=2:duration=first:weights='1 1'[a]",
                 "-map", "[v]", "-map", "[a]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest", "-vf",
                 f"{vf_base},"
                 f"subtitles=sub.srt:force_style='{stl}'"]
 
-    cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+    enc = best_video_encoder_args()
+    if enc[1] != "libx264":
+        say("⚡ Апаратний кодек: " + enc[1])
+    cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
 
     say("🚀 Рендерю відео…")
     try:
@@ -1529,8 +1662,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         say("📝 Причина: " + str(err)[:400])
         cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
                 "-map", "0:v", "-map", "1:a", "-shortest"]
-        if vfx:
-            cmd2 += ["-vf", vf_base]
+        cmd2 += ["-vf", vf_base]
         cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
@@ -1578,7 +1710,7 @@ def parse_script(text):
         if url and not re.match(r"(?i)^https?://", url):
             url = None
         if not q:
-            words = [w for w in re.sub(r"[^\w\s\-]", " ", body).split() if len(w) > 2]
+            words = [w for w in re.sub(r"[^\w\s\-]", " ", body).split() if len(w) &gt; 2]
             q = " ".join(words[:6]) if words else body[:40]
         scenes.append({"q": q, "text": body, "url": url})
     return scenes
@@ -1592,7 +1724,7 @@ def scene_segment(clip, dur, w, h, workdir, idx, start=0.0):
     seg = os.path.join(workdir, "pseg{:02d}.mp4".format(idx))
     vf = ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
           "fps=25,setsar=1,format=yuv420p").format(int(w), int(h), int(w), int(h))
-    pre = ["-ss", "{:.2f}".format(start)] if start > 0.01 else []
+    pre = ["-ss", "{:.2f}".format(start)] if start &gt; 0.01 else []
     run([ff, "-y", "-hide_banner", "-nostdin", *pre, "-stream_loop", "-1", "-i", clip,
          "-t", "{:.2f}".format(dur + 0.2), "-an", "-vf", vf,
          "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
@@ -1633,7 +1765,7 @@ def make_srt_scenes(scenes, durs, workdir):
         return f"{int(h):02d}:{int(m):02d}:{s:06.3f}".replace(".", ",")
     lines, t0 = [], 0.0
     for sc, d in zip(scenes, durs):
-        sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", sc["text"]) if s.strip()]
+        sents = [s.strip() for s in re.split(r"(?&lt;=[.!?])\s+", sc["text"]) if s.strip()]
         if not sents:
             sents = [sc["text"]]
         weights = [max(len(s), 1) for s in sents]
@@ -1641,7 +1773,7 @@ def make_srt_scenes(scenes, durs, workdir):
         t = t0
         for s, wgt in zip(sents, weights):
             end = min(t + wgt * scale, t0 + d)
-            lines.append(f"{len(lines)+1}\n{fmt(t)} --> {fmt(end)}\n{s}\n")
+            lines.append(f"{len(lines)+1}\n{fmt(t)} --&gt; {fmt(end)}\n{s}\n")
             t = end
         t0 += d
     with open(os.path.join(workdir, "sub.srt"), "w", encoding="utf-8") as f:
@@ -1655,7 +1787,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     scenes = parse_script(script_text)
     if not scenes:
         raise RuntimeError("Сценарій порожній — розділи частини порожнім рядком")
-    if len(scenes) > SCRIPT_MAX_SCENES:
+    if len(scenes) &gt; SCRIPT_MAX_SCENES:
         say("⚠️ Частин {} — беру перші {}".format(len(scenes), SCRIPT_MAX_SCENES))
         scenes = scenes[:SCRIPT_MAX_SCENES]
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
@@ -1719,7 +1851,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                 say("ℹ️ Пошук: " + (err or "нічого") + " — буде градієнт")
             for r in (results or [])[:4]:
                 d = int(r.get("dur") or 0)
-                if d and (d < 10 or d > 3600):
+                if d and (d &lt; 10 or d &gt; 3600):
                     say("↩️ Пропускаю (тривалість {} с): {}".format(d, r["title"][:50]))
                     continue
                 try:
@@ -1773,7 +1905,9 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     vf_in = ["-stream_loop", "-1", "-i", "bg.mp4"]
     stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"  # v14 💬: стиль субтитрів
     vfx = VIDEO_STYLES.get(vid_style) or ""               # v14 🎨: стилістика картинки
-    vf_base = f"scale={w}:{h}:force_original_aspect_ratio=cover"
+    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=cover,"
+               "scale=out_color_matrix=bt709:out_range=tv,"
+               "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv")
     if vfx:
         vf_base += "," + vfx
     cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3"]
@@ -1783,14 +1917,18 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         cmd += ["-filter_complex",
                 f"[0:v]{vf_base},"
                 f"subtitles=sub.srt:force_style='{stl}'[v];"
-                f"[1:a][2:a]amix=inputs=2:duration=first:weights='1 0.15'[a]",
+                f"[2:a]volume=0.5[duck];"
+                f"[duck][1:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[duck2];"
+                f"[1:a][duck2]amix=inputs=2:duration=first:weights='1 1'[a]",
                 "-map", "[v]", "-map", "[a]"]
     else:
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest", "-vf",
                 f"{vf_base},"
                 f"subtitles=sub.srt:force_style='{stl}'"]
-    cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
+    enc = best_video_encoder_args()
+    if enc[1] != "libx264":
+        say("⚡ Апаратний кодек: " + enc[1])
+    cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
     say("🚀 Рендерю відео…")
     try:
         run(cmd, cwd=workdir)
@@ -1799,8 +1937,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         say("📝 Причина: " + str(err)[:400])
         cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
                 "-map", "0:v", "-map", "1:a", "-shortest"]
-        if vfx:
-            cmd2 += ["-vf", vf_base]
+        cmd2 += ["-vf", vf_base]
         cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
@@ -1928,7 +2065,7 @@ def pinterest_search(query, limit, say):
         title = " ".join(((p.get("grid_title") or p.get("title")
                            or p.get("description") or "зображення")[:60]).split())
         out.append({"url": u, "title": title})
-        if len(out) >= int(limit):
+        if len(out) &gt;= int(limit):
             break
     return out, ""
 
@@ -1968,7 +2105,7 @@ def openverse_images_search(query, limit, say):
         out = []
         for it in r.json().get("results", []):
             u = it.get("url")
-            if not u or (it.get("width") or 0) < 800:
+            if not u or (it.get("width") or 0) &lt; 800:
                 continue
             out.append({
                 "url": u,
@@ -2012,6 +2149,164 @@ def pixabay_images_search(key, query, limit, say):
         return [], ("Pixabay: {}".format(e))[:150]
 
 
+def load_suno_cookie():
+    """🎼 v19: cookie сесії Suno живе лише на цьому комп'ютері (у папці інструментів)."""
+    try:
+        with open(SUNO_COOKIE_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def save_suno_cookie(cookie):
+    """Зберігає cookie локально — у код і GitHub він не потрапляє."""
+    os.makedirs(TOOLS_DIR, exist_ok=True)
+    with open(SUNO_COOKIE_FILE, "w", encoding="utf-8") as f:
+        f.write(cookie.strip())
+
+
+def _suno_headers(jwt, cookie):
+    """Заголовки мобільного клієнта Suno (реверс-інжиніринг Android-застосунку)."""
+    did = ""
+    for part in cookie.split(";"):
+        p = part.strip()
+        if p.startswith("ajs_anonymous_id="):
+            did = p.split("=", 1)[1].strip('"')
+            break
+    return {
+        "Authorization": "Bearer " + jwt,
+        "Cookie": cookie,
+        "Affiliate-Id": "undefined",
+        "Device-Id": did or str(uuid.uuid4()),
+        "x-suno-client": "Android prerelease-4nt180t 1.0.42",
+        "X-Requested-With": "com.suno.android",
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+    }
+
+
+def suno_get_jwt(cookie, say):
+    """🔑 v19: cookie сесії → короткий JWT-токен (~50 хв) через auth-сервіс Clerk."""
+    client = ""
+    for part in cookie.split(";"):
+        p = part.strip()
+        if p.startswith("__client="):
+            client = p.split("=", 1)[1]
+            break
+    if not client:
+        raise RuntimeError("у cookie нема __client — скопіюй ЦІЛИЙ заголовок Cookie з браузера")
+    common = {"Authorization": client, "Cookie": cookie,
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}
+    qs = "?__clerk_api_version=2025-11-10&amp;_clerk_js_version=" + SUNO_CLERK_V
+    say("🎼 Запитую сесію Suno…")
+    r = requests.get(SUNO_AUTH + "/v1/client" + qs, headers=common, timeout=30)
+    r.raise_for_status()
+    sid = (r.json().get("response") or {}).get("last_active_session_id")
+    if not sid:
+        raise RuntimeError("у cookie нема активної сесії — увійди на suno.com і скопіюй cookie знову")
+    r = requests.post(SUNO_AUTH + "/v1/client/sessions/" + sid + "/tokens" + qs,
+                      headers=common, timeout=30)
+    r.raise_for_status()
+    jwt = r.json().get("jwt")
+    if not jwt:
+        raise RuntimeError("Suno не дав токен — cookie, схоже, прострочений")
+    return jwt
+
+
+def suno_generate(cookie, description, tags, instrumental, say):
+    """🎼 v19: замовляю 2 треки в Suno за описом/стилем. Повертаю (jwt, список id кліпів)."""
+    jwt = suno_get_jwt(cookie, say)
+    h = _suno_headers(jwt, cookie)
+    try:
+        r = requests.post(SUNO_API + "/api/c/check", headers=h,
+                          json={"ctype": "generation"}, timeout=30)
+        if r.status_code == 200 and (r.json() or {}).get("required"):
+            raise RuntimeError("Suno просить капчу на цьому запиті — згенеруй трек у браузері на suno.com і скачай його там")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass  # перевірка капчі не критична — пробую сам запит
+    desc = description or ""
+    if tags:
+        desc = (desc + " | Стиль: " + tags).strip(" |")
+    if not desc:
+        desc = "calm instrumental background track"
+    body = {"make_instrumental": bool(instrumental), "mv": "chirp-v4",
+            "prompt": "", "generation_type": "TEXT", "continue_at": None,
+            "continue_clip_id": None, "task": None, "token": None,
+            "gpt_description_prompt": desc[:900]}
+    say("🎼 Генерую 2 треки в Suno (1–3 хв)…")
+    r = requests.post(SUNO_API + "/api/generate/v2/", headers=h, json=body, timeout=60)
+    if r.status_code != 200:
+        say("… модель chirp-v4 недоступна, пробую chirp-v3-5")
+        body["mv"] = "chirp-v3-5"
+        r = requests.post(SUNO_API + "/api/generate/v2/", headers=h, json=body, timeout=60)
+    r.raise_for_status()
+    clips = r.json().get("clips") or []
+    ids = [c.get("id") for c in clips if c.get("id")]
+    if not ids:
+        raise RuntimeError("Suno не повернув кліпи (HTTP " + str(r.status_code) + ")")
+    return jwt, ids
+
+
+def suno_wait_and_download(cookie, jwt, ids, say, timeout=300):
+    """⏳ v19: чекаю, поки Suno згенерує треки, і скачую готові mp3 у папку MixTracks."""
+    h = _suno_headers(jwt, cookie)
+    os.makedirs(MIX_TRACKS_DIR, exist_ok=True)
+    deadline = time.time() + timeout
+    done, saved = set(), []
+    while time.time() &lt; deadline and len(done) &lt; len(ids):
+        time.sleep(6)
+        try:
+            r = requests.get(SUNO_API + "/api/feed/v2",
+                             params={"ids": ",".join(ids)}, headers=h, timeout=30)
+            r.raise_for_status()
+            clips = r.json().get("clips") or []
+        except Exception as e:
+            say("… ще перевіряю (" + str(e)[:60] + ")")
+            continue
+        for c in clips:
+            cid = c.get("id")
+            if not cid or cid in done:
+                continue
+            st = (c.get("status") or "").lower()
+            if st == "error":
+                done.add(cid)
+                say("⚠️ Трек не вийшов: " + ((c.get("metadata") or {}).get("error_message") or "помилка Suno"))
+            elif st in ("streaming", "complete") and c.get("audio_url"):
+                done.add(cid)
+                title = re.sub(r"[^\w\-. ]", "_", " ".join((c.get("title") or "suno_track").split()))[:60]
+                if not title:
+                    title = "suno_track"
+                path = os.path.join(MIX_TRACKS_DIR, title + ".mp3")
+                base, n = path[:-4], 1
+                while os.path.exists(path):
+                    path = "{}_{}.mp3".format(base, n)
+                    n += 1
+                try:
+                    rr = requests.get(c["audio_url"], timeout=120)
+                    rr.raise_for_status()
+                    with open(path, "wb") as f:
+                        f.write(rr.content)
+                    saved.append(path)
+                    say("⬇️ Скачав {} у папку MixTracks".format(os.path.basename(path)))
+                except Exception as e:
+                    say("⚠️ Не вдалось скачати трек: " + str(e)[:120])
+    return saved
+
+
+def suno_credits(cookie, say):
+    """💰 v19: скільки кредитів зосталось на акаунті Suno."""
+    jwt = suno_get_jwt(cookie, say)
+    r = requests.get(SUNO_API + "/api/billing/info/",
+                     headers=_suno_headers(jwt, cookie), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def mix_plan(tracks_dir, target_sec, say):
     """📋 v16: які треки з папки йдуть у мікс і в якому порядку (до ~target_sec)."""
     plan = []
@@ -2024,7 +2319,7 @@ def mix_plan(tracks_dir, target_sec, say):
             continue
         p = os.path.join(tracks_dir, name)
         d = audio_duration(p)
-        if d >= 5:
+        if d &gt;= 5:
             plan.append((p, d))
     if not plan:
         return []
@@ -2032,7 +2327,7 @@ def mix_plan(tracks_dir, target_sec, say):
     for p, d in plan:
         out.append((p, d))
         t += max(1.0, d - MIX_CROSSFADE)
-        if t >= target_sec:
+        if t &gt;= target_sec:
             break
     return out
 
@@ -2073,13 +2368,13 @@ def make_mix_seo_pack(title, tracklist, workdir, say):
     """📈 v16: SEO-пак для музичного міксу + треклист із таймкодами (сердце
     описів у ніші chill-міксів)."""
     theme = " ".join((title or "Chill Mix").split()) or "Chill Mix"
-    short = theme if len(theme) <= 55 else theme[:52].rstrip() + "…"
+    short = theme if len(theme) &lt;= 55 else theme[:52].rstrip() + "…"
     tl = []
     for start, name in tracklist:
         mm, ss = divmod(int(start), 60)
         tl.append("{:02d}:{:02d} — {}".format(mm, ss, name.replace("_", " ")))
     titles = [
-        "{} — Chill Mix 2026 | Deep House for Relax & Study".format(short),
+        "{} — Chill Mix 2026 | Deep House for Relax &amp; Study".format(short),
         "{} | 1 Hour Chill Vibes • Deep House Mix".format(short),
         "{} — Night Chill Mix • Music for Stress Relief".format(short),
     ]
@@ -2236,7 +2531,7 @@ class App:
         self.root.configure(fg_color=self.BG)
         self.q = queue.Queue()
         self.workdir = None
-        self.yt_checked = {}   # url -> BooleanVar (обране в пошуку YouTube)
+        self.yt_checked = {}   # url -&gt; BooleanVar (обране в пошуку YouTube)
         self.merge_files = []
         self.music_path = ""
         self._gen_running = False
@@ -2279,7 +2574,7 @@ class App:
                     if not os.path.isfile(f):
                         continue
                     mt = os.path.getmtime(f)
-                    if mt > best_mt:
+                    if mt &gt; best_mt:
                         best, best_mt = f, mt
                 except OSError:
                     pass
@@ -2319,7 +2614,7 @@ class App:
         self._build_set_tab()
         self._show_tab("🎬 Генерація")
         # v13: меню правого кліку («📋 Вставити») для всіх текстових полів
-        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.pins_entry, self.tr_entry, self.px_key, self.px_query):
+        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.pins_entry, self.tr_entry, self.px_key, self.px_query, self.suno_cookie, self.suno_desc, self.suno_tags):
             self.attach_paste_menu(w)
 
     def _show_tab(self, val):
@@ -2378,9 +2673,9 @@ class App:
         self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("&lt;Control-v&gt;", "&lt;Control-V&gt;", "&lt;Shift-Insert&gt;"):
             self.query.bind(seq, self._paste_event)
-        self.query.bind("<Control-Return>", self._ctrl_enter)
+        self.query.bind("&lt;Control-Return&gt;", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
@@ -2455,9 +2750,9 @@ class App:
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("&lt;Control-v&gt;", "&lt;Control-V&gt;", "&lt;Shift-Insert&gt;"):
             self.script.bind(seq, self._paste_script_event)
-        self.script.bind("<Control-Return>", self._ctrl_enter)
+        self.script.bind("&lt;Control-Return&gt;", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -2488,6 +2783,41 @@ class App:
         ctk.CTkLabel(trc, text="", font=self._f(10)).pack(anchor="w", padx=16, pady=(0, 8))
 
         # === РЕЖИМ 🎧 МІКС ===
+        # 🎼 Suno AI — генерація музики за описом (v19)
+        sc = self._card(self.frame_mix, fill="x", pady=(0, 8))
+        ctk.CTkLabel(sc, text="🎼 Suno AI — своя музика за описом",
+                     font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        ctk.CTkLabel(sc, text="Опиши трек — Suno згенерує 2 варіанти, я скачаю готові mp3 у папку MixTracks (для міксу або фону відео).",
+                     font=self._f(10), text_color=self.MUTED, anchor="w",
+                     wraplength=560).pack(fill="x", padx=16, pady=(0, 4))
+        self.suno_cookie = ctk.CTkEntry(sc, placeholder_text="Cookie сесії Suno: suno.com → F12 → Network → заголовок Cookie (рядок з __client=…)",
+                                        height=34, corner_radius=10, fg_color=self.INSET,
+                                        font=self._f(12))
+        self.suno_cookie.pack(fill="x", padx=16, pady=(0, 4))
+        self.suno_cookie.insert(0, load_suno_cookie())
+        self.suno_desc = ctk.CTkEntry(sc, placeholder_text="Опиши трек (напр.: заспокійливий lo-fi про вечірній Київ)",
+                                      height=34, corner_radius=10, fg_color=self.INSET,
+                                      font=self._f(12))
+        self.suno_desc.pack(fill="x", padx=16, pady=(0, 4))
+        self.suno_tags = ctk.CTkEntry(sc, placeholder_text="Стиль, якщо хочеш точніше (lo-fi, deep house, epic…)",
+                                      height=34, corner_radius=10, fg_color=self.INSET,
+                                      font=self._f(12))
+        self.suno_tags.pack(fill="x", padx=16, pady=(0, 4))
+        self.suno_inst = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(sc, text="🎙 Без вокалу (інструментал)", variable=self.suno_inst,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(2, 4))
+        srow = ctk.CTkFrame(sc, fg_color="transparent")
+        srow.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkButton(srow, text="🎼 Згенерувати трек", height=34, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.suno_gen_now).pack(side="left")
+        ctk.CTkButton(srow, text="💰 Кредити Suno", height=34, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.suno_credits_now).pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(sc, text="Cookie зберігається лише на цьому комп'ютері — у код і GitHub не потрапляє.\nУ Suno нема офіційного API: це неформальний клієнт твого власного акаунта — тримай обсяг невеликим.",
+                     font=self._f(10), text_color=self.MUTED, justify="left",
+                     wraplength=560).pack(fill="x", padx=16, pady=(2, 12))
+
         xc = self._card(self.frame_mix, fill="x", pady=(0, 8))
         ctk.CTkLabel(xc, text="🎧 Музика для міксу (Pixabay — безкоштовно, без авторських прав)",
                      font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
@@ -2671,7 +3001,7 @@ class App:
         self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("&lt;Control-v&gt;", "&lt;Control-V&gt;", "&lt;Shift-Insert&gt;"):
             self.yt_many.bind(seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
@@ -2784,7 +3114,7 @@ class App:
     def pins_search_now(self):
         """🖼 v18: пошук фото (Openverse / Pixabay / Pinterest) у фоновому потоці."""
         q = self.pins_entry.get().strip()
-        if len(q) < 2:
+        if len(q) &lt; 2:
             messagebox.showwarning("Стоп", "Напиши, які зображення шукати 🙂 (наприклад: neon city)")
             return
         kind = getattr(self, "bg_kind", "ov")
@@ -2892,13 +3222,13 @@ class App:
                   "5. 🌐 Відкриті кліпи та фото (Openverse → Wikimedia) → градієнт")
         for lv in levels:
             ctk.CTkLabel(hc, text=lv, font=self._f(12), anchor="w").pack(fill="x", padx=16, pady=2)
-        ctk.CTkLabel(hc, text="Жодних API-ключів не потрібно — усе працює з відкритими джерелами.",
+        ctk.CTkLabel(hc, text="Ключ Pixabay і cookie Suno зберігаються лише на цьому комп'ютері — у код і GitHub вони не потрапляють.",
                      font=self._f(11), text_color=self.MUTED, anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v18 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v21 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -2912,7 +3242,7 @@ class App:
     def _set_step(self, i):
         self._step = i
         for j, lbl in enumerate(self.step_lbls):
-            if j < i:
+            if j &lt; i:
                 lbl.configure(text="✓ " + self.STEPS[j], text_color=self.GREEN)
             elif j == i:
                 lbl.configure(text="● " + self.STEPS[j], text_color=self.ACCENT_H)
@@ -3155,7 +3485,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        widget.bind("<Button-3>", _popup, add="+")
+        widget.bind("&lt;Button-3&gt;", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
@@ -3470,7 +3800,7 @@ class App:
         if q.startswith("http"):
             messagebox.showwarning("Стоп", "Це схоже на посилання 🙂 Встав його у поле «🔗 Відео з YouTube» вище, а тут пиши запит для пошуку")
             return
-        if len(q) < 2:
+        if len(q) &lt; 2:
             messagebox.showwarning("Стоп", "Введи, що шукати 🙂")
             return
         self.btn.configure(state="disabled")
@@ -3500,9 +3830,9 @@ class App:
         for r in results:
             mm, ss = divmod(int(r["dur"]), 60)
             views = int(r["views"])
-            if views >= 1000000:
+            if views &gt;= 1000000:
                 vtxt = "{:.1f} млн перегл.".format(views / 1000000.0)
-            elif views >= 1000:
+            elif views &gt;= 1000:
                 vtxt = "{:.1f} тис. перегл.".format(views / 1000.0)
             else:
                 vtxt = str(views) + " перегл."
@@ -3538,10 +3868,10 @@ class App:
         """🎵 v16: пошук музики Pixabay у фоновому потоці."""
         key = self.px_key.get().strip()
         q = self.px_query.get().strip()
-        if len(key) < 10:
+        if len(key) &lt; 10:
             messagebox.showwarning("Стоп", "Встав ключ Pixabay 🙂 (безкоштовний — на сторінці pixabay.com/api/docs після входу в акаунт)")
             return
-        if len(q) < 2:
+        if len(q) &lt; 2:
             messagebox.showwarning("Стоп", "Напиши, яку музику шукати 🙂 (наприклад: deep house)")
             return
         save_pixabay_key(key)
@@ -3606,6 +3936,59 @@ class App:
         finally:
             self.q.put(None)
 
+    def suno_gen_now(self):
+        """🎼 v19: генерація треку Suno у фоновому потоці."""
+        cookie = self.suno_cookie.get().strip()
+        desc = self.suno_desc.get().strip()
+        tags = self.suno_tags.get().strip()
+        if len(cookie) &lt; 40 or "__client" not in cookie:
+            messagebox.showwarning("Стоп", "Встав cookie сесії Suno 🙂\n\nsuno.com → F12 → Network → будь-який запит → заголовок Cookie — скопіюй ЦІЛИЙ рядок (з __client=…)")
+            return
+        if not desc and not tags:
+            messagebox.showwarning("Стоп", "Напиши опис треку або стиль 🙂 (наприклад: заспокійливий lo-fi, вечірнє місто)")
+            return
+        save_suno_cookie(cookie)
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        self.say("🎼 Suno: готую запит…")
+        threading.Thread(target=self._suno_gen_thread,
+                         args=(cookie, desc, tags, self.suno_inst.get()), daemon=True).start()
+
+    def _suno_gen_thread(self, cookie, desc, tags, instrumental):
+        try:
+            jwt, ids = suno_generate(cookie, desc, tags, instrumental, self.say)
+            saved = suno_wait_and_download(cookie, jwt, ids, self.say, timeout=300)
+            if saved:
+                self.say("✅ Готово — {} трек(и) Suno у папці MixTracks, можна міксувати".format(len(saved)))
+                self.q.put(("mix_tracks", 0))
+            else:
+                self.say("⚠️ Suno не дав готових треків за 5 хв — спробуй ще раз або згенеруй на suno.com")
+        except Exception as e:
+            self.say("⚠️ Suno: " + str(e)[:200])
+        finally:
+            self.q.put(None)
+
+    def suno_credits_now(self):
+        """💰 v19: перевірка кредитів акаунта Suno."""
+        cookie = self.suno_cookie.get().strip()
+        if len(cookie) &lt; 40 or "__client" not in cookie:
+            messagebox.showwarning("Стоп", "Встав cookie сесії Suno 🙂 (suno.com → F12 → Network → заголовок Cookie)")
+            return
+        save_suno_cookie(cookie)
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._suno_credits_thread, args=(cookie,), daemon=True).start()
+
+    def _suno_credits_thread(self, cookie):
+        try:
+            d = suno_credits(cookie, self.say)
+            self.say("💰 Кредити Suno: зосталось {}, ліміт на місяць {}, використано {}".format(
+                d.get("total_credits_left"), d.get("monthly_limit"), d.get("monthly_usage")))
+        except Exception as e:
+            self.say("⚠️ Suno: " + str(e)[:200])
+        finally:
+            self.q.put(None)
+
     def pipeline_mix(self, title):
         """🎧 v16: пайплайн міксу — окремий від класичного, щоб не плутались."""
         ok = False
@@ -3645,7 +4028,7 @@ class App:
         if ps:
             self.merge_files = list(ps)
             names = ", ".join(os.path.basename(p) for p in self.merge_files[:3])
-            if len(self.merge_files) > 3:
+            if len(self.merge_files) &gt; 3:
                 names += " +" + str(len(self.merge_files) - 3) + " ще"
             self.merge_lbl.configure(text="Обрано: " + names, text_color="#FFFFFF")
             self.say("🎞 Обрано відео: " + str(len(self.merge_files)))
@@ -3737,7 +4120,7 @@ class App:
     def _advance_step(self, msg):
         """Живі кроки пайплайну: повідомлення журналу просувають крок за ключовими словами."""
         nxt = self._step + 1
-        if nxt >= len(self.STEPS):
+        if nxt &gt;= len(self.STEPS):
             return
         for k in self.STEP_KEYS[nxt]:
             if k in msg:
@@ -3757,11 +4140,11 @@ class App:
                 return
         elif mode == "script":  # 📜 сценарій
             script = self.script.get("1.0", "end").strip()
-            if len(script) < 10:
+            if len(script) &lt; 10:
                 messagebox.showwarning("Стоп", "Напиши сценарій у режимі «📜 Сценарій» 🙂 Частини — через порожній рядок.")
                 return
         else:  # 🎬 відео
-            if len(query) < 3:
+            if len(query) &lt; 3:
                 messagebox.showwarning("Стоп", "Спершу напиши тему відео 🙂")
                 return
         if not hasattr(self, "music_path"):
@@ -3830,12 +4213,12 @@ class App:
                 # 📚 v14: батч — кожен рядок поля «Тема» стає окремим відео
                 themes = [query]
                 if getattr(self, "batch", None) and self.batch.get():
-                    themes = [t.strip() for t in query.splitlines() if len(t.strip()) >= 3] or [query]
-                if len(themes) > 1:
+                    themes = [t.strip() for t in query.splitlines() if len(t.strip()) &gt;= 3] or [query]
+                if len(themes) &gt; 1:
                     self.say("📚 Батч: {} тем — генерую по черзі".format(len(themes)))
                 done = 0
                 for idx, th in enumerate(themes, 1):
-                    if len(themes) > 1:
+                    if len(themes) &gt; 1:
                         self.say("▶️ Батч {}/{}: «{}»".format(idx, len(themes), th[:60]))
                         self.q.put(("batch_reset", None))
                     try:
@@ -3854,7 +4237,7 @@ class App:
                                 self.q.put(("poster", f))
                     except Exception as e:
                         self.say("❌ Тема «{}» не вийшла: {}".format(th[:40], str(e)[:150]))
-                ok = done > 0
+                ok = done &gt; 0
             if ok and self.workdir and os.path.isdir(self.workdir):
                 try:
                     os.startfile(self.workdir)  # Windows: одразу показати результат
@@ -3883,3 +4266,29 @@ if __name__ == "__main__":
             _log("SMOKE FAILED: " + str(e))
         sys.exit(0 if ok else 1)
     App().root.mainloop()
+</pre>
+<div style="max-width:980px">
+  <button class="btn" onclick="copyCode()">📋 Копіювати весь код</button>
+  <span id="copied2" class="ok"></span>
+</div>
+<script>
+function copyCode() {
+  var txt = document.getElementById("c1").textContent;
+  if (txt.slice(-1) !== "\n") { txt = txt + "\n"; }
+  navigator.clipboard.writeText(txt).then(function () {
+    document.getElementById("copied").textContent = " ✓ Скопійовано! Іди у GitHub-редактор";
+    document.getElementById("copied2").textContent = " ✓ Скопійовано!";
+  }).catch(function () {
+    var ta = document.createElement("textarea");
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    document.getElementById("copied").textContent = " ✓ Скопійовано! Іди у GitHub-редактор";
+    document.getElementById("copied2").textContent = " ✓ Скопійовано!";
+  });
+}
+</script>
+</body>
+</html>
