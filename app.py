@@ -49,7 +49,11 @@ v22: 📦 кеш-банк сток-кліпів (патерн CDAF) — кліп
 повторні генерації тієї ж теми майже миттєві й не витрачають трафік;
 🎚 гучність фінального міксу вирівнюється до -14 LUFS (EBU R128, стандарт YouTube) —
 у всіх режимах, включно з фолбеком без субтитрів.
+v23: 🥁 beat-sync фону — музика аналізується чистим Python (огибаюча енергії +
+автокореляція онсетів → BPM + фаза) і зміни кадрів потрапляють у такт:
+ефект «Director Mode» з AI-студій; ритм невиразний — монтується як раніше.
 """
+import array
 import asyncio
 import base64
 import hashlib
@@ -180,7 +184,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.22 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.23 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -731,6 +735,70 @@ def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
         return None, "Wikimedia videos: {}".format(e)
 
 
+def beat_grid(music_path, need_sec):
+    """🥁 v23: битова сітка музики (патерн Director Mode з AI-студій):
+    PCM 8 кГц моно → енергетична огибаюча (кадр 32 мс) → автокореляція
+    онсетів → період (57–200 BPM, нормування у 70–170) + фаза кращого біта.
+    Повертає (bpm, [t0, t1, …]) або None, якщо ритм невиразний чи помилка."""
+    try:
+        r = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin",
+                            "-i", music_path, "-f", "s16le", "-ac", "1",
+                            "-ar", "8000", "-"], capture_output=True, timeout=180)
+        if r.returncode != 0 or len(r.stdout) < 32000:
+            return None
+        arr = array.array("h")
+        arr.frombytes(r.stdout[:len(r.stdout) // 2 * 2])
+        hop, env = 256, []
+        for pos in range(0, len(arr) - hop, hop):
+            seg = arr[pos:pos + hop]
+            env.append((sum(x * x for x in seg) / hop) ** 0.5)
+        if len(env) < 100:
+            return None
+        flux = [0.0]
+        for i in range(1, len(env)):
+            flux.append(max(0.0, env[i] - env[i - 1]))
+        peak = max(flux) or 1.0
+        flux = [f / peak for f in flux]
+        fps = 8000.0 / hop
+        lo, hi = max(2, int(0.30 * fps)), int(1.05 * fps)  # періоди 0.30–1.05 с
+        scores = {}
+        for lag in range(lo, hi + 1):
+            s = 0.0
+            for i in range(len(flux) - lag):
+                s += flux[i] * flux[i + lag]
+            scores[lag] = s / max(1, len(flux) - lag)
+        best_lag = max(scores, key=scores.get)
+        mean_s = sum(scores.values()) / len(scores)
+        if scores[best_lag] < 2.5 * max(mean_s, 1e-9):
+            return None  # ритм невиразний (ембієнт/шум) — розрізати по битах нечесно
+        period = best_lag / fps
+        bpm = 60.0 / period
+        if bpm < 70.0:
+            period /= 2.0
+            bpm *= 2.0
+        elif bpm > 170.0:
+            period *= 2.0
+            bpm /= 2.0
+        step = max(1, int(round(period * fps)))
+        best_off, best_sc = 0, -1.0
+        for off in range(min(step, len(flux))):
+            sc = 0.0
+            for i in range(off, len(flux), step):
+                sc += flux[i]
+            if sc > best_sc:
+                best_off, best_sc = off, sc
+        beats, t = [], best_off / fps
+        while t < need_sec + 10.0:
+            if t >= 0.0:
+                beats.append(t)
+            t += period
+        if len(beats) < 4:
+            return None
+        return (bpm, beats)
+    except Exception:
+        return None
+
+
 def xfade_join(segs, takes, workdir, trans, cross=0.5):
     """🎞 v14: склеює нормалізовані фрагменти з плавним переходом (xfade ffmpeg) —
     той самий «Наплив/Затемнення», що й у CapCut. Фрагменти вже однакові за
@@ -758,7 +826,7 @@ def xfade_join(segs, takes, workdir, trans, cross=0.5):
     return bg
 
 
-def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False, say=None):
+def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False, say=None, beats=None):
     """Справжній відеоряд: кожен кліп обрізається до свого слота, нормалізується
     і склеюється. Якщо матеріалу менше за озвучку — кліпи йдуть по колу.
     v14: transition ≠ «» — між фрагментами плавний перехід (xfade).
@@ -797,6 +865,29 @@ def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False
             slots.append((c, min(per, d)))
             i += 1
             guard += 1
+    if beats and len(slots) > 1:  # 🥁 v23: межі слотів — на найближчі бити музики
+        try:
+            dmap = {c: d for c, d in usable}
+            bounds, t = [], 0.0
+            for _, take in slots:
+                t += take
+                bounds.append(t)
+            nb = []
+            for b in bounds[:-1]:
+                bb = min(beats, key=lambda x: abs(x - b))
+                nb.append(bb if abs(bb - b) < 0.6 else b)
+            nb.append(bounds[-1])
+            slots2, prev = [], 0.0
+            for j, b in enumerate(nb):
+                take = max(b - prev, 0.8)
+                take = min(take, dmap.get(slots[j][0], take))
+                slots2.append((slots[j][0], take))
+                prev = b
+            slots = slots2
+            if say:
+                say("🥁 Зміни кадрів підігнано під бити музики")
+        except Exception:
+            pass  # beat-sync не вийшов — слоти лишаються рівними, це не помилка
     segs, takes = [], []
     for j, (c, take) in enumerate(slots):
         seg = os.path.join(workdir, "vseg{}.mp4".format(j))
@@ -1535,6 +1626,16 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
 
     dur = audio_duration(os.path.join(workdir, "voice.mp3"))
     say(f"⏱️ Тривалість: {dur:.1f} с")
+    beats = None  # 🥁 v23: битова сітка музики — фон розріжується у такт
+    mpath = (music or "").strip()
+    if mpath and os.path.isfile(mpath):
+        say("🥁 Аналізую ритм музики (beat-sync фону)…")
+        bgrid = beat_grid(mpath, dur)
+        if bgrid:
+            beats = bgrid[1]
+            say("🥁 Ритм: ~{:.0f} BPM — зміни кадрів підішлю під бити".format(bgrid[0]))
+        else:
+            say("ℹ️ Ритм музики невиразний — монтую фон як звичайно")
 
     make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
     say("💬 Субтитри готові")
@@ -1575,7 +1676,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             try:
                 say("✂️ Нарізаю фрагменти з {} відео для компіляції…".format(len(got)))
                 bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition,
-                                         no_faces=no_faces, say=say)
+                                         no_faces=no_faces, say=say, beats=beats)
                 say("🎬 Фон: компіляція фрагментів твоїх відео з YouTube")
             except Exception as e:
                 say("⚠️ Фрагменти не зібралися ({}), шукаю фон далі…".format(str(e)[:200]))
@@ -1603,7 +1704,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         try:
             say("🎞 Монтую фон з твоїх {} відео…".format(len(bg_files)))
             bg = build_bg_from_clips(list(bg_files), dur, w, h, workdir, transition=transition,
-                                     no_faces=no_faces, say=say)
+                                     no_faces=no_faces, say=say, beats=beats)
             say("🎬 Фон: твоя компіляція з кількох відео")
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
@@ -1643,7 +1744,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             try:
                 say("🎞 Монтую фон з {} відео з YouTube по темі…".format(len(got)))
                 bg = build_bg_from_clips(got, dur, w, h, workdir, transition=transition,
-                                        no_faces=no_faces, say=say)
+                                        no_faces=no_faces, say=say, beats=beats)
                 say("🎬 Фон: відео, знайдені на YouTube по словах теми")
             except Exception as e:
                 say("⚠️ YouTube-фон не зібрався ({}), шукаю відкриті кліпи…".format(str(e)[:200]))
@@ -1664,7 +1765,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             say("🎞️ Завантажено кліпів: " + str(len(clips)) + " (" + source_name + ", CC-ліцензії)")
             try:
                 bg = build_bg_from_clips(clips, dur, w, h, workdir,
-                                         no_faces=no_faces, say=say)
+                                         no_faces=no_faces, say=say, beats=beats)
                 say("🎬 Відеоряд змонтовано зі справжніх кліпів")
             except Exception as e:
                 say("⚠️ Кліпи не зібралися ({}), пробую далі…".format(str(e)[:200]))
@@ -3304,7 +3405,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v22 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v23 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
