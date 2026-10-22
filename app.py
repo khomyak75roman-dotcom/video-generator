@@ -292,7 +292,9 @@ _HW_ENC_CACHE = None
 
 
 def best_video_encoder_args():
-    """v21: апаратний h264-кодек (nvenc/amf/qsv) якщо є; інакше libx264."""
+    """v21: апаратний h264-кодек (nvenc/amf/qsv) якщо є; інакше libx264.
+    v23: обирається лише кодек, що реально працює на цьому залізі
+    (пробне кодування 1 кадру; у списку -encoders кодек є навіть без GPU)."""
     global _HW_ENC_CACHE
     if _HW_ENC_CACHE is None:
         _HW_ENC_CACHE = []
@@ -309,7 +311,17 @@ def best_video_encoder_args():
                 ("h264_qsv", ["-c:v", "h264_qsv", "-global_quality", "20",
                               "-preset", "veryfast"]),
             ):
-                if re.search(r"\b" + name + r"\b", encs):
+                if not re.search(r"\b" + name + r"\b", encs):
+                    continue
+                try:  # 🔧 v23: GPU нема — кодек не ініціалізується → libx264
+                    pr = subprocess.run([ffmpeg_path(), "-hide_banner", "-nostdin",
+                                         "-f", "lavfi", "-i", "color=c=black:s=160x120",
+                                         "-frames:v", "1", "-c:v", name,
+                                         "-f", "null", "-"],
+                                        capture_output=True, timeout=30)
+                except Exception:
+                    pr = None
+                if pr is not None and pr.returncode == 0:
                     _HW_ENC_CACHE = args
                     break
         except Exception:
@@ -1801,7 +1813,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     # v14: стиль субтитрів (💬) і стилістика картинки (🎨) — один рядок фільтрів ffmpeg
     stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"
     vfx = VIDEO_STYLES.get(vid_style) or ""
-    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=cover,"
+    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
                "scale=out_color_matrix=bt709:out_range=tv,"
                "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv")
     if vfx:
@@ -2081,7 +2093,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     vf_in = ["-stream_loop", "-1", "-i", "bg.mp4"]
     stl = SUBTITLE_STYLES.get(sub_style) or "FontSize=16"  # v14 💬: стиль субтитрів
     vfx = VIDEO_STYLES.get(vid_style) or ""               # v14 🎨: стилістика картинки
-    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=cover,"
+    vf_base = (f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
                "scale=out_color_matrix=bt709:out_range=tv,"
                "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv")
     if vfx:
