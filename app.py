@@ -52,6 +52,10 @@ v22: 📦 кеш-банк сток-кліпів (патерн CDAF) — кліп
 v23: 🥁 beat-sync фону — музика аналізується чистим Python (огибаюча енергії +
 автокореляція онсетів → BPM + фаза) і зміни кадрів потрапляють у такт:
 ефект «Director Mode» з AI-студій; ритм невиразний — монтується як раніше.
+v24: 🔍 аудіо-лікар — готове відео перевіряється на тишу, кліпінг і довгі
+паузи (silencedetect + volumedetect) і попереджає у журнал, не ламаючи генерацію;
+🧪 передпольотні перевірки — перед стартом звіряється місце на диску, доступність
+музики (запис без музики краще за падіння на 90-й хвилині) та наявність OpenCV.
 """
 import array
 import asyncio
@@ -184,7 +188,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.23 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.24 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -337,6 +341,46 @@ def audio_duration(path):
         raise RuntimeError("Не вдалося визначити тривалість озвучки")
     h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
     return h * 3600 + mi * 60 + s
+
+
+def audio_health_check(workdir, say):
+    """🔍 v24: аудіо-лікар — швидка перевірка звуку готового final.mp4
+    (silencedetect + volumedetect) і попередження у журнал: повна тиша,
+    кліпінг, довгі паузи з таймкодами. Ніколи не ламає генерацію."""
+    try:
+        final = os.path.join(workdir, "final.mp4")
+        if not os.path.isfile(final):
+            return
+        pr = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", final,
+                             "-af", "silencedetect=noise=-45dB:d=2,volumedetect",
+                             "-f", "null", "-"], capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=180)
+        log = pr.stderr or ""
+        mean = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", log)
+        peak = re.search(r"max_volume:\s*(-?[\d.]+)\s*dB", log)
+        if mean is None:
+            return  # звукової доріжки чи звіту нема — не лякаємо марно
+        if float(mean.group(1)) < -55.0:
+            say("🔇 АУДІО-ТРИВОГА: у фінальному відео повна тиша — озвучка, "
+                "мабуть, не вбудувалася. Перевір final.mp4 і спробуй ще раз.")
+        else:
+            say("🔊 Гучність фіналу: середня {} dB, пік {} dB.".format(
+                mean.group(1), peak.group(1) if peak else "?"))
+            if peak and float(peak.group(1)) > -0.2:
+                say("⚠️ Кліпінг: пік {} dB — звук підрізається в дах, "
+                    "пониж музику чи голос.".format(peak.group(1)))
+        pauses = [(float(t), float(d)) for t, d in re.findall(
+            r"silence_start: (-?[\d.]+)[\s\S]*?silence_duration: ([\d.]+)", log)
+            if float(d) >= 3.0]
+        if pauses:
+            stamps = ", ".join("{}:{:02d}".format(int(t // 60), int(t % 60))
+                               for t, _ in pauses[:3])
+            tail = " …" if len(pauses) > 3 else ""
+            say("⏸ Довгі паузи (≥3с) у фіналі: {} ({} шт.){}".format(stamps, len(pauses), tail))
+        elif float(mean.group(1)) >= -55.0:
+            say("✅ Аудіо-лікар: порядок.")
+    except Exception:
+        pass  # 🔍 v24: діагностика — лише попередження, ніколи не ламає генерацію
 
 
 def make_srt(sentences, total, workdir):
@@ -1865,6 +1909,10 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             make_seo_pack(query, text, workdir, say)
         except Exception as e:
             say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
+    try:  # 🔍 v24: аудіо-лікар — тиша/кліпінг/довгі паузи у готовому відео
+        audio_health_check(workdir, say)
+    except Exception:
+        pass
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -2143,6 +2191,10 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                           " ".join(sc["text"] for sc in scenes), workdir, say)
         except Exception as e:
             say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
+    try:  # 🔍 v24: аудіо-лікар — тиша/кліпінг/довгі паузи у готовому відео
+        audio_health_check(workdir, say)
+    except Exception:
+        pass
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -2666,6 +2718,10 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
             make_mix_seo_pack(title or "Night Chill Mix", tracklist, workdir, say)
         except Exception as e:
             say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
+    try:  # 🔍 v24: аудіо-лікар — тиша/кліпінг/довгі паузи у готовому відео
+        audio_health_check(workdir, say)
+    except Exception:
+        pass
     say("✅ ГОТОВО: {}".format(os.path.join(workdir, "final.mp4")))
     return workdir
 
@@ -3417,7 +3473,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v23 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v24 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4182,6 +4238,7 @@ class App:
         """🎧 v16: пайплайн міксу — окремий від класичного, щоб не плутались."""
         ok = False
         try:
+            self.preflight_notes()  # 🧪 v24: місце на диску / музика / cv2 — до старту
             minutes = 60
             try:
                 minutes = max(10, min(180, int(float(self.mix_minutes.get()))))
@@ -4345,9 +4402,40 @@ class App:
         self.status_lbl.configure(text="● Генерується…", text_color="#F59E0B")
         target = self.pipeline_mix if mode == "mix" else self.pipeline
         threading.Thread(target=target, args=(query,), daemon=True).start()
+    def preflight_notes(self):
+        """🧪 v24: передпольотні перевірки — попереджуємо ДО старту генерації,
+        щоб не падати на 90-й хвилині. Тільки повідомлення у журнал."""
+        try:
+            free = shutil.disk_usage(os.path.expanduser("~")).free
+            if free < 2 * 1024 ** 3:
+                self.say("⚠️ Вільно лише {:.1f} ГБ — на рендер треба ~2 ГБ+, "
+                         "може не влізти.".format(free / 1024 ** 3))
+        except Exception:
+            pass
+        try:
+            m = (getattr(self, "music_path", "") or "").strip()
+            if m and not os.path.isfile(m):
+                self.say("⚠️ Файл музики зник: «{}» — згенерую без музики.".format(
+                    os.path.basename(m)[:60]))
+                self.music_path = ""
+            elif m:
+                try:
+                    audio_duration(m)
+                except Exception:
+                    self.say("⚠️ Файл музики не читається: «{}» — згенерую без музики.".format(
+                        os.path.basename(m)[:60]))
+                    self.music_path = ""
+        except Exception:
+            pass
+        try:
+            if getattr(self, "no_faces", None) is not None and self.no_faces.get() and cv2 is None:
+                self.say("ℹ️ OpenCV не встановлено — фільтр «без обличчя» буде пропущений.")
+        except Exception:
+            pass
     def pipeline(self, query):
         ok = False
         try:
+            self.preflight_notes()  # 🧪 v24: місце на диску / музика / cv2 — до старту
             many = []
             if getattr(self, "yt_many_bg", None) and self.yt_many_bg.get():
                 many = self.parse_yt_links(self.yt_many.get("1.0", "end"))
@@ -4455,3 +4543,4 @@ if __name__ == "__main__":
             _log("SMOKE FAILED: " + str(e))
         sys.exit(0 if ok else 1)
     App().root.mainloop()
+
