@@ -56,6 +56,12 @@ v24: 🔍 аудіо-лікар — готове відео перевіряєт
 паузи (silencedetect + volumedetect) і попереджає у журнал, не ламаючи генерацію;
 🧪 передпольотні перевірки — перед стартом звіряється місце на диску, доступність
 музики (запис без музики краще за падіння на 90-й хвилині) та наявність OpenCV.
+v25: 🎤 караоке-субтитри — під час озвучки edge-tts віддає точні часові
+мітки кожного слова (WordBoundary), і субтитри будуються за РЕАЛЬНИМ
+голосом, а не рівномірною апроксимацією: короткі фрази з'являються точно
+коли звучать (як auto-captions у CapCut/TikTok). Новий стиль субтитрів
+«Караоке» (жовті з рамкою). Якщо хмара не дала міток або ввімкнено
+прибирання пауз — тихо повертаємось до рівномірних субтитрів (fail-open).
 """
 import array
 import asyncio
@@ -143,6 +149,7 @@ SUBTITLE_STYLES = {
     "Жовті з тінню (CapCut)": "FontSize=16,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,Outline=1,Shadow=1,Bold=1",
     "Білі з підкладкою": "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101010,Outline=2,Shadow=0,Bold=0",
     "Неонові великі": "FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00ED3A7C,Outline=2,Shadow=1,Bold=1",
+    "Караоке 🎤": "FontSize=15,PrimaryColour=&H0000E5FF,OutlineColour=&H00000000,Outline=2,Shadow=1,Bold=1,MarginV=36",
 }
 # v14 🎨: стилістика картинки — фільтри ffmpeg (як «Filters» у модних редакторах)
 VIDEO_STYLES = {
@@ -1184,6 +1191,70 @@ def tts_save(text, voice, out_mp3, say):
     run([ff, "-y", "-hide_banner", "-nostdin",
          "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
          "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
+def tts_save_karaoke(text, voice, out_mp3, say):
+    """🎤 v25: караоке-субтитри — edge-tts одночасно з озвучкою віддає
+    часові мітки кожного слова (WordBoundary: offset/duration у 100-нс).
+    Повертає список (слово, старт_с, кінець_с) або None, якщо хмара не дала
+    метрик — тоді озвучку робить звичайний tts_save. Fail-open:
+    караоке — надбудова, а не залежність; без нього все працює як раніше."""
+    words, audio = [], bytearray()
+    try:
+        async def _collect():
+            cm = edge_tts.Communicate(text, voice)
+            async for chunk in cm.stream():
+                if chunk["type"] == "audio":
+                    audio.extend(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    words.append((chunk.get("text", ""),
+                                  chunk.get("offset", 0) / 1e7,
+                                  (chunk.get("offset", 0) + chunk.get("duration", 0)) / 1e7))
+        asyncio.run(_collect())
+    except Exception as e:
+        say("ℹ️ Караоке-мітки не зібрав ({}): озвучка зі звичайними планами".format(str(e)[:100]))
+        return None
+    if not words or len(audio) < 500:
+        return None
+    try:
+        with open(out_mp3, "wb") as f:
+            f.write(bytes(audio))
+        if os.path.getsize(out_mp3) < 500:
+            return None
+    except Exception:
+        return None
+    return words
+
+
+def make_karaoke_srt(words, total, workdir, max_chars=26, max_gap=0.5, max_sec=3.0):
+    """🎤 v25: SRT з РЕАЛЬНИХ міток слів (WordBoundary), а не з рівномірної
+    апроксимації. Слова групуються у короткі фрази: довжина ≤ max_chars,
+    пауза > max_gap або вікно > max_sec — нова фраза (стиль auto-captions:
+    текст з'являється точно під голос). Повертає кількість фраз."""
+    def fmt(t):
+        h, rem = divmod(t, 3600); m, s = divmod(rem, 60)
+        return "{:02d}:{:02d}:{:06.3f}".format(int(h), int(m), s).replace(".", ",")
+    lines, cur, start, end = [], [], 0.0, 0.0
+
+    def flush():
+        if cur:
+            lines.append("{}\n{} --> {}\n{}\n".format(
+                len(lines) + 1, fmt(start), fmt(min(end, total)), " ".join(cur)))
+
+    for w, s0, e0 in words:
+        if cur and (len(" ".join(cur)) + len(w) + 1 > max_chars
+                    or s0 - end > max_gap
+                    or s0 - start > max_sec):
+            flush()
+            cur = []
+        if not cur:
+            start = s0
+        cur.append(w)
+        end = max(e0, s0)
+    flush()
+    with open(os.path.join(workdir, "sub.srt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    return len(lines)
+
+
 
 
 def remove_pauses(mp3_path, out_path, say):
@@ -1293,8 +1364,8 @@ def parse_vtt_text(vtt_path):
                 continue
             if re.match(r"^\d+$", s):  # номери блоків
                 continue
-            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
-            s = re.sub(r"&nbsp;", " ", s)
+            s = re.sub(r"<[^>]*>", " ", s)  # теги , <00:00:01.000> тощо
+            s = re.sub(r" ", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
             if s:
                 lines.append(s)
@@ -1668,7 +1739,11 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     text = narration_for(query)
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
-    tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say)
+    karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say) if not trim_sil else None
+    if karaoke_words is None:
+        tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say)
+    else:
+        say("🎤 Караоке-мітки зібрано: {} слів з точним таймінгом".format(len(karaoke_words)))
     if trim_sil:  # ✂️ v14: прибираємо довгі паузи з озвучки
         trim_out = os.path.join(workdir, "voice_trim.mp3")
         p, _ = remove_pauses(os.path.join(workdir, "voice.mp3"), trim_out, say)
@@ -1693,7 +1768,11 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         else:
             say("ℹ️ Ритм музики невиразний — монтую фон як звичайно")
 
-    make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
+    if karaoke_words:
+        n = make_karaoke_srt(karaoke_words, dur, workdir)
+        say("🎤 Караоке-субтитри: {} фраз синхронно з голосом".format(n))
+    else:
+        make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
     say("💬 Субтитри готові")
 
     bg = None
@@ -2040,10 +2119,14 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
 
     # 1) Озвучка кожної частини окремо
     say("🎙️ Озвучую частини голосом {}…".format(voice_label))
+    part_words = []  # 🎤 v25: мітки слів кожної частини (None — якщо караоке недоступне)
     mp3s, durs = [], []
     for i, sc in enumerate(scenes):
         m = os.path.join(workdir, "voice_{:02d}.mp3".format(i))
-        tts_save(sc["text"], voice, m, say)
+        pw = tts_save_karaoke(sc["text"], voice, m, say) if not trim_sil else None
+        if pw is None:
+            tts_save(sc["text"], voice, m, say)
+        part_words.append(pw)
         if trim_sil:  # ✂️ v14: прибираємо паузи в кожній частині окремо
             t_out = os.path.join(workdir, "vtrim_{:02d}.mp3".format(i))
             p, _ = remove_pauses(m, t_out, say)
@@ -2061,7 +2144,17 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     say("⏱️ Загальна тривалість: {:.1f} с".format(total))
 
     # 2) Субтитри по частинах
-    make_srt_scenes(scenes, durs, workdir)
+    karaoke_all = []  # 🎤 v25: мітки всіх частин зі зсувом на старт кожної у склеєнці
+    acc = 0.0
+    for pw, d in zip(part_words, durs):
+        if pw:
+            karaoke_all.extend((w, s0 + acc, e0 + acc) for (w, s0, e0) in pw)
+        acc += d
+    if karaoke_all:
+        n = make_karaoke_srt(karaoke_all, total, workdir)
+        say("🎤 Караоке-субтитри: {} фраз синхронно з голосом".format(n))
+    else:
+        make_srt_scenes(scenes, durs, workdir)
     say("💬 Субтитри готові")
 
     # 3) Фон кожної частини: своє відео («Кліп: …») або авто-пошук YouTube
@@ -2918,9 +3011,9 @@ class App:
         self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.query.bind(seq, self._paste_event)
-        self.query.bind("<Control-Return>", self._ctrl_enter)
+        self.query.bind("", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
@@ -2995,9 +3088,9 @@ class App:
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.script.bind(seq, self._paste_script_event)
-        self.script.bind("<Control-Return>", self._ctrl_enter)
+        self.script.bind("", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -3246,7 +3339,7 @@ class App:
         self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.yt_many.bind(seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
@@ -3730,7 +3823,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        widget.bind("<Button-3>", _popup, add="+")
+        widget.bind("", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
