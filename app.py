@@ -3082,8 +3082,8 @@ class App:
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
         for seq in ("", "", ""):
-            self.query.bind(seq, self._paste_event)
-        self.query.bind("", self._ctrl_enter)
+            self._bind_safe(self.query, seq, self._paste_event)
+        self._bind_safe(self.query, "", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
@@ -3110,7 +3110,7 @@ class App:
         def _agent_enter(_e):
             self._agent_send()
             return "break"
-        self.agent_entry.bind("", _agent_enter)
+        self._bind_safe(self.agent_entry, "", _agent_enter)
         ctk.CTkLabel(ac, text="Enter або кнопка — виконати • можна вставити довгий текст",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                    padx=16, pady=(0, 2))
@@ -3180,8 +3180,8 @@ class App:
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
         for seq in ("", "", ""):
-            self.script.bind(seq, self._paste_script_event)
-        self.script.bind("", self._ctrl_enter)
+            self._bind_safe(self.script, seq, self._paste_script_event)
+        self._bind_safe(self.script, "", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -3431,7 +3431,7 @@ class App:
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
         for seq in ("", "", ""):
-            self.yt_many.bind(seq, self._paste_many_event)
+            self._bind_safe(self.yt_many, seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
         ctk.CTkButton(yrow, text="📋", width=48, height=32, corner_radius=16,
@@ -3914,7 +3914,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        widget.bind("", _popup, add="+")
+        self._bind_safe(widget, "", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
@@ -3927,6 +3927,24 @@ class App:
     def paste_query(self):
         """Вставляє текст із буфера обміну в поле запиту."""
         self.paste_into(self.query)
+
+    def _bind_safe(self, widget, seq, handler, add=None):
+        """v26.2: байнд без права на збій (fail-open). Різні збірки
+        customtkinter/tk по-різному приймають байнди, а впалий байнд на
+        старті = не відкрилось вікно. Середовище відмовило — живемо без
+        хоткея: кнопка і нативні байнди Tk усе одно працюють."""
+        try:
+            if add:
+                widget.bind(seq, handler, add)
+            else:
+                widget.bind(seq, handler)
+            return True
+        except Exception:
+            try:
+                widget.bind(sequence=seq, command=handler, add=True)
+                return True
+            except Exception:
+                return False
 
     def _paste_event(self, event):
         self.paste_query()
