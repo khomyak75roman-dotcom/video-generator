@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Генератор відео з запиту: озвучка edge-tts + відеокліпи Openverse + субтитри (ffmpeg).
 UI у стилі iPhone (CustomTkinter, dark mode iOS). v3: скролінг, авто-ffmpeg, YouTube-фон.
 v4: пошук YouTube без ключів — обрані знайдені відео йдуть кліпами у фон.
@@ -62,6 +61,12 @@ v25: 🎤 караоке-субтитри — під час озвучки edge-
 коли звучать (як auto-captions у CapCut/TikTok). Новий стиль субтитрів
 «Караоке» (жовті з рамкою). Якщо хмара не дала міток або ввімкнено
 прибирання пауз — тихо повертаємось до рівномірних субтитрів (fail-open).
+v26: 🤖 агентне вікно — у режимі Відео з'явилось поле «🤖 Асистент»:
+пиши фразу звичайною мовою («зроби вертикальне відео про каву голосом
+Остапа з караоке-субтитрами, без музики») — парсер на правилах (нуль ключів,
+Tier 1) сам налаштує тему, орієнтацію, голос, стиль субтитрів, музику,
+обкладинку/SEO/щільну озвучку і підказує; «давай» — і генерація їде.
+Невпізнане лишається темою; парсер ніколи не падає (fail-open).
 """
 import array
 import asyncio
@@ -1255,6 +1260,71 @@ def make_karaoke_srt(words, total, workdir, max_chars=26, max_gap=0.5, max_sec=3
     return len(lines)
 
 
+AGENT_CMD_WORDS = (
+    "зроби відео", "зробити відео", "створи відео", "створити відео", "згенеруй",
+    "згенерувати", "зняти відео", "зроби ролик", "створи ролик", "потрібне відео",
+    "потрібен ролик", "нехай буде відео",
+)
+
+
+def parse_agent_command(text):
+    """🤖 v26: агентне вікно, Tier 1 — командний парсер без ключів:
+    фраза → параметри генерації. Все невпізнане лишається темою,
+    парсер НІКОЛИ не падає (fail-open: невідоме = тема)."""
+    raw = text.strip()
+    low = " " + raw.lower() + " "
+    p = {"mode": "video", "query": raw, "size": None, "voice": None,
+         "sub_style": None, "no_music": False, "cover": None, "seo": None,
+         "trim": None, "script": None}
+    # --- режим ---
+    if "мікс" in low or "mix" in low:
+        p["mode"] = "mix"
+    elif "сценар" in low:
+        p["mode"] = "script"
+    # --- орієнтація/розмір ---
+    if any(k in low for k in ("вертикал", "shorts", "reels", "tiktok", "9:16")):
+        p["size"] = "Shorts"
+    elif any(k in low for k in ("горизонтал", "16:9", "1080p", "ютуб", "youtube")):
+        p["size"] = "1080p"
+    # --- голос ---
+    if "поліна" in low or "жіноч" in low or "жін" in low:
+        p["voice"] = "Поліна"
+    elif "остап" in low or "чоловіч" in low:
+        p["voice"] = "Остап"
+    # --- субтитри ---
+    if "караоке" in low:
+        p["sub_style"] = "Караоке 🎤"
+    elif "жовт" in low:
+        p["sub_style"] = "Жовті з тінню (CapCut)"
+    # --- музика ---
+    if "без музик" in low:
+        p["no_music"] = True
+    # --- прапорці ---
+    if "обкладинк" in low or "прев'ю" in low or "превью" in low:
+        p["cover"] = True
+    if "seo" in low:
+        p["seo"] = True
+    if "щільн" in low or "без пауз" in low or "динамічн" in low:
+        p["trim"] = True
+    # --- тема: прибираємо командні слова, беремо після «про» ---
+    theme = raw
+    for w in AGENT_CMD_WORDS:
+        if theme.lower().startswith(w):
+            theme = theme[len(w):].lstrip(" :.,-\u2013\u2014")
+            break
+    if " про " in " " + theme.lower() + " ":
+        idx = theme.lower().rfind(" про ")
+        theme = theme[idx + len(" про "):].strip()
+    theme = theme.strip().rstrip(".!?")
+    p["query"] = theme if theme else raw
+    # --- сценарій: текст після двокрапки (якщо дали) ---
+    if p["mode"] == "script" and ":" in raw:
+        body = raw.split(":", 1)[1].strip()
+        if len(body) > 10:
+            p["script"] = body
+    return p
+
+
 
 
 def remove_pauses(mp3_path, out_path, say):
@@ -1364,8 +1434,8 @@ def parse_vtt_text(vtt_path):
                 continue
             if re.match(r"^\d+$", s):  # номери блоків
                 continue
-            s = re.sub(r"<[^>]*>", " ", s)  # теги , <00:00:01.000> тощо
-            s = re.sub(r" ", " ", s)
+            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
+            s = re.sub(r"&nbsp;", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
             if s:
                 lines.append(s)
@@ -3011,9 +3081,9 @@ class App:
         self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self.query.bind(seq, self._paste_event)
-        self.query.bind("", self._ctrl_enter)
+        self.query.bind("<Control-Return>", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
@@ -3026,6 +3096,19 @@ class App:
         ctk.CTkSwitch(qc, text="📚 Кілька відео батчем (кожен рядок теми — окреме відео)",
                       variable=self.batch, font=self._f(12),
                       progress_color=self.ACCENT).pack(anchor="w", padx=16, pady=(2, 0))
+
+        # 🤖 v26: агентне поле — фраза звичайною мовою, парсер налаштує поля сам
+        ac = self._card(self.frame_video, fill="x", pady=(0, 8))
+        ctk.CTkLabel(ac, text="🤖 Асистент — напиши фразу, а я налаштую поля",
+                     font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
+        self.agent_entry = ctk.CTkEntry(ac, height=40, font=self._f(13),
+                                        fg_color=self.INSET, corner_radius=10,
+                                        placeholder_text="напр.: зроби вертикальне відео про каву голосом Остапа, караоке-субтитри, без музики")
+        self.agent_entry.pack(fill="x", padx=16, pady=(0, 4))
+        self.agent_entry.bind("<Return>", lambda e: self._agent_send())
+        ctk.CTkButton(ac, text="🤖  Виконати фразу", height=36, corner_radius=18,
+                      font=self._f(13, "bold"), command=self._agent_send).pack(
+                          fill="x", padx=16, pady=(2, 12))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                     padx=16, pady=(2, 12))
@@ -3088,9 +3171,9 @@ class App:
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self.script.bind(seq, self._paste_script_event)
-        self.script.bind("", self._ctrl_enter)
+        self.script.bind("<Control-Return>", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -3339,7 +3422,7 @@ class App:
         self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self.yt_many.bind(seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
@@ -3823,7 +3906,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        widget.bind("", _popup, add="+")
+        widget.bind("<Button-3>", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
@@ -4466,6 +4549,80 @@ class App:
                 self._set_step(nxt)
                 return
 
+    def _agent_send(self):
+        """🤖 v26: фраза → поля UI → підказка у журналі; «давай» → старт генерації."""
+        cmd = (self.agent_entry.get() or "").strip()
+        if not cmd:
+            return
+        if cmd.lower() in ("давай", "давай!", "ок", "окей", "старт", "go",
+                           "запуск", "погнали", "виконай"):
+            if getattr(self, "_gen_running", False):
+                return
+            self.say("🤖 Поїхали!")
+            self.start()
+            return
+        p = parse_agent_command(cmd)
+        self._agent_apply(p)
+        notes = []
+        if p["mode"] == "mix":
+            notes.append("режим 🎧 Мікс")
+        elif p["mode"] == "script":
+            notes.append("режим 📜 Сценарій")
+        if p["size"]:
+            notes.append(p["size"])
+        if p["voice"]:
+            notes.append("голос " + p["voice"])
+        if p["sub_style"]:
+            notes.append("субтитри «" + p["sub_style"] + "»")
+        if p["no_music"]:
+            notes.append("без музики")
+        if p["trim"]:
+            notes.append("щільна озвучка (без пауз)")
+        if p["cover"]:
+            notes.append("обкладинка")
+        if p["seo"]:
+            notes.append("SEO-пак")
+        self.say("🤖 Зрозумів: тема «{}»{}".format(
+            p["query"][:60], (" • " + ", ".join(notes)) if notes else ""))
+        self.say("🤖 Перевір поля й напиши «давай» (або Enter) — згенерую.")
+
+    def _agent_apply(self, p):
+        """🤖 v26: застосувати параметри до полів UI. Fail-open:
+        чого немає або не читається — тихо пропускаю."""
+        try:
+            self._set_mode(p["mode"])
+            if p["mode"] == "script" and p.get("script"):
+                self.script.delete("1.0", "end")
+                self.script.insert("1.0", p["script"])
+            elif p.get("query"):
+                self.query.delete("1.0", "end")
+                self.query.insert("1.0", p["query"])
+            if p["size"] and hasattr(self, "size"):
+                try:
+                    self.size.set(p["size"])
+                except Exception:
+                    pass
+            if p["voice"] and hasattr(self, "voice"):
+                try:
+                    self.voice.set(p["voice"])
+                except Exception:
+                    pass
+            if p["sub_style"] and hasattr(self, "sub_style"):
+                try:
+                    self.sub_style.set(p["sub_style"])
+                except Exception:
+                    pass
+            if p["no_music"]:
+                self.music_path = ""
+            if p["trim"] is not None and hasattr(self, "trim_sil"):
+                self.trim_sil.set(bool(p["trim"]))
+            if p["cover"] is not None and hasattr(self, "cover_on"):
+                self.cover_on.set(bool(p["cover"]))
+            if p["seo"] is not None and hasattr(self, "seo"):
+                self.seo.set(bool(p["seo"]))
+        except Exception as e:
+            self.say("ℹ️ Асистент: щось не налаштував ({}), поля лишаються як були".format(str(e)[:80]))
+
     def start(self):
         query = self.query.get("1.0", "end").strip()
         mode = getattr(self, "mode", "video")
@@ -4636,4 +4793,3 @@ if __name__ == "__main__":
             _log("SMOKE FAILED: " + str(e))
         sys.exit(0 if ok else 1)
     App().root.mainloop()
-
