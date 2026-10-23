@@ -1434,8 +1434,8 @@ def parse_vtt_text(vtt_path):
                 continue
             if re.match(r"^\d+$", s):  # номери блоків
                 continue
-            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
-            s = re.sub(r"&nbsp;", " ", s)
+            s = re.sub(r"<[^>]*>", " ", s)  # теги , <00:00:01.000> тощо
+            s = re.sub(r" ", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
             if s:
                 lines.append(s)
@@ -3081,9 +3081,9 @@ class App:
         self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.query.bind(seq, self._paste_event)
-        self.query.bind("<Control-Return>", self._ctrl_enter)
+        self.query.bind("", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
@@ -3101,11 +3101,19 @@ class App:
         ac = self._card(self.frame_video, fill="x", pady=(0, 8))
         ctk.CTkLabel(ac, text="🤖 Асистент — напиши фразу, а я налаштую поля",
                      font=self._f(13, "bold"), anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        self.agent_entry = ctk.CTkEntry(ac, height=40, font=self._f(13),
-                                        fg_color=self.INSET, corner_radius=10,
-                                        placeholder_text="напр.: зроби вертикальне відео про каву голосом Остапа, караоке-субтитри, без музики")
+        # поле — багаторядкове (CTkTextbox): приймає вставлений текст будь-якої
+        # довжини, вертикальний скролінг; Enter — виконати (без переносу рядка)
+        self.agent_entry = ctk.CTkTextbox(ac, height=96, font=self._f(13), wrap="word",
+                                          fg_color=self.INSET, corner_radius=10)
         self.agent_entry.pack(fill="x", padx=16, pady=(0, 4))
-        self.agent_entry.bind("<Return>", lambda e: self._agent_send())
+
+        def _agent_enter(_e):
+            self._agent_send()
+            return "break"
+        self.agent_entry.bind("", _agent_enter)
+        ctk.CTkLabel(ac, text="Enter або кнопка — виконати • можна вставити довгий текст",
+                     font=self._f(10), text_color=self.MUTED).pack(anchor="w",
+                                                                   padx=16, pady=(0, 2))
         ctk.CTkButton(ac, text="🤖  Виконати фразу", height=36, corner_radius=18,
                       font=self._f(13, "bold"), command=self._agent_send).pack(
                           fill="x", padx=16, pady=(2, 12))
@@ -3171,9 +3179,9 @@ class App:
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.script.bind(seq, self._paste_script_event)
-        self.script.bind("<Control-Return>", self._ctrl_enter)
+        self.script.bind("", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -3422,7 +3430,7 @@ class App:
         self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
+        for seq in ("", "", ""):
             self.yt_many.bind(seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
@@ -3906,7 +3914,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        widget.bind("<Button-3>", _popup, add="+")
+        widget.bind("", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
@@ -4551,7 +4559,7 @@ class App:
 
     def _agent_send(self):
         """🤖 v26: фраза → поля UI → підказка у журналі; «давай» → старт генерації."""
-        cmd = (self.agent_entry.get() or "").strip()
+        cmd = " ".join(self.agent_entry.get("1.0", "end").split())
         if not cmd:
             return
         if cmd.lower() in ("давай", "давай!", "ок", "окей", "старт", "go",
