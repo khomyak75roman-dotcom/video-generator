@@ -67,6 +67,10 @@ v26: 🤖 агентне вікно — у режимі Відео з'явило
 Tier 1) сам налаштує тему, орієнтацію, голос, стиль субтитрів, музику,
 обкладинку/SEO/щільну озвучку і підказує; «давай» — і генерація їде.
 Невпізнане лишається темою; парсер ніколи не падає (fail-open).
+v26.1–v26.3: 🤖 поле Асистента — багаторядкове зі скролінгом (CTkTextbox);
+байнди хоткеїв — fail-open (збій байнда не валить старт); у полях теми
+й Асистента — кнопки «📥 Вставити»: вставка з буфера працює завжди,
+навіть якщо Ctrl+V у вашій збірці не перехоплюється.
 """
 import array
 import asyncio
@@ -3086,9 +3090,12 @@ class App:
         self._bind_safe(self.query, "", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
+        ctk.CTkButton(qrow, text="📥 Вставити", width=100, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.paste_query).pack(side="left")
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.score_now).pack(side="left")
+                      command=self.score_now).pack(side="left", padx=(8, 0))
         ctk.CTkButton(qrow, text="🌐 YouTube", width=100, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.open_youtube_search).pack(side="left", padx=(8, 0))
@@ -3111,12 +3118,18 @@ class App:
             self._agent_send()
             return "break"
         self._bind_safe(self.agent_entry, "", _agent_enter)
-        ctk.CTkLabel(ac, text="Enter або кнопка — виконати • можна вставити довгий текст",
+        ctk.CTkLabel(ac, text="📥 Вставити — скопійований текст з буфера • 🤖 Виконати фразу або Enter — налаштувати поля",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                    padx=16, pady=(0, 2))
-        ctk.CTkButton(ac, text="🤖  Виконати фразу", height=36, corner_radius=18,
+        abtn = ctk.CTkFrame(ac, fg_color="transparent")
+        abtn.pack(fill="x", padx=16, pady=(2, 12))
+        ctk.CTkButton(abtn, text="📥 Вставити", height=36, corner_radius=18,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13, "bold"),
+                      command=lambda: self.paste_into(self.agent_entry)).pack(
+                          side="left", fill="x", expand=True, padx=(0, 4))
+        ctk.CTkButton(abtn, text="🤖  Виконати фразу", height=36, corner_radius=18,
                       font=self._f(13, "bold"), command=self._agent_send).pack(
-                          fill="x", padx=16, pady=(2, 12))
+                          side="left", fill="x", expand=True, padx=(4, 0))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                     padx=16, pady=(2, 12))
