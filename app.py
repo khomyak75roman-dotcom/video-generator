@@ -71,6 +71,12 @@ v26.1–v26.3: 🤖 поле Асистента — багаторядкове �
 байнди хоткеїв — fail-open (збій байнда не валить старт); у полях теми
 й Асистента — кнопки «📥 Вставити»: вставка з буфера працює завжди,
 навіть якщо Ctrl+V у вашій збірці не перехоплюється.
+v27: 🎯 «Тривалість: N» у сценарії — озвучка «під рядок»: atempo-фіт тривалості
+частини без зміни висоти голосу (караоке-мітки стискаються разом зі звуком, fail-open);
+🔊 перемикач «Майстеринг −14 LUFS» — two-pass EBU R128 (measured-лінійний —
+прозоріш за однопрохідний динамічний); 📦 «під точний розмір» — two-pass копія
+10/25/50/100 МБ (Discord/пошта/Shorts) поруч з оригіналом; ⏭️ фон з YouTube чистіший —
+SponsorBlock вирізає спонсорські вставки (стара збірка yt-dlp — без вирізання, fail-open).
 """
 import array
 import asyncio
@@ -204,7 +210,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.24 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.27 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -357,6 +363,99 @@ def audio_duration(path):
         raise RuntimeError("Не вдалося визначити тривалість озвучки")
     h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
     return h * 3600 + mi * 60 + s
+def speed_fit(mp3, target, workdir, say):
+    """🎯 v27: підігнати озвучку під цільову тривалість частини сценарію
+    (atempo — голос той самий, змінюється лише швидкість; без «голівки»).
+    Fail-open: не вдалось або ціль надто далеко — повертаю початковий файл."""
+    target = max(2.0, float(target))
+    d = audio_duration(mp3)
+    if d <= 0:
+        return mp3
+    ratio = d / target
+    if abs(ratio - 1.0) < 0.04:
+        return mp3
+    if not (0.55 <= ratio <= 1.9):
+        say("🎯 Ціль {:.1f} с надто далеко від озвучки ({:.1f} с) — лишаю як є".format(target, d))
+        return mp3
+    tempo = min(max(ratio, 0.75), 1.35)
+    out = mp3[:-4] + ".fit.mp3" if mp3.lower().endswith(".mp3") else mp3 + ".fit.mp3"
+    try:
+        run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-i", mp3,
+             "-filter:a", "atempo={:.4f}".format(tempo),
+             "-c:a", "libmp3lame", "-q:a", "4", out], cwd=workdir)
+    except Exception as e:
+        say("🎯 Підгонка не вийшла ({}), лишаю як є".format(str(e)[:100]))
+        return mp3
+    d2 = audio_duration(out)
+    if d2 > 0 and abs(d2 - target) < abs(d - target):
+        say("🎯 Підігнав озвучку {:.1f} → {:.1f} с (швидкість ×{:.2f})".format(d, d2, tempo))
+        return out
+    say("🎯 Підгонка не покращила результат — лишаю як є")
+    return mp3
+
+
+def loudnorm_master(video, say, workdir):
+    """🔊 v27: two-pass EBU R128 (−14 LUFS, TP −1.0 dB) поверх готового відео.
+    Перший прохід міряє гучність, другий лінійно вирівнює — прозоро,
+    без «дихання» однопрохідного динамічного режиму. Файл міняється на місці.
+    Fail-open: не вийшло — файл лишається як був."""
+    ff = ffmpeg_path()
+    probe = subprocess.run([ff, "-hide_banner", "-nostdin", "-i", video,
+                            "-af", "loudnorm=I=-14:TP=-1.0:LRA=11:print_format=summary",
+                            "-f", "null", "-"], capture_output=True, text=True,
+                           encoding="utf-8", errors="ignore", timeout=600)
+    log = (probe.stderr or "") + (probe.stdout or "")
+
+    def grab(key):
+        m = re.search(key + r":\s*(-?[0-9.]+)", log)
+        return m.group(1) if m else None
+
+    mi, mtp, mlra, mth = (grab("Input Integrated"), grab("Input True Peak"),
+                          grab("Input LRA"), grab("Input Threshold"))
+    if not mi or not mtp or not mlra or not mth:
+        say("🔊 Гучність не вдалось виміряти — пропускаю майстеринг")
+        return video
+    tmp = video + ".master.mp4"
+    run([ff, "-y", "-hide_banner", "-nostdin", "-i", video,
+         "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
+         "-af", ("loudnorm=I=-14:TP=-1.0:LRA=11:measured_I={}:measured_TP={}:"
+                 "measured_LRA={}:measured_thresh={}:linear=true").format(mi, mtp, mlra, mth),
+         tmp], cwd=workdir)
+    os.replace(tmp, video)
+    say("🔊 Майстеринг: {} LUFS → −14 LUFS (EBU R128, TP −1.0)".format(mi))
+    return video
+
+
+def compress_to_size(video, mb, say, workdir):
+    """📦 v27: two-pass стиснення до цільового розміру (Discord/пошта/Shorts).
+    Створює окремий файл final_XXmb.mp4 поруч з оригіналом (оригінал лишається).
+    Fail-open: не влізе з пристойною якістю — пропускаю."""
+    ff = ffmpeg_path()
+    dur = audio_duration(video)
+    if dur <= 0:
+        return video
+    audio_kbps = 128
+    vb = int((mb * 8192 * 0.93 - audio_kbps) / dur)
+    if vb < 120:
+        say("📦 {:.0f} с не влізе у {} МБ з пристойною якістю — пропускаю стиснення".format(dur, mb))
+        return video
+    out = (video[:video.rfind(".")] + "_{}mb.mp4".format(mb))
+    say("📦 Стискаю до {} МБ (two-pass, ~{} кбіт/с на відео)…".format(mb, vb))
+    for extra in (["-pass", "1", "-an", "-f", "null", "-"],
+                  ["-pass", "2", "-c:a", "aac", "-b:a", str(audio_kbps) + "k",
+                   "-movflags", "+faststart", out]):
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", video,
+             "-c:v", "libx264", "-b:v", str(vb) + "k",
+             "-maxrate", str(int(vb * 1.45)) + "k", "-bufsize", str(int(vb * 2)) + "k",
+             "-preset", "medium", "-pix_fmt", "yuv420p", *extra], cwd=workdir)
+    for junk in ("ffmpeg2pass-0.log", "ffmpeg2pass-0.log.mbtree"):
+        try:
+            os.remove(os.path.join(workdir, junk))
+        except OSError:
+            pass
+    size = os.path.getsize(out) / (1024 * 1024)
+    say("📦 Готово: {} — {:.1f} МБ (оригінал лишається поруч)".format(os.path.basename(out), size))
+    return out
 
 
 def audio_health_check(workdir, say):
@@ -1068,11 +1167,21 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
         out_tmpl = os.path.join(outdir, fixed_name + ".%(ext)s")
     else:
         out_tmpl = os.path.join(outdir, "%(title).100B.%(ext)s")
+    sb = []  # ⏭️ v27: SponsorBlock — вирізаю спонсорські вставки з фону, якщо yt-dlp уміє
+    try:
+        r = subprocess.run([exe, "--sponsorblock-remove", "sponsor", "--version"],
+                           capture_output=True, text=True, timeout=20)
+        if r.returncode == 0:
+            sb = ["--sponsorblock-remove", "sponsor,selfpromo"]
+        else:
+            say("ℹ️ SponsorBlock не підтримується збіркою yt-dlp — фон без вирізання")
+    except Exception:
+        sb = []
     cmd = [exe, "--no-playlist", "--no-warnings", "--newline",
            "-f", "bv*[ext=mp4][height<={0}]+ba[ext=m4a]/b[ext=mp4][height<={0}]/b[height<={0}]".format(height),
            "--merge-output-format", "mp4",
            "--ffmpeg-location", os.path.dirname(os.path.abspath(ffmpeg_path())),
-           "-o", out_tmpl, "--no-simulate", "--print", "after_move:filepath", url]
+           "-o", out_tmpl, "--no-simulate", "--print", "after_move:filepath", *sb, url]
     if max_sec:
         cmd += ["--download-sections", "*0:00-{}:00".format(int(max_sec) // 60)]
     say("▶️ Завантажую відео з YouTube…")
@@ -1796,7 +1905,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -2066,6 +2175,16 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         audio_health_check(workdir, say)
     except Exception:
         pass
+    if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
+        try:
+            loudnorm_master(os.path.join(workdir, "final.mp4"), say, workdir)
+        except Exception as e:
+            say("⚠️ Майстеринг гучності не вийшов ({}), лишаю як є".format(str(e)[:120]))
+    if pack_mb:  # 📦 v27: копія під точний розмір (Discord/пошта/Shorts) — поруч з оригіналом
+        try:
+            compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
+        except Exception as e:
+            say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -2075,21 +2194,28 @@ def parse_script(text):
     Керуючі рядки на початку частини (будь-яким порядком, далі — текст озвучки):
       «Пошук: запит» (або «Знайти:», «Search:») — запит для YouTube-пошуку фону частини;
       «Кліп: посилання» (або «Відео:», «Clip:») — ТВОЄ конкретне YouTube-відео у фон
-      частини (якщо не завантажиться — шукаю автоматично за запитом)."""
+      частини (якщо не завантажиться — шукаю автоматично за запитом);
+      «Тривалість: 12» (або «Час:», «Duration:») — цільова тривалість частини
+      в секундах: озвучка підганяється темпом (голос лишається природним),
+      фон — рівно стільки; караоке-мітки стискаються разом зі звуком."""
     scenes = []
     for block in re.split(r"\n[ \t]*\n+", (text or "").strip()):
         lines = [l.strip() for l in block.split("\n") if l.strip()]
         if not lines:
             continue
-        q, url = None, None
+        q, url, dur = None, None, None
         while lines:
             m = re.match(r"(?i)^(?:пошук|знайти|search)\s*[:\-—]\s*(.+)$", lines[0])
             u = re.match(r"(?i)^(?:кліп|відео|clip)\s*[:\-—]\s*(\S+)$", lines[0])
+            t = re.match(r"(?i)^(?:тривалість|час|duration|dur)\s*[:\-—]\s*([0-9]+(?:[.,][0-9]+)?)\s*(?:с(?:ек)?)?\s*$", lines[0])
             if m and not q:
                 q = m.group(1).strip()
                 lines = lines[1:]
             elif u and not url:
                 url = u.group(1).strip()
+                lines = lines[1:]
+            elif t and dur is None:
+                dur = float(t.group(1).replace(",", "."))
                 lines = lines[1:]
             else:
                 break
@@ -2098,10 +2224,12 @@ def parse_script(text):
             continue
         if url and not re.match(r"(?i)^https?://", url):
             url = None
+        if dur and not (2 <= dur <= 600):  # 🎯 v27: поза розумним діапазоном — ігнорую
+            dur = None
         if not q:
             words = [w for w in re.sub(r"[^\w\s\-]", " ", body).split() if len(w) > 2]
             q = " ".join(words[:6]) if words else body[:40]
-        scenes.append({"q": q, "text": body, "url": url})
+        scenes.append({"q": q, "text": body, "url": url, "dur": dur})
     return scenes
 
 
@@ -2169,7 +2297,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -2209,6 +2337,17 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                     os.replace(t_out, m)
                 except OSError:
                     pass
+        if sc.get("dur"):  # 🎯 v27: озвучка «під рядок» — підганяю темп під ціль
+            try:
+                d0 = audio_duration(m)
+                fitted = speed_fit(m, sc["dur"], workdir, say)
+                if fitted != m:
+                    m = fitted
+                    if part_words[i]:  # 🎤 караоке-мітки стискаються разом зі звуком
+                        k = max(audio_duration(m), 0.01) / d0
+                        part_words[i] = [(w, s0 * k, e0 * k) for (w, s0, e0) in part_words[i]]
+            except Exception as e:
+                say("⚠️ Підгонка тривалості не вийшла ({}), лишаю як є".format(str(e)[:100]))
         d = audio_duration(m)
         mp3s.append(m)
         durs.append(max(d, 1.0))
@@ -2362,6 +2501,16 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         audio_health_check(workdir, say)
     except Exception:
         pass
+    if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
+        try:
+            loudnorm_master(os.path.join(workdir, "final.mp4"), say, workdir)
+        except Exception as e:
+            say("⚠️ Майстеринг гучності не вийшов ({}), лишаю як є".format(str(e)[:120]))
+    if pack_mb:  # 📦 v27: копія під точний розмір (Discord/пошта/Shorts) — поруч з оригіналом
+        try:
+            compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
+        except Exception as e:
+            say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -3186,7 +3335,7 @@ class App:
         tc = self._card(self.frame_script, fill="x", pady=(0, 8))
         ctk.CTkLabel(tc, text="📜 Сценарій (по частинах)", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(tc, text="Частини через порожній рядок. «Пошук: запит» задає пошук фону, «Кліп: посилання» — твоє конкретне відео.",
+        ctk.CTkLabel(tc, text="Частини через порожній рядок. «Пошук: запит» задає пошук фону, «Кліп: посилання» — твоє відео; «Тривалість: 12» — цільові секунди частини (озвучка підженеться темпом).",
                      font=self._f(10), text_color=self.MUTED, justify="left",
                      wraplength=560).pack(fill="x", padx=16, pady=(0, 4))
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
@@ -3427,7 +3576,16 @@ class App:
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         self.seo = ctk.BooleanVar(value=True)  # 📈 v15: SEO-пак
         ctk.CTkSwitch(self.extra_body, text="📈 SEO-пак для YouTube (youtube-seo.txt)", variable=self.seo,
-                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 12))
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.loudnorm = ctk.BooleanVar(value=False)  # 🔊 v27: майстеринг гучності
+        ctk.CTkSwitch(self.extra_body, text="🔊 Майстеринг −14 LUFS (EBU R128)", variable=self.loudnorm,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.pack_size = ctk.StringVar(value="Не стискати")  # 📦 v27: цільовий розмір копії
+        ctk.CTkSegmentedButton(self.extra_body, values=["Не стискати", "10 МБ", "25 МБ", "50 МБ", "100 МБ"],
+                               variable=self.pack_size, font=self._f(11), height=28,
+                               fg_color=self.INSET, selected_color=self.ACCENT,
+                               selected_hover_color=self.ACCENT_H,
+                               unselected_color=self.HOVER).pack(anchor="w", padx=14, pady=(4, 12))
 
         # 🧰 Інструменти (згорнуто за замовчуванням)
         ic = self._card(side, fill="x", pady=(0, 8))
@@ -3670,7 +3828,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v24 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v27 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4076,6 +4234,8 @@ class App:
             "cover": bool(self.cover_on.get()),
             "no_faces": bool(self.no_faces.get()),
             "seo": bool(self.seo.get()),
+            "loudnorm": bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False,  # 🔊 v27
+            "pack": (self.pack_size.get() if hasattr(self, "pack_size") else "Не стискати"),  # 📦 v27
             "yt_q": self.yt_q.get(),
         }
         try:
@@ -4120,6 +4280,13 @@ class App:
             self.no_faces.set(bool(data["no_faces"]))
         if "seo" in data:
             self.seo.set(bool(data["seo"]))
+        if "loudnorm" in data and hasattr(self, "loudnorm"):
+            self.loudnorm.set(bool(data["loudnorm"]))
+        if data.get("pack") and hasattr(self, "pack_size"):
+            try:
+                self.pack_size.set(str(data["pack"]))
+            except Exception:
+                pass
         if data.get("yt_q") in YT_QUALITY:
             self.yt_q.set(data["yt_q"])
         self.say("📂 Пресет «{}» застосовано".format(name))
@@ -4762,13 +4929,18 @@ class App:
             cov = bool(self.cover_on.get()) if hasattr(self, "cover_on") else False
             nf = bool(self.no_faces.get()) if hasattr(self, "no_faces") else False  # 🚫 v15
             se = bool(self.seo.get()) if hasattr(self, "seo") else False             # 📈 v15
+            ln = bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False  # 🔊 v27
+            pk = None  # 📦 v27: цільовий розмір копії
+            if hasattr(self, "pack_size"):
+                digits = "".join(c for c in str(self.pack_size.get()) if c.isdigit())
+                pk = int(digits) if digits else None
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
-                                      no_faces=nf, seo=se)
+                                      no_faces=nf, seo=se, master=ln, pack_mb=pk)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -4794,7 +4966,7 @@ class App:
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se)
+                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
