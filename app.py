@@ -82,6 +82,11 @@ v28: 🎚 повзунок темпу озвучки (−20…+30%, edge-tts rat
 (фон з YouTube тепер теж пишеться у кредити); 🛡️ QC-звіт — повне декодування
 -xerror, 3 кадр-проби і підсумок у qc.txt; 📋 manifest.json — план генерації
 (режим, тема/частини, голос, стилі) як артефакт у робочій папці (fail-open).
+v29: 🧠 Tier 2 — опційний локальний Ollama для Асистента: налаштування
+живуть лише на комп'ютері (tools/ollama.json, як ключ Pixabay); слабка для
+парсера фраза або «сценарій про …» без тексту — локальна модель розбирає
+фразу у ті самі поля й уміє писати сценарій частинами; усе у фоновому потоці
+(Tk не блокується), нема Ollama — Асистент працює як раніше (fail-open, нуль ключів).
 """
 import array
 import asyncio
@@ -215,10 +220,11 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.28 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.29 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
+OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29: URL+модель, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
 # v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
@@ -590,7 +596,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v28"}
+                "app": "Генератор відео v29"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1540,6 +1546,88 @@ def parse_agent_command(text):
     return p
 
 
+def ollama_list_models(url, timeout=8):
+    """🧠 v29: список локально встановлених моделей Ollama (/api/tags).
+    Нема сервера або помилка — порожній список (fail-open, нуль ключів)."""
+    try:
+        r = requests.get((url or "").rstrip("/") + "/api/tags", timeout=timeout)
+        if r.status_code != 200:
+            return []
+        return [m.get("name") for m in (r.json().get("models") or [])
+                if m.get("name")]
+    except Exception:
+        return []
+
+
+def ollama_chat(url, model, prompt, system=None, timeout=90):
+    """🧠 v29: один запит до локального Ollama (/api/chat, stream=false).
+    Повертає текст відповіді або "" — нема сервера/таймаут/помилка (fail-open)."""
+    try:
+        body = {"model": model, "stream": False,
+                "messages": ([{"role": "system", "content": system}] if system else [])
+                + [{"role": "user", "content": prompt}]}
+        r = requests.post((url or "").rstrip("/") + "/api/chat", json=body,
+                          timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        return (((r.json().get("message") or {}).get("content") or "")).strip()
+    except Exception:
+        return ""
+
+
+def ollama_parse_command(cmd, url, model):
+    """🧠 v29: Tier 2 — LLM розбирає довільну фразу у ті самі поля, що й
+    парсер Tier 1. Просить строгий JSON, невідомі значення ігнорує.
+    Не вийшло — None, Асистент лишається на правилах (fail-open)."""
+    system = ("Ти — парсер команд українського відеогенератора. Перетвори фразу "
+              "користувача у JSON рівно з такими ключами: "
+              '{"mode": "video|script|mix", "query": "тема", '
+              '"size": "Shorts|1080p|null", "voice": "Поліна|Остап|null", '
+              '"sub_style": "Караоке 🎤|Жовті з тінню (CapCut)|Класичні|null", '
+              '"no_music": true|false, "cover": true|false|null, '
+              '"seo": true|false|null, "trim": true|false|null, '
+              '"script": "текст сценарію або null"}. '
+              "Значення null — якщо в фразі нема. Відповідай ЛИШЕ JSON, без пояснень.")
+    out = ollama_chat(url, model, cmd, system=system, timeout=120)
+    m = re.search(r"\{[\s\S]*\}", out or "")
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except Exception:
+        return None
+    p = {"mode": "video", "query": cmd, "size": None, "voice": None,
+         "sub_style": None, "no_music": False, "cover": None, "seo": None,
+         "trim": None, "script": None}
+    if d.get("mode") in ("video", "script", "mix"):
+        p["mode"] = d["mode"]
+    if d.get("query"):
+        p["query"] = str(d["query"])[:300]
+    if d.get("size") in ("Shorts", "1080p"):
+        p["size"] = d["size"]
+    if d.get("voice") in ("Поліна", "Остап"):
+        p["voice"] = d["voice"]
+    if d.get("sub_style") in ("Караоке 🎤", "Жовті з тінню (CapCut)", "Класичні"):
+        p["sub_style"] = d["sub_style"]
+    p["no_music"] = bool(d.get("no_music"))
+    for k in ("cover", "seo", "trim"):
+        p[k] = bool(d[k]) if isinstance(d.get(k), bool) else None
+    if d.get("script") and len(str(d["script"])) > 10:
+        p["script"] = str(d["script"])[:8000]
+    return p
+
+
+def ollama_write_script(theme, url, model):
+    """🧠 v29: LLM-сценарист — тема → сценарій по частинах для режиму 📜
+    (частини через порожній рядок; «Пошук: …» — підказка фону частини).
+    Не вийшло — порожній рядок (fail-open)."""
+    system = ("Ти — сценарист коротких українських відео. Пиши сценарій "
+              "частинами: частини розділяй ПОРОЖНІМ рядком. Кожна частина — "
+              "2–4 речення тексту озвучки; за потреби на початку частини "
+              "керуючий рядок «Пошук: <запит для фону YouTube>». "
+              "3–6 частин. Без заголовків і нумерації — тільки текст.")
+    return ollama_chat(url, model, "Напиши сценарій відео на тему: " + (theme or ""),
+                       system=system, timeout=300)
 
 
 def remove_pauses(mp3_path, out_path, say):
@@ -2663,6 +2751,29 @@ def save_pixabay_key(key):
         f.write(key.strip())
 
 
+def load_ollama_conf():
+    """🧠 v29: URL і модель Ollama — лише на цьому комп'ютері (як ключ Pixabay).
+    Файла нема — дефолти: локальний сервер, модель ще не обрана (Tier 2 спить)."""
+    try:
+        with open(OLLAMA_CONF_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {"url": "http://localhost:11434", "model": "", "models": []}
+
+
+def save_ollama_conf(url, model, models):
+    """🧠 v29: зберігає URL/модель/список локально — у код і GitHub не потрапляє."""
+    try:
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        with open(OLLAMA_CONF_FILE, "w", encoding="utf-8") as f:
+            json.dump({"url": (url or "").strip(), "model": (model or "").strip(),
+                       "models": list(models or [])[:30]}, f,
+                      ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+
+
 def pixabay_music_search(key, query, limit, say):
     """🎵 v16: пошук безкоштовної музики Pixabay (Content License: комерційне
     використання без згадки автора). Ключ користувача — не частина програми."""
@@ -3403,7 +3514,7 @@ class App:
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                    padx=16, pady=(0, 2))
         abtn = ctk.CTkFrame(ac, fg_color="transparent")
-        abtn.pack(fill="x", padx=16, pady=(2, 12))
+        abtn.pack(fill="x", padx=16, pady=(2, 4))
         ctk.CTkButton(abtn, text="📥 Вставити", height=36, corner_radius=18,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13, "bold"),
                       command=lambda: self.paste_into(self.agent_entry)).pack(
@@ -3411,6 +3522,33 @@ class App:
         ctk.CTkButton(abtn, text="🤖  Виконати фразу", height=36, corner_radius=18,
                       font=self._f(13, "bold"), command=self._agent_send).pack(
                           side="left", fill="x", expand=True, padx=(4, 0))
+
+        # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
+        ctk.CTkLabel(ac, text="🧠 Ollama (локальний AI, опційно) — краще розбирає фрази, вміє писати сценарій",
+                     font=self._f(11), text_color=self.MUTED, anchor="w",
+                     wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
+        _oc = load_ollama_conf()
+        self.ollama_url = ctk.CTkEntry(ac, placeholder_text="http://localhost:11434",
+                                       height=32, corner_radius=10, fg_color=self.INSET,
+                                       font=self._f(12))
+        self.ollama_url.pack(fill="x", padx=16, pady=(0, 4))
+        self.ollama_url.insert(0, (_oc.get("url") or "http://localhost:11434"))
+        orow = ctk.CTkFrame(ac, fg_color="transparent")
+        orow.pack(fill="x", padx=16, pady=(0, 4))
+        self.ollama_model = ctk.CTkOptionMenu(
+            orow, values=(_oc.get("models") or ["модель не обрана"]), width=240,
+            height=32, corner_radius=10, fg_color=self.INSET, button_color=self.HOVER,
+            font=self._f(12))
+        self.ollama_model.pack(side="left", fill="x", expand=True)
+        if _oc.get("model") and _oc["model"] in (_oc.get("models") or []):
+            self.ollama_model.set(_oc["model"])
+        ctk.CTkButton(orow, text="🔄 Перевірити", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.ollama_check_now).pack(side="left", padx=(8, 0))
+        self.ollama_status = ctk.CTkLabel(
+            ac, text="Перевір — підпишу модель. Зберігається лише локально; без Ollama — Асистент як раніше.",
+            font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
+        self.ollama_status.pack(fill="x", padx=16, pady=(0, 12))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                     padx=16, pady=(2, 12))
@@ -3969,7 +4107,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v28 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v29 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4867,6 +5005,10 @@ class App:
                     self._apply_tools_status(msg[1], msg[2])
                 elif kind == "batch_reset":  # 📚 v14: нова тема батчу — кроки починаються заново
                     self._reset_steps()
+                elif kind == "agent_llm":  # 🧠 v29: локальна модель розібрала фразу
+                    self._agent_llm_done(msg[1])
+                elif kind == "ollama_check":  # 🧠 v29: перевірка Ollama готова
+                    self._ollama_check_done(msg[1])
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -4915,6 +5057,21 @@ class App:
             self.start()
             return
         p = parse_agent_command(cmd)
+
+        # 🧠 v29 Tier 2: локальна модель (Ollama) — для слабко-розпізнаних фраз
+        # і сценаріїв без тексту; запит іде у фоновий потік, Tk не блокується
+        if hasattr(self, "ollama_model"):
+            _om = (self.ollama_model.get() or "").strip()
+            _ou = (hasattr(self, "ollama_url") and self.ollama_url.get().strip()) or ""
+            if _om and _om != "модель не обрана" and _ou:
+                _weak = not (p["size"] or p["voice"] or p["sub_style"] or p["trim"]
+                             or p["cover"] or p["seo"] or p["script"])
+                _need_sc = p["mode"] == "script" and not p["script"]
+                if _weak or _need_sc:
+                    self.say("🧠 Ollama ({}): думаю над фразою у фоні…".format(_om))
+                    threading.Thread(target=self._agent_llm_thread,
+                                    args=(cmd, _ou, _om, _weak, _need_sc),
+                                    daemon=True).start()
         self._agent_apply(p)
         notes = []
         if p["mode"] == "mix":
@@ -4938,6 +5095,54 @@ class App:
         self.say("🤖 Зрозумів: тема «{}»{}".format(
             p["query"][:60], (" • " + ", ".join(notes)) if notes else ""))
         self.say("🤖 Перевір поля й напиши «давай» (або Enter) — згенерую.")
+
+    def _agent_llm_thread(self, cmd, url, model, weak, need_script):
+        """🧠 v29: Tier 2 у фоновому потоці — LLM-розбір фрази і/або сценарій.
+        Tk-поля не чіпаю: результат іде в чергу, застосує головний потік."""
+        lp = ollama_parse_command(cmd, url, model) if weak else None
+        sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model) if need_script else ""
+        self.q.put(("agent_llm", (cmd, lp, sc)))
+
+    def _agent_llm_done(self, payload):
+        """🧠 v29: результат Ollama — у головному потоці: налаштувати поля."""
+        cmd, lp, sc = payload
+        if not lp and not sc:
+            self.say("🧠 Модель нічого не додумала — лишається, як розібрав парсер")
+            return
+        p = lp or parse_agent_command(cmd)
+        if sc:
+            p["script"] = sc
+            p["mode"] = "script"
+        self._agent_apply(p)
+        self.say("🧠 Ollama підказала{} — перевір поля й пиши «давай»".format(
+            " і написала сценарій" if sc else ""))
+
+    def ollama_check_now(self):
+        """🧠 v29: «Перевірити» — список моделей Ollama у фоні, щоб Tk не завис."""
+        url = (self.ollama_url.get().strip() or "http://localhost:11434")
+        self.ollama_status.configure(text="🔄 Шукаю Ollama на {}…".format(url))
+        threading.Thread(target=lambda: self.q.put(
+            ("ollama_check", (url, ollama_list_models(url)))), daemon=True).start()
+
+    def _ollama_check_done(self, payload):
+        """🧠 v29: перевірку зроблено — у головному потоці оновлюю меню й зберігаю."""
+        url, models = payload
+        if not models:
+            self.ollama_status.configure(
+                text="ℹ️ Ollama на {} не піднято — Асистент працює як раніше (парсер)".format(url))
+            return
+        cur = self.ollama_model.get()
+        self.ollama_model.configure(values=models)
+        if cur not in models:
+            self.ollama_model.set(models[0])
+        try:
+            save_ollama_conf(url, self.ollama_model.get(), models)
+        except Exception:
+            pass
+        self.ollama_status.configure(text="🧠 Ollama живий: {}. Модель «{}» збережено.".format(
+            ", ".join(models[:4]) + (" …" if len(models) > 4 else ""), self.ollama_model.get()))
+        self.say("🧠 Ollama готовий — Асистент тепер уміє більше")
+
 
     def _agent_apply(self, p):
         """🤖 v26: застосувати параметри до полів UI. Fail-open:
