@@ -87,6 +87,11 @@ v29: 🧠 Tier 2 — опційний локальний Ollama для Асис�
 парсера фраза або «сценарій про …» без тексту — локальна модель розбирає
 фразу у ті самі поля й уміє писати сценарій частинами; усе у фоновому потоці
 (Tk не блокується), нема Ollama — Асистент працює як раніше (fail-open, нуль ключів).
+v30: 🎚 довгі озвучки edge-tts більше не обриваються — текст ріжеться на
+шматки по реченнях і зшивається воєдино, караоке-мітки зсуваються разом
+з ними; 📑 chapters.txt — розділи YouTube за частинами (допис у SEO-пак);
+📝 approval.txt — тривалість/розмір, артефакти ✓/— і поради перед публікацією;
+📦 кнопка у сценарії — відновити частини з manifest.json минулого запуску.
 """
 import array
 import asyncio
@@ -220,7 +225,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.29 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.30 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -596,13 +601,74 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v29"}
+                "app": "Генератор відео v30"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         say("📋 Маніфест генерації — manifest.json")
     except Exception:
         pass  # 📋 v28: маніфест — артефакт, ніколи не ламає генерацію
+
+
+def make_chapters(scenes, durs, workdir, say):
+    """📑 v30: chapters.txt — розділи YouTube за частинами сценарію: мітки
+    «0:00 Перші слова озвучки частини». Менше двох частин — розділи не потрібні;
+    список дописується в кінець youtube-seo.txt. Fail-open: артефакт."""
+    try:
+        if not scenes or len(scenes) < 2:
+            return
+        lines, t = [], 0.0
+        for i, (sc, d) in enumerate(zip(scenes, durs or [])):
+            name = " ".join(str(sc.get("text") or "").split()[:6]) or "Частина {}".format(i + 1)
+            sec = int(round(t))
+            lines.append("{}:{:02d} {}".format(sec // 60, sec % 60, name))
+            t += max(float(d or 0), 1.0)
+        with open(os.path.join(workdir, "chapters.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        say("📑 Розділи YouTube — chapters.txt ({} частин)".format(len(lines)))
+        try:
+            with open(os.path.join(workdir, "youtube-seo.txt"), "a", encoding="utf-8") as f:
+                f.write("\n\nРОЗДІЛИ (скопіюй у YouTube):\n" + "\n".join(lines) + "\n")
+        except Exception:
+            pass
+    except Exception as e:
+        say("⚠️ Розділи не зібрав: " + str(e)[:120])
+
+
+def write_approval(info, workdir, say):
+    """📝 v30: approval.txt — «перевір перед публікацією»: тривалість і розмір
+    final.mp4, режим/голос, артефакти робочої папки (✓ є / — нема) і короткий
+    чек-лист. Fail-open: артефакт, ніколи не ламає генерацію."""
+    try:
+        final = os.path.join(workdir, "final.mp4")
+        try:
+            dur = "{:.0f} с".format(audio_duration(final))
+        except Exception:
+            dur = "?"
+        try:
+            size = "{:.1f} МБ".format(os.path.getsize(final) / 1048576.0)
+        except Exception:
+            size = "?"
+        lines = ["APPROVAL — перевір перед публікацією", ""]
+        for k, v in (info or {}).items():
+            lines.append("{}: {}".format(k, v))
+        lines.append("Відео: final.mp4 — {}, {}".format(dur, size))
+        lines.append("")
+        lines.append("Артефакти:")
+        for fn, label in (("youtube-seo.txt", "📈 SEO-пак"), ("chapters.txt", "📑 Розділи"),
+                          ("credits.txt", "📄 Кредити"), ("credits.json", "📄 Кредити JSON"),
+                          ("qc.txt", "🛡️ QC-звіт"), ("manifest.json", "📋 Маніфест")):
+            mark = "✓" if os.path.exists(os.path.join(workdir, fn)) else "—"
+            lines.append("  {} {} ({})".format(mark, label, fn))
+        lines.append("")
+        lines.append("Перед публікацією: 1) проглянь відео цілком; 2) назва/опис/теги —")
+        lines.append("з youtube-seo.txt; 3) розділи — з chapters.txt; 4) кредити джерел —")
+        lines.append("з credits.txt у опис; 5) обмеження розміру — 📦-копія поруч із final.mp4.")
+        with open(os.path.join(workdir, "approval.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        say("📝 approval.txt — чек-лист перед публікацією")
+    except Exception:
+        pass
 
 
 def make_srt(sentences, total, workdir):
@@ -1367,22 +1433,120 @@ def merge_videos(files, say):
     return out
 
 
-def tts_save(text, voice, out_mp3, say, rate_pct=0):
-    """Озвучка з запасними планами: edge-tts → системний голос Windows → тиха пауза.
+def _tts_chunks(text, limit=500):
+    """🎚 v30: edge-tts обриває довгі тексти — ріжу на шматки по реченнях
+    (до limit символів), наддовге речення — по словах. Список шматків."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    parts, cur = [], ""
+    for sent in re.split(r"(?<=[.!?…])\s+", text):
+        if len(sent) > limit:  # наддовге речення — по словах
+            wcur = ""
+            for w in sent.split():
+                if wcur and len(wcur) + 1 + len(w) > limit:
+                    parts.append(wcur)
+                    wcur = w
+                else:
+                    wcur = (wcur + " " + w).strip()
+            if wcur:
+                parts.append(wcur)
+        elif cur and len(cur) + 1 + len(sent) > limit:
+            parts.append(cur)
+            cur = sent
+        else:
+            cur = (cur + " " + sent).strip()
+    if cur:
+        parts.append(cur)
+    return [p.strip() for p in parts if p.strip()]
 
-    Хмара edge-tts часом відповідає 403 (Microsoft обмежує доступ) —
+
+def _rm_parts(files):
+    """🗑 v30: тихо прибрати тимчасові шматки озвучки (якщо лишились)."""
+    for q in files:
+        try:
+            os.remove(q)
+        except OSError:
+            pass
+
+
+def _tts_words(chunk, voice, out_mp3, rate_pct=0):
+    """🎤 v30: один шматок edge-tts — аудіо у файл і мітки слів (WordBoundary,
+    час у секундах). Не вийшло або без метрик — None."""
+    words, audio = [], bytearray()
+    try:
+        async def _collect():
+            cm = edge_tts.Communicate(chunk, voice, rate="{:+d}%".format(int(rate_pct or 0)))
+            async for c in cm.stream():
+                if c["type"] == "audio":
+                    audio.extend(c["data"])
+                elif c["type"] == "WordBoundary":
+                    words.append((c.get("text", ""),
+                                  c.get("offset", 0) / 1e7,
+                                  (c.get("offset", 0) + c.get("duration", 0)) / 1e7))
+        asyncio.run(_collect())
+    except Exception:
+        return None
+    if not words or len(audio) < 500:
+        return None
+    try:
+        with open(out_mp3, "wb") as f:
+            f.write(bytes(audio))
+        if os.path.getsize(out_mp3) < 500:
+            return None
+    except Exception:
+        return None
+    return words
+
+
+def tts_save(text, voice, out_mp3, say, rate_pct=0):
+    """Озвучка з запасними планами: edge-tts (довгий текст — шматками, 🎚 v30)
+    → системний голос Windows → тиха пауза.
+
+    Хмара edge-tts часом відповідає 403 (Microsoft обмежує доступ), а довгі
+    тексти обривала на середині — тепер ріжуться на шматки і зшиваються;
     додаток усе одно генерує відео, а не падає.
     """
     ff = ffmpeg_path()
+    chunks = _tts_chunks(text)
 
-    # План 1: edge-tts — найкращі голоси
+    # План 1: edge-tts — найкращі голоси; 🎚 v30: довгий текст шматками
     for attempt in (1, 2):
-        try:
-            asyncio.run(edge_tts.Communicate(text, voice, rate="{:+d}%".format(int(rate_pct or 0))).save(out_mp3))
-            if os.path.exists(out_mp3) and os.path.getsize(out_mp3) > 500:
+        parts, ok = [], bool(chunks)
+        for i, ch in enumerate(chunks):
+            p = "{}.part{:03d}".format(out_mp3, i)
+            try:
+                asyncio.run(edge_tts.Communicate(ch, voice, rate="{:+d}%".format(int(rate_pct or 0))).save(p))
+                if os.path.exists(p) and os.path.getsize(p) > 500:
+                    parts.append(p)
+                else:
+                    ok = False
+                    break
+            except Exception as e:
+                say("ℹ️ edge-tts не відповів (спроба {}, шматок {} з {}): {}".format(attempt, i + 1, len(chunks), e))
+                ok = False
+                break
+        if ok and parts:
+            try:
+                if len(parts) == 1:
+                    os.replace(parts[0], out_mp3)
+                else:
+                    lst = out_mp3 + ".list"
+                    with open(lst, "w", encoding="utf-8") as f:
+                        for p in parts:
+                            f.write("file '{}'\n".format(p.replace("\\", "/").replace("'", "'\\''")))
+                    run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+                         "-i", lst, "-c:a", "libmp3lame", "-q:a", "4", out_mp3])
+                    os.remove(lst)
+                if len(parts) > 1:
+                    say("🎚 Довгий текст озвучено {} шматками — без обривань".format(len(parts)))
+                _rm_parts(parts)
                 return
-        except Exception as e:
-            say(f"ℹ️ edge-tts не відповів (спроба {attempt}): {e}")
+            except Exception as e:
+                say("ℹ️ Шматки озвучки не зшиваються ({}): пробую ще раз".format(str(e)[:100]))
+        _rm_parts(parts)
     say("⚠️ Хмарна озвучка недоступна — пробую системний голос Windows…")
 
     # План 2: системний голос Windows — працює без інтернету
@@ -1417,36 +1581,51 @@ def tts_save(text, voice, out_mp3, say, rate_pct=0):
     run([ff, "-y", "-hide_banner", "-nostdin",
          "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
          "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
+
+
 def tts_save_karaoke(text, voice, out_mp3, say, rate_pct=0):
     """🎤 v25: караоке-субтитри — edge-tts одночасно з озвучкою віддає
     часові мітки кожного слова (WordBoundary: offset/duration у 100-нс).
+    🎚 v30: довгий текст озвучується шматками — мітки кожного шматка
+    зсуваються на тривалість попередніх, тож караоке не спливає.
     Повертає список (слово, старт_с, кінець_с) або None, якщо хмара не дала
     метрик — тоді озвучку робить звичайний tts_save. Fail-open:
     караоке — надбудова, а не залежність; без нього все працює як раніше."""
-    words, audio = [], bytearray()
-    try:
-        async def _collect():
-            cm = edge_tts.Communicate(text, voice, rate="{:+d}%".format(int(rate_pct or 0)))
-            async for chunk in cm.stream():
-                if chunk["type"] == "audio":
-                    audio.extend(chunk["data"])
-                elif chunk["type"] == "WordBoundary":
-                    words.append((chunk.get("text", ""),
-                                  chunk.get("offset", 0) / 1e7,
-                                  (chunk.get("offset", 0) + chunk.get("duration", 0)) / 1e7))
-        asyncio.run(_collect())
-    except Exception as e:
-        say("ℹ️ Караоке-мітки не зібрав ({}): озвучка зі звичайними планами".format(str(e)[:100]))
+    ff = ffmpeg_path()
+    chunks = _tts_chunks(text)
+    if not chunks:
         return None
-    if not words or len(audio) < 500:
-        return None
-    try:
-        with open(out_mp3, "wb") as f:
-            f.write(bytes(audio))
-        if os.path.getsize(out_mp3) < 500:
+    words, parts, base = [], [], 0.0
+    for i, ch in enumerate(chunks):
+        p = "{}.kpart{:03d}".format(out_mp3, i)
+        got = _tts_words(ch, voice, p, rate_pct)
+        if got is None:
+            _rm_parts(parts)
+            say("ℹ️ Караоке-мітки не зібрав (шматок {} з {}): озвучка зі звичайними планами".format(i + 1, len(chunks)))
             return None
+        words.extend((w, s + base, e + base) for (w, s, e) in got)
+        parts.append(p)
+        try:
+            base += audio_duration(p)
+        except Exception:
+            _rm_parts(parts)
+            return None
+    try:
+        if len(parts) == 1:
+            os.replace(parts[0], out_mp3)
+        else:
+            lst = out_mp3 + ".list"
+            with open(lst, "w", encoding="utf-8") as f:
+                for p in parts:
+                    f.write("file '{}'\n".format(p.replace("\\", "/").replace("'", "'\\''")))
+            run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+                 "-i", lst, "-c:a", "libmp3lame", "-q:a", "4", out_mp3])
+            os.remove(lst)
+            say("🎚 Караоке зшито з {} шматків — мітки на своїх місцях".format(len(parts)))
     except Exception:
+        _rm_parts(parts)
         return None
+    _rm_parts(parts)
     return words
 
 
@@ -2389,6 +2568,11 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
         except Exception as e:
             say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
+    try:  # 📝 v30: approval.txt — чек-лист перед публікацією
+        write_approval({"режим": "відео", "тема": query, "голос": voice_label},
+                       workdir, say)
+    except Exception:
+        pass
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -2701,6 +2885,10 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                           " ".join(sc["text"] for sc in scenes), workdir, say)
         except Exception as e:
             say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
+    try:  # 📑 v30: розділи YouTube за частинами сценарію — chapters.txt
+        make_chapters(scenes, durs, workdir, say)
+    except Exception:
+        pass
     try:  # 🔍 v24: аудіо-лікар — тиша/кліпінг/довгі паузи у готовому відео
         audio_health_check(workdir, say)
     except Exception:
@@ -2731,6 +2919,11 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
         except Exception as e:
             say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
+    try:  # 📝 v30: approval.txt — чек-лист перед публікацією
+        write_approval({"режим": "сценарій", "частин": len(scenes),
+                        "голос": voice_label}, workdir, say)
+    except Exception:
+        pass
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -3625,7 +3818,10 @@ class App:
         ctk.CTkButton(trow, text="💾", width=48, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
                       command=self.save_script_file).pack(side="left", padx=(8, 0))
-        ctk.CTkLabel(tc, text="Ctrl+Enter згенерувати",
+        ctk.CTkButton(trow, text="📦", width=48, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13),
+                      command=self.import_manifest_now).pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(tc, text="Ctrl+Enter згенерувати • 📦 — відновити з manifest.json",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                     padx=16, pady=(2, 0))
         trc = self._card(self.frame_script, fill="x", pady=(0, 8))  # 📜 транскрипція поруч
@@ -4107,7 +4303,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v29 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v30 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4448,6 +4644,43 @@ class App:
             self.say("💾 Сценарій збережено: " + path)
         except Exception as e:
             messagebox.showerror("Генератор відео", "Не вдалось зберегти: " + str(e)[:200])
+
+    def import_manifest_now(self):
+        """📦 v30: відновити сценарій з manifest.json минулого запуску —
+        частини (Пошук/Кліп/Тривалість + текст) збираються назад у поле."""
+        path = filedialog.askopenfilename(
+            title="Відкрити маніфест генерації",
+            filetypes=[("Маніфест генерації", "*.json"), ("Усі файли", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            blocks = []
+            for sc in (data.get("scenes") or []):
+                if not isinstance(sc, dict):
+                    continue
+                lines = []
+                if sc.get("q"):
+                    lines.append("Пошук: " + str(sc["q"]))
+                if sc.get("url"):
+                    lines.append("Кліп: " + str(sc["url"]))
+                d = sc.get("dur")
+                if isinstance(d, (int, float)) and d:
+                    lines.append("Тривалість: " + (str(int(d)) if float(d) == int(d) else str(d)))
+                if sc.get("text"):
+                    lines.append(str(sc["text"]))
+                if lines:
+                    blocks.append("\n".join(lines))
+            if not blocks:
+                messagebox.showerror("Генератор відео", "У цьому маніфесті нема частин сценарію (це, схоже, маніфест режиму «Відео»).")
+                return
+            self.script.delete("1.0", "end")
+            self.script.insert("1.0", "\n\n".join(blocks))
+            self._set_mode("script")
+            self.say("📦 Сценарій відновлено з маніфесту: {} частин".format(len(blocks)))
+        except Exception as e:
+            messagebox.showerror("Генератор відео", "Не вдалось прочитати маніфест: " + str(e)[:200])
 
     def _ctrl_enter(self, event):
         self.start()
