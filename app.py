@@ -77,6 +77,11 @@ v27: 🎯 «Тривалість: N» у сценарії — озвучка «�
 прозоріш за однопрохідний динамічний); 📦 «під точний розмір» — two-pass копія
 10/25/50/100 МБ (Discord/пошта/Shorts) поруч з оригіналом; ⏭️ фон з YouTube чистіший —
 SponsorBlock вирізає спонсорські вставки (стара збірка yt-dlp — без вирізання, fail-open).
+v28: 🎚 повзунок темпу озвучки (−20…+30%, edge-tts rate — голос лишається тим самим);
+📄 credits.json — структуровані кредити всіх фонових джерел поруч з credits.txt
+(фон з YouTube тепер теж пишеться у кредити); 🛡️ QC-звіт — повне декодування
+-xerror, 3 кадр-проби і підсумок у qc.txt; 📋 manifest.json — план генерації
+(режим, тема/частини, голос, стилі) як артефакт у робочій папці (fail-open).
 """
 import array
 import asyncio
@@ -210,7 +215,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.27 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.28 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -496,6 +501,102 @@ def audio_health_check(workdir, say):
             say("✅ Аудіо-лікар: порядок.")
     except Exception:
         pass  # 🔍 v24: діагностика — лише попередження, ніколи не ламає генерацію
+
+
+def credits_to_json(workdir, say):
+    """📄 v28: credits.json — структуровані кредити джерел фону поруч з credits.txt:
+    тип, назва, ліцензія, автор, посилання — у machine-readable вигляді (для опису
+    YouTube, перевірки прав, повторного використання). Fail-open: нема файлу або
+    криві рядки — тихо йду далі, криві пишу як є у поле note."""
+    src = os.path.join(workdir, "credits.txt")
+    if not os.path.isfile(src):
+        return
+    try:
+        recs, seen = [], set()
+        with open(src, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                kind = "video" if line.startswith("🎬") else ("photo" if line.startswith("🖼️") else "note")
+                parts = [p.strip() for p in line.split(" — ")]
+                url = parts[3] if len(parts) >= 4 else ""
+                if url and url in seen:
+                    continue
+                if url:
+                    seen.add(url)
+                if len(parts) >= 4:
+                    recs.append({"type": kind,
+                                 "title": parts[0].replace("🎬", "").replace("🖼️", "").replace("📦", "").strip(),
+                                 "license": parts[1], "author": parts[2], "url": url})
+                else:
+                    recs.append({"type": kind, "note": line})
+        data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "sources": recs}
+        with open(os.path.join(workdir, "credits.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        say("📄 Структуровані кредити джерел ({} поз.) — credits.json".format(len(recs)))
+    except Exception:
+        pass  # 📄 v28: кредити — доповнення, ніколи не ламають генерацію
+
+
+def qc_report(workdir, say):
+    """🛡️ v28: QC-звіт фіналу — повне декодування з -xerror (цілісність файлу),
+    3 кадр-проби (10/50/90% тривалості) і підсумок у qc.txt біля відео.
+    QC — лише діагностика: жодне попередження не ламає генерацію (fail-open)."""
+    final = os.path.join(workdir, "final.mp4")
+    if not os.path.isfile(final):
+        return
+    try:
+        ff = ffmpeg_path()
+        dur = audio_duration(final)
+        pr = subprocess.run([ff, "-hide_banner", "-nostdin", "-xerror", "-i", final,
+                             "-f", "null", "-"], capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=600)
+        clean = pr.returncode == 0
+        frames = []
+        for i, at in enumerate((max(dur * 0.1, 0), dur * 0.5, max(dur - 0.5, 0))):
+            p = os.path.join(workdir, "qc_frame_{}.jpg".format(i + 1))
+            try:
+                run([ff, "-y", "-hide_banner", "-nostdin", "-ss", "{:.2f}".format(at),
+                     "-i", final, "-frames:v", "1", "-q:v", "3", p], cwd=workdir)
+                if os.path.isfile(p) and os.path.getsize(p) > 0:
+                    frames.append("qc_frame_{}.jpg".format(i + 1))
+            except Exception:
+                pass
+        size_mb = os.path.getsize(final) / (1024 * 1024)
+        if clean:
+            say("🛡️ QC: декодування чисте — {:.1f} с, {:.1f} МБ, {} кадр-проб(и) — qc.txt".format(
+                dur, size_mb, len(frames)))
+        else:
+            say("🛡️ QC-ТРИВОГА: декодування з помилкою — відео може обриватись; "
+                "переглянь кадр-проби і qc.txt")
+        try:
+            with open(os.path.join(workdir, "qc.txt"), "w", encoding="utf-8") as f:
+                f.write("QC-звіт: {}\nдекодування (ffmpeg -xerror): {}\n"
+                        "тривалість: {:.1f} с\nрозмір: {:.1f} МБ\nкадр-проби: {}\n".format(
+                            datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "OK" if clean else "ПОМИЛКА ДЕКОДУВАННЯ", dur, size_mb,
+                            ", ".join(frames) or "не вийшло"))
+        except OSError:
+            pass
+    except Exception:
+        pass  # 🛡️ v28: QC — лише діагностика, ніколи не ламає генерацію
+
+
+def write_manifest(info, workdir, say):
+    """📋 v28: manifest.json — план і результат генерації у робочій папці:
+    режим, тема або частини сценарію (текст, запит, посилання, тривалість),
+    голос, розмір, стилі. Артефакт-тека: видно, з чого зібрано відео, і легко
+    повторити той самий запуск. Fail-open: не вийшло — не важливо."""
+    try:
+        data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "app": "Генератор відео v28"}
+        data.update(info or {})
+        with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        say("📋 Маніфест генерації — manifest.json")
+    except Exception:
+        pass  # 📋 v28: маніфест — артефакт, ніколи не ламає генерацію
 
 
 def make_srt(sentences, total, workdir):
@@ -1213,6 +1314,7 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
     code = proc.wait()
     if code != 0 or not final_path:
         raise RuntimeError("yt-dlp не зміг завантажити відео (код {}). Перевір посилання.".format(code))
+    append_credit(outdir, "🎬 {} — фонове відео (права належать автору каналу) — YouTube-канал — {}".format(os.path.basename(final_path), url))
     return final_path
 
 
@@ -1259,7 +1361,7 @@ def merge_videos(files, say):
     return out
 
 
-def tts_save(text, voice, out_mp3, say):
+def tts_save(text, voice, out_mp3, say, rate_pct=0):
     """Озвучка з запасними планами: edge-tts → системний голос Windows → тиха пауза.
 
     Хмара edge-tts часом відповідає 403 (Microsoft обмежує доступ) —
@@ -1270,7 +1372,7 @@ def tts_save(text, voice, out_mp3, say):
     # План 1: edge-tts — найкращі голоси
     for attempt in (1, 2):
         try:
-            asyncio.run(edge_tts.Communicate(text, voice).save(out_mp3))
+            asyncio.run(edge_tts.Communicate(text, voice, rate="{:+d}%".format(int(rate_pct or 0))).save(out_mp3))
             if os.path.exists(out_mp3) and os.path.getsize(out_mp3) > 500:
                 return
         except Exception as e:
@@ -1309,7 +1411,7 @@ def tts_save(text, voice, out_mp3, say):
     run([ff, "-y", "-hide_banner", "-nostdin",
          "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
          "-t", "%.2f" % seconds, "-c:a", "libmp3lame", "-b:a", "48k", out_mp3])
-def tts_save_karaoke(text, voice, out_mp3, say):
+def tts_save_karaoke(text, voice, out_mp3, say, rate_pct=0):
     """🎤 v25: караоке-субтитри — edge-tts одночасно з озвучкою віддає
     часові мітки кожного слова (WordBoundary: offset/duration у 100-нс).
     Повертає список (слово, старт_с, кінець_с) або None, якщо хмара не дала
@@ -1318,7 +1420,7 @@ def tts_save_karaoke(text, voice, out_mp3, say):
     words, audio = [], bytearray()
     try:
         async def _collect():
-            cm = edge_tts.Communicate(text, voice)
+            cm = edge_tts.Communicate(text, voice, rate="{:+d}%".format(int(rate_pct or 0)))
             async for chunk in cm.stream():
                 if chunk["type"] == "audio":
                     audio.extend(chunk["data"])
@@ -1905,7 +2007,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -1922,9 +2024,9 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     text = narration_for(query)
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
-    karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say) if not trim_sil else None
+    karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct) if not trim_sil else None
     if karaoke_words is None:
-        tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say)
+        tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct)
     else:
         say("🎤 Караоке-мітки зібрано: {} слів з точним таймінгом".format(len(karaoke_words)))
     if trim_sil:  # ✂️ v14: прибираємо довгі паузи з озвучки
@@ -2175,6 +2277,20 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         audio_health_check(workdir, say)
     except Exception:
         pass
+    try:  # 📄 v28: структуровані кредити всіх джерел — credits.json у робочій папці
+        credits_to_json(workdir, say)
+    except Exception:
+        pass
+    try:  # 🛡️ v28: QC-звіт — декодування -xerror, кадр-проби, підсумок qc.txt
+        qc_report(workdir, say)
+    except Exception:
+        pass
+    try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
+        write_manifest({"mode": "video", "theme": query, "voice": voice_label,
+                        "size": size_str, "sub_style": sub_style, "vid_style": vid_style,
+                        "transition": transition}, workdir, say)
+    except Exception:
+        pass
     if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
         try:
             loudnorm_master(os.path.join(workdir, "final.mp4"), say, workdir)
@@ -2297,7 +2413,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -2325,9 +2441,9 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     mp3s, durs = [], []
     for i, sc in enumerate(scenes):
         m = os.path.join(workdir, "voice_{:02d}.mp3".format(i))
-        pw = tts_save_karaoke(sc["text"], voice, m, say) if not trim_sil else None
+        pw = tts_save_karaoke(sc["text"], voice, m, say, rate_pct=rate_pct) if not trim_sil else None
         if pw is None:
-            tts_save(sc["text"], voice, m, say)
+            tts_save(sc["text"], voice, m, say, rate_pct=rate_pct)
         part_words.append(pw)
         if trim_sil:  # ✂️ v14: прибираємо паузи в кожній частині окремо
             t_out = os.path.join(workdir, "vtrim_{:02d}.mp3".format(i))
@@ -2499,6 +2615,22 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             say("⚠️ SEO-пак не вийшов: " + str(e)[:120])
     try:  # 🔍 v24: аудіо-лікар — тиша/кліпінг/довгі паузи у готовому відео
         audio_health_check(workdir, say)
+    except Exception:
+        pass
+    try:  # 📄 v28: структуровані кредити всіх джерел — credits.json у робочій папці
+        credits_to_json(workdir, say)
+    except Exception:
+        pass
+    try:  # 🛡️ v28: QC-звіт — декодування -xerror, кадр-проби, підсумок qc.txt
+        qc_report(workdir, say)
+    except Exception:
+        pass
+    try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
+        write_manifest({"mode": "script", "voice": voice_label, "size": size_str,
+                        "sub_style": sub_style, "vid_style": vid_style,
+                        "scenes": [{"text": sc.get("text"), "q": sc.get("q"),
+                                    "url": sc.get("url"), "dur": sc.get("dur")}
+                                   for sc in scenes]}, workdir, say)
     except Exception:
         pass
     if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
@@ -3585,7 +3717,16 @@ class App:
                                variable=self.pack_size, font=self._f(11), height=28,
                                fg_color=self.INSET, selected_color=self.ACCENT,
                                selected_hover_color=self.ACCENT_H,
-                               unselected_color=self.HOVER).pack(anchor="w", padx=14, pady=(4, 12))
+                               unselected_color=self.HOVER).pack(anchor="w", padx=14, pady=(4, 0))
+        self.tts_rate = ctk.DoubleVar(value=0)  # 🎚 v28: темп озвучки edge-tts (−20…+30%)
+        self.tts_rate_lbl = ctk.CTkLabel(self.extra_body, text="🎚 Темп озвучки: +0%",
+                                         font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.tts_rate_lbl.pack(anchor="w", padx=14, pady=(6, 0))
+        ctk.CTkSlider(self.extra_body, from_=-20, to=30, number_of_steps=10,
+                      variable=self.tts_rate, progress_color=self.ACCENT,
+                      command=lambda v: self.tts_rate_lbl.configure(
+                          text="🎚 Темп озвучки: {:+.0f}%".format(v))
+                      ).pack(anchor="w", padx=14, pady=(2, 12))
 
         # 🧰 Інструменти (згорнуто за замовчуванням)
         ic = self._card(side, fill="x", pady=(0, 8))
@@ -3828,7 +3969,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v27 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v28 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4236,6 +4377,7 @@ class App:
             "seo": bool(self.seo.get()),
             "loudnorm": bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False,  # 🔊 v27
             "pack": (self.pack_size.get() if hasattr(self, "pack_size") else "Не стискати"),  # 📦 v27
+            "tts_rate": int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0,  # 🎚 v28
             "yt_q": self.yt_q.get(),
         }
         try:
@@ -4285,6 +4427,11 @@ class App:
         if data.get("pack") and hasattr(self, "pack_size"):
             try:
                 self.pack_size.set(str(data["pack"]))
+            except Exception:
+                pass
+        if "tts_rate" in data and hasattr(self, "tts_rate"):
+            try:
+                self.tts_rate.set(int(data["tts_rate"]))
             except Exception:
                 pass
         if data.get("yt_q") in YT_QUALITY:
@@ -4934,13 +5081,14 @@ class App:
             if hasattr(self, "pack_size"):
                 digits = "".join(c for c in str(self.pack_size.get()) if c.isdigit())
                 pk = int(digits) if digits else None
+            rt = int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0  # 🎚 v28: темп озвучки
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
-                                      no_faces=nf, seo=se, master=ln, pack_mb=pk)
+                                      no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -4966,7 +5114,7 @@ class App:
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk)
+                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
