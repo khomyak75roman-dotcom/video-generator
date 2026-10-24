@@ -92,6 +92,10 @@ v30: 🎚 довгі озвучки edge-tts більше не обривают�
 з ними; 📑 chapters.txt — розділи YouTube за частинами (допис у SEO-пак);
 📝 approval.txt — тривалість/розмір, артефакти ✓/— і поради перед публікацією;
 📦 кнопка у сценарії — відновити частини з manifest.json минулого запуску.
+v31: 🌐 Tier 2 тепер ходить і через 9Router — локальний OpenAI-сумісний роутер
+(localhost:20128): перемикач Ollama/9Router у картці Асистента, моделі
+підписуються так само (/v1/models, /v1/chat/completions); api-free, нуль
+ключів, усе локально; нема роутера — Асистент працює як раніше (fail-open).
 """
 import array
 import asyncio
@@ -225,11 +229,11 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.30 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.31 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
-OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29: URL+модель, лише локально
+OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: URL+модель+провайдер, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
 # v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
@@ -601,7 +605,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v30"}
+                "app": "Генератор відео v31"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1754,7 +1758,7 @@ def ollama_chat(url, model, prompt, system=None, timeout=90):
         return ""
 
 
-def ollama_parse_command(cmd, url, model):
+def ollama_parse_command(cmd, url, model, provider="ollama"):
     """🧠 v29: Tier 2 — LLM розбирає довільну фразу у ті самі поля, що й
     парсер Tier 1. Просить строгий JSON, невідомі значення ігнорує.
     Не вийшло — None, Асистент лишається на правилах (fail-open)."""
@@ -1767,7 +1771,7 @@ def ollama_parse_command(cmd, url, model):
               '"seo": true|false|null, "trim": true|false|null, '
               '"script": "текст сценарію або null"}. '
               "Значення null — якщо в фразі нема. Відповідай ЛИШЕ JSON, без пояснень.")
-    out = ollama_chat(url, model, cmd, system=system, timeout=120)
+    out = llm_chat(provider, url, model, cmd, system=system, timeout=120)
     m = re.search(r"\{[\s\S]*\}", out or "")
     if not m:
         return None
@@ -1796,7 +1800,7 @@ def ollama_parse_command(cmd, url, model):
     return p
 
 
-def ollama_write_script(theme, url, model):
+def ollama_write_script(theme, url, model, provider="ollama"):
     """🧠 v29: LLM-сценарист — тема → сценарій по частинах для режиму 📜
     (частини через порожній рядок; «Пошук: …» — підказка фону частини).
     Не вийшло — порожній рядок (fail-open)."""
@@ -1805,8 +1809,51 @@ def ollama_write_script(theme, url, model):
               "2–4 речення тексту озвучки; за потреби на початку частини "
               "керуючий рядок «Пошук: <запит для фону YouTube>». "
               "3–6 частин. Без заголовків і нумерації — тільки текст.")
-    return ollama_chat(url, model, "Напиши сценарій відео на тему: " + (theme or ""),
+    return llm_chat(provider, url, model, "Напиши сценарій відео на тему: " + (theme or ""),
                        system=system, timeout=300)
+
+
+def router_list_models(url, timeout=8):
+    """🌐 v31: 9Router — список моделей через OpenAI-сумісний /v1/models.
+    Нема роутера або помилка — порожній список (fail-open, api-free, нуль ключів)."""
+    try:
+        r = requests.get((url or "").rstrip("/") + "/v1/models", timeout=timeout)
+        if r.status_code != 200:
+            return []
+        return [m.get("id") for m in (r.json().get("data") or []) if m.get("id")]
+    except Exception:
+        return []
+
+
+def router_chat(url, model, prompt, system=None, timeout=90):
+    """🌐 v31: 9Router — один запит /v1/chat/completions (OpenAI-формат).
+    Повертає текст відповіді або "" — нема роутера/таймаут/помилка (fail-open)."""
+    try:
+        body = {"model": model,
+                "messages": ([{"role": "system", "content": system}] if system else [])
+                + [{"role": "user", "content": prompt}]}
+        r = requests.post((url or "").rstrip("/") + "/v1/chat/completions",
+                          json=body, timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        ch = (r.json().get("choices") or [{}])[0]
+        return (((ch.get("message") or {}).get("content") or "")).strip()
+    except Exception:
+        return ""
+
+
+def llm_list_models(provider, url, timeout=8):
+    """🌐 v31: список моделей за провайдером: Ollama (/api/tags) або 9Router (/v1/models)."""
+    if provider == "9router":
+        return router_list_models(url, timeout)
+    return ollama_list_models(url, timeout)
+
+
+def llm_chat(provider, url, model, prompt, system=None, timeout=90):
+    """🌐 v31: один запит за провайдером: Ollama (/api/chat) або 9Router (/v1/chat/completions)."""
+    if provider == "9router":
+        return router_chat(url, model, prompt, system=system, timeout=timeout)
+    return ollama_chat(url, model, prompt, system=system, timeout=timeout)
 
 
 def remove_pauses(mp3_path, out_path, say):
@@ -2952,15 +2999,16 @@ def load_ollama_conf():
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:
-        return {"url": "http://localhost:11434", "model": "", "models": []}
+        return {"url": "http://localhost:11434", "model": "", "models": [], "provider": "ollama"}}
 
 
-def save_ollama_conf(url, model, models):
-    """🧠 v29: зберігає URL/модель/список локально — у код і GitHub не потрапляє."""
+def save_ollama_conf(url, model, models, provider="ollama"):
+    """🧠 v29 / 🌐 v31: зберігає URL/модель/список/провайдер локально — у код і GitHub не потрапляє."""
     try:
         os.makedirs(TOOLS_DIR, exist_ok=True)
         with open(OLLAMA_CONF_FILE, "w", encoding="utf-8") as f:
             json.dump({"url": (url or "").strip(), "model": (model or "").strip(),
+                       "provider": (provider or "ollama").strip() or "ollama",
                        "models": list(models or [])[:30]}, f,
                       ensure_ascii=False, indent=1)
     except OSError:
@@ -3717,10 +3765,21 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 Ollama (локальний AI, опційно) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 Локальний AI (опційно): Ollama або 🌐 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
+        prow = ctk.CTkFrame(ac, fg_color="transparent")
+        prow.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkLabel(prow, text="Джерело:", font=self._f(11),
+                     text_color=self.MUTED).pack(side="left", padx=(0, 6))
+        self.llm_provider = ctk.CTkSegmentedButton(
+            prow, values=["Ollama", "9Router"], font=self._f(11), height=28,
+            fg_color=self.INSET, selected_color=self.ACCENT,
+            selected_hover_color=self.ACCENT_H, unselected_color=self.HOVER,
+            command=self._switch_llm_provider)
+        self.llm_provider.set("9Router" if (_oc.get("provider") or "ollama") == "9router" else "Ollama")
+        self.llm_provider.pack(side="left")
         self.ollama_url = ctk.CTkEntry(ac, placeholder_text="http://localhost:11434",
                                        height=32, corner_radius=10, fg_color=self.INSET,
                                        font=self._f(12))
@@ -3739,7 +3798,7 @@ class App:
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.ollama_check_now).pack(side="left", padx=(8, 0))
         self.ollama_status = ctk.CTkLabel(
-            ac, text="Перевір — підпишу модель. Зберігається лише локально; без Ollama — Асистент як раніше.",
+            ac, text="Перевір — підпишу модель. Зберігається лише локально; без локального AI — Асистент як раніше.",
             font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
         self.ollama_status.pack(fill="x", padx=16, pady=(0, 12))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
@@ -4303,7 +4362,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v30 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v31 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5291,8 +5350,8 @@ class App:
             return
         p = parse_agent_command(cmd)
 
-        # 🧠 v29 Tier 2: локальна модель (Ollama) — для слабко-розпізнаних фраз
-        # і сценаріїв без тексту; запит іде у фоновий потік, Tk не блокується
+        # 🧠 v29 / 🌐 v31 Tier 2: локальна модель (Ollama або 9Router) — для
+        # слабко-розпізнаних фраз і сценаріїв без тексту; запит у фоні, Tk не блокується
         if hasattr(self, "ollama_model"):
             _om = (self.ollama_model.get() or "").strip()
             _ou = (hasattr(self, "ollama_url") and self.ollama_url.get().strip()) or ""
@@ -5301,9 +5360,11 @@ class App:
                              or p["cover"] or p["seo"] or p["script"])
                 _need_sc = p["mode"] == "script" and not p["script"]
                 if _weak or _need_sc:
-                    self.say("🧠 Ollama ({}): думаю над фразою у фоні…".format(_om))
+                    _prov = self._llm_provider()
+                    self.say("🧠 {} ({}): думаю над фразою у фоні…".format(
+                        "🌐 9Router" if _prov == "9router" else "Ollama", _om))
                     threading.Thread(target=self._agent_llm_thread,
-                                    args=(cmd, _ou, _om, _weak, _need_sc),
+                                    args=(cmd, _ou, _om, _weak, _need_sc, _prov),
                                     daemon=True).start()
         self._agent_apply(p)
         notes = []
@@ -5329,11 +5390,12 @@ class App:
             p["query"][:60], (" • " + ", ".join(notes)) if notes else ""))
         self.say("🤖 Перевір поля й напиши «давай» (або Enter) — згенерую.")
 
-    def _agent_llm_thread(self, cmd, url, model, weak, need_script):
-        """🧠 v29: Tier 2 у фоновому потоці — LLM-розбір фрази і/або сценарій.
+    def _agent_llm_thread(self, cmd, url, model, weak, need_script, provider="ollama"):
+        """🧠 v29 / 🌐 v31: Tier 2 у фоновому потоці — LLM-розбір фрази і/або сценарій.
         Tk-поля не чіпаю: результат іде в чергу, застосує головний потік."""
-        lp = ollama_parse_command(cmd, url, model) if weak else None
-        sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model) if need_script else ""
+        lp = ollama_parse_command(cmd, url, model, provider) if weak else None
+        sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model,
+                                 provider) if need_script else ""
         self.q.put(("agent_llm", (cmd, lp, sc)))
 
     def _agent_llm_done(self, payload):
@@ -5350,31 +5412,55 @@ class App:
         self.say("🧠 Ollama підказала{} — перевір поля й пиши «давай»".format(
             " і написала сценарій" if sc else ""))
 
+    def _llm_provider(self):
+        """🌐 v31: що обрано в картці Асистента: 'ollama' або '9router'."""
+        try:
+            return "9router" if (self.llm_provider.get() or "") == "9Router" else "ollama"
+        except Exception:
+            return "ollama"
+
+    def _switch_llm_provider(self, val):
+        """🌐 v31: перемикання Ollama ↔ 9Router — дефолтний URL міняється слідом."""
+        defs = {"Ollama": "http://localhost:11434", "9Router": "http://localhost:20128"}
+        others = {v for k, v in defs.items() if k != val}
+        cur = (self.ollama_url.get() or "").strip()
+        if not cur or cur in others:
+            self.ollama_url.delete(0, "end")
+            self.ollama_url.insert(0, defs.get(val, "http://localhost:11434"))
+        self.ollama_status.configure(
+            text="Джерело: {} — за замовчуванням {}. Перевір — підпишу модель.".format(
+                val, defs.get(val, "")))
+
     def ollama_check_now(self):
-        """🧠 v29: «Перевірити» — список моделей Ollama у фоні, щоб Tk не завис."""
-        url = (self.ollama_url.get().strip() or "http://localhost:11434")
-        self.ollama_status.configure(text="🔄 Шукаю Ollama на {}…".format(url))
+        """🧠 v29 / 🌐 v31: «Перевірити» — список моделей провайдера у фоні, Tk не зависає."""
+        prov = self._llm_provider()
+        url = (self.ollama_url.get().strip()
+               or ("http://localhost:20128" if prov == "9router" else "http://localhost:11434"))
+        name = "🌐 9Router" if prov == "9router" else "🧠 Ollama"
+        self.ollama_status.configure(text="🔄 Шукаю {} на {}…".format(name, url))
         threading.Thread(target=lambda: self.q.put(
-            ("ollama_check", (url, ollama_list_models(url)))), daemon=True).start()
+            ("ollama_check", (prov, url, llm_list_models(prov, url)))), daemon=True).start()
 
     def _ollama_check_done(self, payload):
-        """🧠 v29: перевірку зроблено — у головному потоці оновлюю меню й зберігаю."""
-        url, models = payload
+        """🧠 v29 / 🌐 v31: перевірку зроблено — меню моделей, збереження, статус."""
+        prov, url, models = payload
+        name = "🌐 9Router" if prov == "9router" else "🧠 Ollama"
         if not models:
             self.ollama_status.configure(
-                text="ℹ️ Ollama на {} не піднято — Асистент працює як раніше (парсер)".format(url))
+                text="ℹ️ {} на {} не піднято — Асистент працює як раніше (парсер)".format(name, url))
             return
         cur = self.ollama_model.get()
         self.ollama_model.configure(values=models)
         if cur not in models:
             self.ollama_model.set(models[0])
         try:
-            save_ollama_conf(url, self.ollama_model.get(), models)
+            save_ollama_conf(url, self.ollama_model.get(), models, prov)
         except Exception:
             pass
-        self.ollama_status.configure(text="🧠 Ollama живий: {}. Модель «{}» збережено.".format(
-            ", ".join(models[:4]) + (" …" if len(models) > 4 else ""), self.ollama_model.get()))
-        self.say("🧠 Ollama готовий — Асистент тепер уміє більше")
+        self.ollama_status.configure(text="{} живий: {}. Модель «{}» збережено.".format(
+            name, ", ".join(models[:4]) + (" …" if len(models) > 4 else ""),
+            self.ollama_model.get()))
+        self.say("{} готовий — Асистент тепер уміє більше".format(name))
 
 
     def _agent_apply(self, p):
