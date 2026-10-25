@@ -2049,8 +2049,8 @@ def parse_vtt_text(vtt_path):
                 continue
             if re.match(r"^\d+$", s):  # номери блоків
                 continue
-            s = re.sub(r"<[^>]*>", " ", s)  # теги , <00:00:01.000> тощо
-            s = re.sub(r" ", " ", s)
+            s = re.sub(r"<[^>]*>", " ", s)  # теги <c>, <00:00:01.000> тощо
+            s = re.sub(r"&nbsp;", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
             if s:
                 lines.append(s)
@@ -3085,7 +3085,7 @@ def load_ollama_conf():
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:
-        return {"url": "http://localhost:11434", "model": "", "models": [], "provider": "ollama"}}
+        return {"url": "http://localhost:11434", "model": "", "models": [], "provider": "ollama"}
 
 
 def save_ollama_conf(url, model, models, provider="ollama"):
@@ -3825,9 +3825,9 @@ class App:
         self.query = ctk.CTkTextbox(qc, height=64, font=self._f(13), wrap="word",
                                     fg_color=self.INSET, corner_radius=10)
         self.query.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self._bind_safe(self.query, seq, self._paste_event)
-        self._bind_safe(self.query, "", self._ctrl_enter)
+        self._bind_safe(self.query, "<Control-Return>", self._ctrl_enter)
         qrow = ctk.CTkFrame(qc, fg_color="transparent")
         qrow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(qrow, text="📥 Вставити", width=100, height=32, corner_radius=16,
@@ -3857,7 +3857,7 @@ class App:
         def _agent_enter(_e):
             self._agent_send()
             return "break"
-        self._bind_safe(self.agent_entry, "", _agent_enter)
+        self._bind_safe(self.agent_entry, "<Return>", _agent_enter)
         ctk.CTkLabel(ac, text="📥 Вставити — скопійований текст з буфера • 🤖 Виконати фразу або Enter — налаштувати поля",
                      font=self._f(10), text_color=self.MUTED).pack(anchor="w",
                                                                    padx=16, pady=(0, 2))
@@ -3970,9 +3970,9 @@ class App:
         self.script = ctk.CTkTextbox(tc, height=110, font=self._f(13), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.script.pack(fill="x", padx=16, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self._bind_safe(self.script, seq, self._paste_script_event)
-        self._bind_safe(self.script, "", self._ctrl_enter)
+        self._bind_safe(self.script, "<Control-Return>", self._ctrl_enter)
         trow = ctk.CTkFrame(tc, fg_color="transparent")
         trow.pack(fill="x", padx=16, pady=(2, 2))
         ctk.CTkButton(trow, text="📋", width=48, height=32, corner_radius=16,
@@ -4252,7 +4252,7 @@ class App:
         self.yt_many = ctk.CTkTextbox(self.tools_body, height=72, font=self._f(12), wrap="word",
                                      fg_color=self.INSET, corner_radius=10)
         self.yt_many.pack(fill="x", padx=14, pady=(0, 4))
-        for seq in ("", "", ""):
+        for seq in ("<Control-v>", "<Control-V>", "<Shift-Insert>"):
             self._bind_safe(self.yt_many, seq, self._paste_many_event)
         yrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
         yrow.pack(fill="x", padx=14, pady=(2, 4))
@@ -4736,7 +4736,7 @@ class App:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
-        self._bind_safe(widget, "", _popup, add="+")
+        self._bind_safe(widget, "<Button-3>", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
