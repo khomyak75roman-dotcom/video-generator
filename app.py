@@ -112,6 +112,11 @@ v34: ⏱ ETA під час довгих перекодувань (ffmpeg -progre
 фінал масштабується до 3840×2160 (або 2160×3840 для вертикальних) lanczos+unsharp:
 чесно — нових деталей не додає, але YouTube дає 4К-завантаженням вищий бітрейт,
 тож після стиснення YouTube картинка виглядає краще. Обидва — fail-open.
+v35: 🌐 Асистент уміє думати ОНЛАЙН — безкоштовний Pollinations
+(text.pollinations.ai): третій перемикач «🌐 Онлайн» поруч з Ollama/9Router,
+БЕЗ ключів і БЕЗ встановлення (анонімна модель gpt-oss-20b, ліміт ~1 запит/15 с);
+POST /openai (OpenAI-формат) + GET-фолбек, пауза між запитами, усе fail-open —
+мережі нема — Асистент працює як раніше (парсер правил).
 """
 import array
 import asyncio
@@ -246,11 +251,12 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.34 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.35 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
 OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: URL+модель+провайдер, лише локально
+POLLINATIONS_URL = "https://text.pollinations.ai"  # 🌐 v35: безкоштовний онлайн-LLM БЕЗ ключів (Pollinations)
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
@@ -522,7 +528,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v34"}
+            d = {"app": "Генератор відео v35"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -660,7 +666,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v34"}
+                "app": "Генератор відео v35"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2078,17 +2084,77 @@ def router_chat(url, model, prompt, system=None, timeout=90):
         return ""
 
 
+def pollinations_list_models(url, timeout=8):
+    """🌐 v35: Pollinations — БЕЗКОШТОВНИЙ онлайн-LLM без ключів (text.pollinations.ai):
+    список моделей через GET /models. Лишаю лише анонімні (tier=anonymous) —
+    решта хоче ключ. Нема відповіді/помилка — базовий gpt-oss-20b (fail-open)."""
+    try:
+        r = requests.get((url or POLLINATIONS_URL).rstrip("/") + "/models",
+                         timeout=timeout, headers={"User-Agent": UA_STRING})
+        if r.status_code != 200:
+            return ["gpt-oss-20b"]
+        data = r.json()
+        if isinstance(data, dict):  # на всяк випадок: і масив, і {"models": []}
+            data = data.get("models") or data.get("data") or []
+        out = []
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("name") or m.get("id")
+            tier = str(m.get("tier") or "anonymous").lower()
+            if name and tier == "anonymous":
+                out.append(str(name))
+        return out or ["gpt-oss-20b"]
+    except Exception:
+        return ["gpt-oss-20b"]
+
+
+def pollinations_chat(url, model, prompt, system=None, timeout=120):
+    """🌐 v35: один запит до Pollinations — POST /openai (OpenAI-формат, БЕЗ ключа).
+    Не вдався (429/402 — анонімний ліміт, ~1 запит/15 с) — GET-фолбек:
+    /<промпт>?model=…&system=… . Повертає текст або "" (fail-open, нуль ключів)."""
+    base = (url or POLLINATIONS_URL).rstrip("/")
+    body = {"model": (model or "gpt-oss-20b").strip() or "gpt-oss-20b",
+            "messages": ([{"role": "system", "content": system}] if system else [])
+            + [{"role": "user", "content": prompt}]}
+    try:
+        r = requests.post(base + "/openai", json=body, timeout=timeout,
+                          headers={"User-Agent": UA_STRING})
+        if r.status_code == 200:
+            ch = (r.json().get("choices") or [{}])[0]
+            txt = (((ch.get("message") or {}).get("content") or "")).strip()
+            if txt:
+                return txt
+    except Exception:
+        pass
+    try:  # GET-фолбек: промпт прямо в URL (той самий безключовий сервіс)
+        q = (base + "/" + quote_plus((prompt or "")[:1500])
+             + "?model=" + quote_plus((model or "gpt-oss-20b").strip() or "gpt-oss-20b"))
+        if system:
+            q += "&system=" + quote_plus(system[:1500])
+        r = requests.get(q, timeout=timeout, headers={"User-Agent": UA_STRING})
+        if r.status_code == 200 and (r.text or "").strip():
+            return r.text.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def llm_list_models(provider, url, timeout=8):
-    """🌐 v31: список моделей за провайдером: Ollama (/api/tags) або 9Router (/v1/models)."""
+    """🌐 v31/v35: список моделей за провайдером: Ollama, 9Router або Pollinations."""
     if provider == "9router":
         return router_list_models(url, timeout)
+    if provider == "pollinations":
+        return pollinations_list_models(url, timeout)
     return ollama_list_models(url, timeout)
 
 
 def llm_chat(provider, url, model, prompt, system=None, timeout=90):
-    """🌐 v31: один запит за провайдером: Ollama (/api/chat) або 9Router (/v1/chat/completions)."""
+    """🌐 v31/v35: один запит за провайдером: Ollama, 9Router або Pollinations."""
     if provider == "9router":
         return router_chat(url, model, prompt, system=system, timeout=timeout)
+    if provider == "pollinations":
+        return pollinations_chat(url, model, prompt, system=system, timeout=timeout)
     return ollama_chat(url, model, prompt, system=system, timeout=timeout)
 
 
@@ -4080,7 +4146,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 Локальний AI (опційно): Ollama або 🌐 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🌐 Онлайн (Pollinations — безкоштовно, БЕЗ ключів і встановлення) або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -4089,11 +4155,13 @@ class App:
         ctk.CTkLabel(prow, text="Джерело:", font=self._f(11),
                      text_color=self.MUTED).pack(side="left", padx=(0, 6))
         self.llm_provider = ctk.CTkSegmentedButton(
-            prow, values=["Ollama", "9Router"], font=self._f(11), height=28,
+            prow, values=["Ollama", "9Router", "🌐 Онлайн"], font=self._f(11), height=28,
             fg_color=self.INSET, selected_color=self.ACCENT,
             selected_hover_color=self.ACCENT_H, unselected_color=self.HOVER,
             command=self._switch_llm_provider)
-        self.llm_provider.set("9Router" if (_oc.get("provider") or "ollama") == "9router" else "Ollama")
+        _prov0 = (_oc.get("provider") or "ollama")
+        self.llm_provider.set("🌐 Онлайн" if _prov0 == "pollinations"
+                              else ("9Router" if _prov0 == "9router" else "Ollama"))
         self.llm_provider.pack(side="left")
         self.ollama_url = ctk.CTkEntry(ac, placeholder_text="http://localhost:11434",
                                        height=32, corner_radius=10, fg_color=self.INSET,
@@ -4113,7 +4181,7 @@ class App:
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.ollama_check_now).pack(side="left", padx=(8, 0))
         self.ollama_status = ctk.CTkLabel(
-            ac, text="Перевір — підпишу модель. Зберігається лише локально; без локального AI — Асистент як раніше.",
+            ac, text="🌐 Онлайн працює одразу — нічого не встановлювати. Перевір — підпишу модель. Налаштування лише локально; без AI — Асистент як раніше (парсер).",
             font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
         self.ollama_status.pack(fill="x", padx=16, pady=(0, 12))
         ctk.CTkLabel(qc, text="Ctrl+V вставити • Ctrl+Enter згенерувати • фон підберу сам",
@@ -4717,7 +4785,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v34 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка і 📈 4К-апскейл фіналу.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v35 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл і 🌐 онлайн AI-асистент (Pollinations, без ключів).\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5769,7 +5837,7 @@ class App:
                 if _weak or _need_sc:
                     _prov = self._llm_provider()
                     self.say("🧠 {} ({}): думаю над фразою у фоні…".format(
-                        "🌐 9Router" if _prov == "9router" else "Ollama", _om))
+                        {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations"}.get(_prov, "Ollama"), _om))
                     threading.Thread(target=self._agent_llm_thread,
                                     args=(cmd, _ou, _om, _weak, _need_sc, _prov),
                                     daemon=True).start()
@@ -5819,6 +5887,9 @@ class App:
             llm_trace("parse", provider, model, t0, bool(lp),
                       len(str(lp)) if lp else 0)
         if need_script:
+            if provider == "pollinations" and weak:  # 🌐 v35: анонімний ліміт ~1/15 с — пауза між запитами
+                self.say("⏳ Онлайн-модель: пауза ~16 с між запитами (безкоштовний ліміт)…")
+                time.sleep(16)
             t0 = time.time()
             sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model,
                                      provider) or ""
@@ -5836,19 +5907,23 @@ class App:
             p["script"] = sc
             p["mode"] = "script"
         self._agent_apply(p)
-        self.say("🧠 Ollama підказала{} — перевір поля й пиши «давай»".format(
+        self.say("🧠 AI-модель підказала{} — перевір поля й пиши «давай»".format(
             " і написала сценарій" if sc else ""))
 
     def _llm_provider(self):
-        """🌐 v31: що обрано в картці Асистента: 'ollama' або '9router'."""
+        """🌐 v31/v35: що обрано в картці Асистента: 'ollama', '9router' або 'pollinations'."""
         try:
-            return "9router" if (self.llm_provider.get() or "") == "9Router" else "ollama"
+            val = self.llm_provider.get() or ""
+            if val == "🌐 Онлайн":
+                return "pollinations"
+            return "9router" if val == "9Router" else "ollama"
         except Exception:
             return "ollama"
 
     def _switch_llm_provider(self, val):
-        """🌐 v31: перемикання Ollama ↔ 9Router — дефолтний URL міняється слідом."""
-        defs = {"Ollama": "http://localhost:11434", "9Router": "http://localhost:20128"}
+        """🌐 v31/v35: перемикання Ollama ↔ 9Router ↔ Онлайн — дефолтний URL міняється слідом."""
+        defs = {"Ollama": "http://localhost:11434", "9Router": "http://localhost:20128",
+                "🌐 Онлайн": POLLINATIONS_URL}
         others = {v for k, v in defs.items() if k != val}
         cur = (self.ollama_url.get() or "").strip()
         if not cur or cur in others:
@@ -5862,8 +5937,9 @@ class App:
         """🧠 v29 / 🌐 v31: «Перевірити» — список моделей провайдера у фоні, Tk не зависає."""
         prov = self._llm_provider()
         url = (self.ollama_url.get().strip()
-               or ("http://localhost:20128" if prov == "9router" else "http://localhost:11434"))
-        name = "🌐 9Router" if prov == "9router" else "🧠 Ollama"
+               or (POLLINATIONS_URL if prov == "pollinations"
+                   else ("http://localhost:20128" if prov == "9router" else "http://localhost:11434")))
+        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)"}.get(prov, "🧠 Ollama")
         self.ollama_status.configure(text="🔄 Шукаю {} на {}…".format(name, url))
         threading.Thread(target=lambda: self.q.put(
             ("ollama_check", (prov, url, llm_list_models(prov, url)))), daemon=True).start()
@@ -5871,7 +5947,7 @@ class App:
     def _ollama_check_done(self, payload):
         """🧠 v29 / 🌐 v31: перевірку зроблено — меню моделей, збереження, статус."""
         prov, url, models = payload
-        name = "🌐 9Router" if prov == "9router" else "🧠 Ollama"
+        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)"}.get(prov, "🧠 Ollama")
         if not models:
             self.ollama_status.configure(
                 text="ℹ️ {} на {} не піднято — Асистент працює як раніше (парсер)".format(name, url))
