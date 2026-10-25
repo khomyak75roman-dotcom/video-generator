@@ -102,6 +102,10 @@ v32: 🛡️ no-regression guard у 📦-стисненні — битий аб�
 скільки тривало, чи відповіло; opik-патерн); 📺 платформа публікації — пресет
 📦 і поради в approval.txt (HandBrake-пресети); 📏 правила проєкту для
 Асистента — поле "rules" у tools/ollama.json (abide-урок).
+v33: 🧬 картка «Метадані» в Інструментах — змінити метадані будь-якого відео
+до невпізнаваності: Швидко (remux без перекодування — випалює всі теги/розділи,
+пише випадкову creation_time) або Глибоко (ще й перекодування h264/aac —
+стерає відбитки кодека). Вихідний файл не чіпається: результат *_meta.mp4 поруч.
 """
 import array
 import asyncio
@@ -110,6 +114,7 @@ import hashlib
 import json
 import os
 import queue
+import random
 import re
 import shutil
 import subprocess
@@ -235,7 +240,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.32 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.33 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -511,7 +516,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v32"}
+            d = {"app": "Генератор відео v33"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -649,7 +654,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v32"}
+                "app": "Генератор відео v33"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1452,6 +1457,68 @@ def has_audio(path):
     """Чи є у файлі звукова доріжка (розбір виводу ffmpeg -i)."""
     r = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", path], capture_output=True, text=True, encoding="utf-8", errors="ignore")
     return "Audio: " in (r.stderr or "")
+
+
+def metadata_snapshot(path):
+    """🧬 v33: знімок метаданих відео через ffmpeg -i (без ffprobe-залежностей):
+    тривалість + теги контейнера/потоків (title, creation_time, encoder, location,
+    камера тощо). Fail-open: будь-що не так — порожній словник."""
+    try:
+        pr = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", path],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=60)
+        log = pr.stderr or ""
+        out = {}
+        m = re.search(r"Duration:\s*(\d+:\d+:\d+\.\d+)", log)
+        if m:
+            out["duration"] = m.group(1)
+        for key, val in re.findall(
+                r"^\s*(title|artist|album|comment|encoder|creation_time|"
+                r"location|make|model|software|handler_name|composer)\s*:\s*(.*?)\s*$",
+                log, re.M):
+            out[key] = val
+        return out
+    except Exception:
+        return {}
+
+
+def scrub_metadata(path, deep, say):
+    """🧬 v33: змінити метадані відео до невпізнаваності.
+    Швидко: remux (-c copy) — випалює ВСІ теги, розділи, XMP-згадки і пише
+    нову випадкову creation_time; секунди, якість не чіпається.
+    Глибоко: + перекодування h264/aac з -fflags +bitexact — стирає ще й
+    відбитки кодека/статистику GOP; повільніше, якість ~crf 18.
+    Вихідний файл НІКОЛИ не змінюється: результат = <ім'я>_meta.mp4 поруч."""
+    ff = ffmpeg_path()
+    base = os.path.splitext(path)[0]
+    out = base + "_meta.mp4"
+    n = 1
+    while os.path.exists(out):
+        out = "{}_meta_{}.mp4".format(base, n)
+        n += 1
+    rnd = random.Random()
+    fake_time = "{}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.000000Z".format(
+        rnd.randint(2016, 2025), rnd.randint(1, 12), rnd.randint(1, 28),
+        rnd.randint(0, 23), rnd.randint(0, 59), rnd.randint(0, 59))
+    cmd = [ff, "-y", "-hide_banner", "-nostdin", "-i", path,
+           "-map_metadata", "-1", "-map_chapters", "-1",
+           "-metadata", "creation_time=" + fake_time,
+           "-metadata", "title=", "-metadata", "comment=",
+           "-fflags", "+bitexact", "-movflags", "+faststart"]
+    if deep:
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k"]
+    else:
+        cmd += ["-c", "copy"]
+    say("🧬 Переписую метадані" +
+        (" (глибоко, з перекодуванням)…" if deep else " (швидко, без перекодування)…"))
+    pr = subprocess.run(cmd + [out], capture_output=True, text=True,
+                        encoding="utf-8", errors="ignore", timeout=7200)
+    if pr.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) < 1024:
+        if os.path.isfile(out):
+            os.remove(out)
+        raise RuntimeError((pr.stderr or "")[-400:] or "ffmpeg не дав файл")
+    return out
 
 
 def merge_videos(files, say):
@@ -4284,6 +4351,28 @@ class App:
         self.merge_bg = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(self.tools_body, text="🎬 Ці відео у фон генерації", variable=self.merge_bg,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 4))
+        ctk.CTkLabel(self.tools_body, text="🧬 Метадані — змінити до невпізнаваності",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.meta_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано відео",
+                                     font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.meta_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        mrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        mrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(mrow, text="➕ Додати", width=84, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_meta_file).pack(side="left")
+        ctk.CTkButton(mrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_meta_file).pack(side="left", padx=(6, 0))
+        self.meta_mode = ctk.StringVar(value="Швидко")
+        ctk.CTkSegmentedButton(self.tools_body, values=["Швидко", "Глибоко"],
+                               variable=self.meta_mode, font=self._f(11), height=28,
+                               fg_color=self.INSET, selected_color=self.ACCENT,
+                               selected_hover_color=self.ACCENT_H,
+                               unselected_color=self.HOVER).pack(anchor="w", padx=14, pady=(0, 4))
+        ctk.CTkButton(mrow, text="🧬 Змінити", width=110, height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.meta_now).pack(side="right")
         ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
@@ -4479,7 +4568,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v32 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v33 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 інструмент метаданих (змінити до невпізнаваності).\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5382,6 +5471,52 @@ class App:
             self.say("📂 Папка: Відео\\Compiled")
         except Exception as e:
             self.say("❌ " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def pick_meta_file(self):
+        """🧬 v33: обрати відео для переписування метаданих."""
+        p = filedialog.askopenfilename(filetypes=[("Відео", "*.mp4 *.mov *.mkv *.avi *.webm")])
+        if p:
+            self.meta_file = p
+            self.meta_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🧬 Обрано: " + os.path.basename(p))
+
+    def clear_meta_file(self):
+        self.meta_file = None
+        self.meta_lbl.configure(text="Не обрано відео", text_color=self.MUTED)
+
+    def meta_now(self):
+        """🧬 v33: переписати метадані обраного відео — окремим потоком."""
+        if not getattr(self, "meta_file", None) or not os.path.isfile(self.meta_file):
+            messagebox.showwarning("Стоп", "Спершу додай відео 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._meta_thread, daemon=True).start()
+
+    def _meta_thread(self):
+        p = getattr(self, "meta_file", None)
+        try:
+            ensure_ffmpeg(self.say)
+            before = metadata_snapshot(p)
+            fields = ", ".join("{}={}".format(k, str(v)[:40])
+                               for k, v in sorted(before.items()) if k != "duration")
+            self.say("🧬 Було: " + (fields[:200] if fields else "тегів нема"))
+            out = scrub_metadata(p, self.meta_mode.get() == "Глибоко", self.say)
+            after = metadata_snapshot(out)
+            tail = ", ".join("{}={}".format(k, str(v)[:30])
+                             for k, v in sorted(after.items()) if k != "duration")
+            self.say("🧬 Стало: " + (tail[:200] if tail else "порожньо"))
+            self.say("ℹ️ Вихідний файл не змінено — результат поруч з ним")
+            try:
+                os.startfile(os.path.dirname(out))  # Windows: показати результат
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("❌ Метадані: " + str(e)[:300])
+            if self.meta_mode.get() != "Глибоко":
+                self.say("💡 Швидко не потягнув цей формат — спробуй «Глибоко» (перекодування)")
         finally:
             self.q.put(None)
 
