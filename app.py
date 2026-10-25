@@ -96,6 +96,12 @@ v31: 🌐 Tier 2 тепер ходить і через 9Router — локаль�
 (localhost:20128): перемикач Ollama/9Router у картці Асистента, моделі
 підписуються так само (/v1/models, /v1/chat/completions); api-free, нуль
 ключів, усе локально; нема роутера — Асистент працює як раніше (fail-open).
+v32: 🛡️ no-regression guard у 📦-стисненні — битий або не менший за оригінал
+результат прибирається, лишаю оригінал; маркер у manifest.json — той самий
+розмір не стискається двічі; 📝 llm_trace.jsonl — журнал запитів Tier 2 (хто,
+скільки тривало, чи відповіло; opik-патерн); 📺 платформа публікації — пресет
+📦 і поради в approval.txt (HandBrake-пресети); 📏 правила проєкту для
+Асистента — поле "rules" у tools/ollama.json (abide-урок).
 """
 import array
 import asyncio
@@ -229,11 +235,12 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.31 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.32 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
 OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: URL+модель+провайдер, лише локально
+LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
 # v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
@@ -449,7 +456,9 @@ def loudnorm_master(video, say, workdir):
 def compress_to_size(video, mb, say, workdir):
     """📦 v27: two-pass стиснення до цільового розміру (Discord/пошта/Shorts).
     Створює окремий файл final_XXmb.mp4 поруч з оригіналом (оригінал лишається).
-    Fail-open: не влізе з пристойною якістю — пропускаю."""
+    Fail-open: не влізе з пристойною якістю — пропускаю.
+    🛡️ v32: no-regression guard — битий або не менший за оригінал результат
+    прибирається (лишаю оригінал); маркер у manifest.json — не роблю двічі."""
     ff = ffmpeg_path()
     dur = audio_duration(video)
     if dur <= 0:
@@ -460,6 +469,14 @@ def compress_to_size(video, mb, say, workdir):
         say("📦 {:.0f} с не влізе у {} МБ з пристойною якістю — пропускаю стиснення".format(dur, mb))
         return video
     out = (video[:video.rfind(".")] + "_{}mb.mp4".format(mb))
+    try:  # 🛡️ v32: ідемпотентність — цей розмір уже стиснутий → не роблю двічі
+        with open(os.path.join(workdir, "manifest.json"), encoding="utf-8") as f:
+            pk = (json.load(f) or {}).get("pack") or {}
+        if int(pk.get("mb") or 0) == int(mb) and os.path.isfile(out):
+            say("📦 Вже стиснуто до {} МБ ({}) — не роблю двічі".format(mb, os.path.basename(out)))
+            return out
+    except Exception:
+        pass  # 🛡️ v32: нема маркера або кривий маніфест — стискаю як перший раз
     say("📦 Стискаю до {} МБ (two-pass, ~{} кбіт/с на відео)…".format(mb, vb))
     for extra in (["-pass", "1", "-an", "-f", "null", "-"],
                   ["-pass", "2", "-c:a", "aac", "-b:a", str(audio_kbps) + "k",
@@ -473,6 +490,33 @@ def compress_to_size(video, mb, say, workdir):
             os.remove(os.path.join(workdir, junk))
         except OSError:
             pass
+    try:  # 🛡️ v32: decode-перевірка — стиснений файл мусить читатися цілком
+        pr = run([ff, "-v", "error", "-i", out, "-f", "null", "-"], cwd=workdir)
+        if getattr(pr, "returncode", 1) != 0:
+            raise RuntimeError("decode-перевірка не пройшла")
+    except Exception as e:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+        say("⚠️ 📦 Стиснений файл вийшов битим ({}), лишаю оригінал".format(str(e)[:80]))
+        return video
+    if os.path.getsize(out) >= os.path.getsize(video):  # 🛡️ v32: не менший за оригінал — нема сенсу
+        os.remove(out)
+        say("📦 Стиснута копія вийшла не меншою за оригінал — лишаю оригінал")
+        return video
+    try:  # 🛡️ v32: маркер «цей розмір уже зроблено» у manifest.json
+        mp = os.path.join(workdir, "manifest.json")
+        try:
+            with open(mp, encoding="utf-8") as f:
+                d = json.load(f) or {}
+        except Exception:
+            d = {"app": "Генератор відео v32"}
+        d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
+        with open(mp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # 🛡️ v32: маркер — зручність, ніколи не ламає стиснення
     size = os.path.getsize(out) / (1024 * 1024)
     say("📦 Готово: {} — {:.1f} МБ (оригінал лишається поруч)".format(os.path.basename(out), size))
     return out
@@ -605,7 +649,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v31"}
+                "app": "Генератор відео v32"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -668,6 +712,16 @@ def write_approval(info, workdir, say):
         lines.append("Перед публікацією: 1) проглянь відео цілком; 2) назва/опис/теги —")
         lines.append("з youtube-seo.txt; 3) розділи — з chapters.txt; 4) кредити джерел —")
         lines.append("з credits.txt у опис; 5) обмеження розміру — 📦-копія поруч із final.mp4.")
+        plat = (info or {}).get("платформа")  # 📺 v32: поради платформи (HandBrake-пресети)
+        tips = {"Shorts": ["до 60 секунд", "вертикальний кадр 9:16",
+                           "додай #shorts у назву або опис"],
+                "YouTube": ["100 МБ-копія для швидкого завантаження; якість перемиє YouTube сам"],
+                "Telegram": ["звичайний чат — до 50 МБ"]}
+        if plat and plat in tips:
+            lines.append("")
+            lines.append("Платформа {}:".format(plat))
+            for tip in tips[plat]:
+                lines.append("  • " + tip)
         with open(os.path.join(workdir, "approval.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         say("📝 approval.txt — чек-лист перед публікацією")
@@ -1771,6 +1825,9 @@ def ollama_parse_command(cmd, url, model, provider="ollama"):
               '"seo": true|false|null, "trim": true|false|null, '
               '"script": "текст сценарію або null"}. '
               "Значення null — якщо в фразі нема. Відповідай ЛИШЕ JSON, без пояснень.")
+    rules = project_rules()  # 📏 v32: правила проєкту (abide-урок) — обов'язкові для моделі
+    if rules:
+        system += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
     out = llm_chat(provider, url, model, cmd, system=system, timeout=120)
     m = re.search(r"\{[\s\S]*\}", out or "")
     if not m:
@@ -1809,6 +1866,9 @@ def ollama_write_script(theme, url, model, provider="ollama"):
               "2–4 речення тексту озвучки; за потреби на початку частини "
               "керуючий рядок «Пошук: <запит для фону YouTube>». "
               "3–6 частин. Без заголовків і нумерації — тільки текст.")
+    rules = project_rules()  # 📏 v32: правила проєкту (abide-урок) — обов'язкові для моделі
+    if rules:
+        system += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
     return llm_chat(provider, url, model, "Напиши сценарій відео на тему: " + (theme or ""),
                        system=system, timeout=300)
 
@@ -1854,6 +1914,32 @@ def llm_chat(provider, url, model, prompt, system=None, timeout=90):
     if provider == "9router":
         return router_chat(url, model, prompt, system=system, timeout=timeout)
     return ollama_chat(url, model, prompt, system=system, timeout=timeout)
+
+
+def llm_trace(kind, provider, model, t0, ok, chars):
+    """📝 v32: llm_trace.jsonl — журнал запитів Tier 2 (opik @track-патерн):
+    провайдер/модель/вид/мс/успіх/символи. Ротація: >64 КБ — лишаю останні
+    500 рядків. Fail-open: журнал — лише діагностика, ніколи не ламає запит."""
+    try:
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        p = LLM_TRACE_FILE
+        if os.path.isfile(p) and os.path.getsize(p) > 64 * 1024:
+            try:
+                with open(p, encoding="utf-8") as f:
+                    tail = "".join(f.readlines()[-500:])
+            except Exception:
+                tail = ""
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(tail)
+        rec = {"t": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+               "provider": (provider or "ollama").strip() or "ollama",
+               "model": (model or "")[:60], "kind": kind,
+               "ms": int((time.time() - t0) * 1000), "ok": bool(ok),
+               "chars": int(chars or 0)}
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 📝 v32: журнал — лише діагностика, ніколи не ламає Tier 2
 
 
 def remove_pauses(mp3_path, out_path, say):
@@ -2321,7 +2407,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -2602,7 +2688,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
         write_manifest({"mode": "video", "theme": query, "voice": voice_label,
                         "size": size_str, "sub_style": sub_style, "vid_style": vid_style,
-                        "transition": transition}, workdir, say)
+                        "transition": transition, "platform": platform}, workdir, say)
     except Exception:
         pass
     if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
@@ -2616,7 +2702,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         except Exception as e:
             say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
     try:  # 📝 v30: approval.txt — чек-лист перед публікацією
-        write_approval({"режим": "відео", "тема": query, "голос": voice_label},
+        write_approval({"режим": "відео", "тема": query, "голос": voice_label, "платформа": platform},
                        workdir, say)
     except Exception:
         pass
@@ -2732,7 +2818,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -2953,7 +3039,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                         "sub_style": sub_style, "vid_style": vid_style,
                         "scenes": [{"text": sc.get("text"), "q": sc.get("q"),
                                     "url": sc.get("url"), "dur": sc.get("dur")}
-                                   for sc in scenes]}, workdir, say)
+                                   for sc in scenes], "platform": platform}, workdir, say)
     except Exception:
         pass
     if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
@@ -2968,7 +3054,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             say("⚠️ Стиснення до розміру не вийшло ({}), оригінал лишається".format(str(e)[:120]))
     try:  # 📝 v30: approval.txt — чек-лист перед публікацією
         write_approval({"режим": "сценарій", "частин": len(scenes),
-                        "голос": voice_label}, workdir, say)
+                        "голос": voice_label, "платформа": platform}, workdir, say)
     except Exception:
         pass
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
@@ -3003,16 +3089,37 @@ def load_ollama_conf():
 
 
 def save_ollama_conf(url, model, models, provider="ollama"):
-    """🧠 v29 / 🌐 v31: зберігає URL/модель/список/провайдер локально — у код і GitHub не потрапляє."""
+    """🧠 v29 / 🌐 v31 / 📏 v32: зберігає URL/модель/список/провайдер локально —
+    у код і GitHub не потрапляє. Поле "rules" (правила проєкту) не затираю."""
     try:
         os.makedirs(TOOLS_DIR, exist_ok=True)
+        old = load_ollama_conf()  # 📏 v32: читаю старе — "rules" лишаються
+        if not isinstance(old, dict):
+            old = {}
+        old.update({"url": (url or "").strip(), "model": (model or "").strip(),
+                    "provider": (provider or "ollama").strip() or "ollama",
+                    "models": list(models or [])[:30]})
         with open(OLLAMA_CONF_FILE, "w", encoding="utf-8") as f:
-            json.dump({"url": (url or "").strip(), "model": (model or "").strip(),
-                       "provider": (provider or "ollama").strip() or "ollama",
-                       "models": list(models or [])[:30]}, f,
-                      ensure_ascii=False, indent=1)
+            json.dump(old, f, ensure_ascii=False, indent=1)
     except OSError:
         pass
+
+
+def project_rules():
+    """📏 v32: правила проєкту для Асистента (abide-урок) — список рядків із
+    поля "rules" локального tools/ollama.json. Криве або порожнє — дефолти.
+    Fail-open: правила — надбудова над Tier 2, не ламають його."""
+    try:
+        rules = load_ollama_conf().get("rules")
+        if isinstance(rules, list) and rules:
+            ok = [str(r).strip() for r in rules if str(r or "").strip()]
+            if ok:
+                return ok[:12]
+    except Exception:
+        pass
+    return ["Відповідай українською, простими словами.",
+            "Не пропонуй API-ключі й платні сервіси.",
+            "Сценарій: 3–6 частин, 2–4 речення в частині."]
 
 
 def pixabay_music_search(key, query, limit, say):
@@ -4111,6 +4218,16 @@ class App:
                                fg_color=self.INSET, selected_color=self.ACCENT,
                                selected_hover_color=self.ACCENT_H,
                                unselected_color=self.HOVER).pack(anchor="w", padx=14, pady=(4, 0))
+        ctk.CTkLabel(self.extra_body, text="📺 Платформа публікації (пресет 📦 і поради):",
+                     font=self._f(11), text_color=self.MUTED, anchor="w").pack(
+            anchor="w", padx=14, pady=(8, 0))  # 📺 v32: HandBrake-пресети платформ
+        self.pub_platform = ctk.StringVar(value="Не")
+        ctk.CTkSegmentedButton(self.extra_body, values=["Не", "YouTube", "Shorts", "Telegram"],
+                               variable=self.pub_platform, font=self._f(11), height=28,
+                               fg_color=self.INSET, selected_color=self.ACCENT,
+                               selected_hover_color=self.ACCENT_H,
+                               unselected_color=self.HOVER,
+                               command=self._switch_pub_platform).pack(anchor="w", padx=14, pady=(4, 0))
         self.tts_rate = ctk.DoubleVar(value=0)  # 🎚 v28: темп озвучки edge-tts (−20…+30%)
         self.tts_rate_lbl = ctk.CTkLabel(self.extra_body, text="🎚 Темп озвучки: +0%",
                                          font=self._f(11), text_color=self.MUTED, anchor="w")
@@ -4362,7 +4479,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v31 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v32 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -4807,6 +4924,7 @@ class App:
             "seo": bool(self.seo.get()),
             "loudnorm": bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False,  # 🔊 v27
             "pack": (self.pack_size.get() if hasattr(self, "pack_size") else "Не стискати"),  # 📦 v27
+            "platform": ((self.pub_platform.get() or "") if hasattr(self, "pub_platform") else ""),  # 📺 v32
             "tts_rate": int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0,  # 🎚 v28
             "yt_q": self.yt_q.get(),
         }
@@ -4857,6 +4975,11 @@ class App:
         if data.get("pack") and hasattr(self, "pack_size"):
             try:
                 self.pack_size.set(str(data["pack"]))
+            except Exception:
+                pass
+        if data.get("platform") and hasattr(self, "pub_platform"):  # 📺 v32
+            try:
+                self.pub_platform.set(str(data["platform"]))
             except Exception:
                 pass
         if "tts_rate" in data and hasattr(self, "tts_rate"):
@@ -5390,12 +5513,32 @@ class App:
             p["query"][:60], (" • " + ", ".join(notes)) if notes else ""))
         self.say("🤖 Перевір поля й напиши «давай» (або Enter) — згенерую.")
 
+    def _switch_pub_platform(self, val=None):
+        """📺 v32: платформа публікації — пресет 📦 (HandBrake-урок): Shorts 25 МБ,
+        YouTube 100 МБ, Telegram 50 МБ + поради платформи в approval.txt."""
+        try:
+            mb = {"Shorts": "25 МБ", "YouTube": "100 МБ", "Telegram": "50 МБ"}.get(val or "")
+            if mb and hasattr(self, "pack_size"):
+                self.pack_size.set(mb)
+                self.say("📺 {}: пресет 📦 {} (поради — в approval.txt)".format(val, mb))
+        except Exception:
+            pass  # 📺 v32: перемикач — ніколи не ламає інтерфейс
+
     def _agent_llm_thread(self, cmd, url, model, weak, need_script, provider="ollama"):
         """🧠 v29 / 🌐 v31: Tier 2 у фоновому потоці — LLM-розбір фрази і/або сценарій.
         Tk-поля не чіпаю: результат іде в чергу, застосує головний потік."""
-        lp = ollama_parse_command(cmd, url, model, provider) if weak else None
-        sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model,
-                                 provider) if need_script else ""
+        lp = None
+        sc = ""
+        if weak:  # 📝 v32: запит Tier 2 — у журнал llm_trace.jsonl (opik-патерн)
+            t0 = time.time()
+            lp = ollama_parse_command(cmd, url, model, provider)
+            llm_trace("parse", provider, model, t0, bool(lp),
+                      len(str(lp)) if lp else 0)
+        if need_script:
+            t0 = time.time()
+            sc = ollama_write_script(parse_agent_command(cmd)["query"], url, model,
+                                     provider) or ""
+            llm_trace("script", provider, model, t0, bool(sc), len(sc or ""))
         self.q.put(("agent_llm", (cmd, lp, sc)))
 
     def _agent_llm_done(self, payload):
@@ -5606,13 +5749,15 @@ class App:
                 digits = "".join(c for c in str(self.pack_size.get()) if c.isdigit())
                 pk = int(digits) if digits else None
             rt = int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0  # 🎚 v28: темп озвучки
+            pv = (self.pub_platform.get() if getattr(self, "pub_platform", None)
+                  and self.pub_platform.get() != "Не" else None)  # 📺 v32: платформа публікації
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
-                                      no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt)
+                                      no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -5638,7 +5783,7 @@ class App:
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt)
+                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
