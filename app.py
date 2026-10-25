@@ -106,6 +106,12 @@ v33: 🧬 картка «Метадані» в Інструментах — зм
 до невпізнаваності: Швидко (remux без перекодування — випалює всі теги/розділи,
 пише випадкову creation_time) або Глибоко (ще й перекодування h264/aac —
 стерає відбитки кодека). Вихідний файл не чіпається: результат *_meta.mp4 поруч.
+v34: ⏱ ETA під час довгих перекодувань (ffmpeg -progress: «⏱ 34% • 1.2x •
+лишилось ~2 хв»); 🧹 перемикач «Авто-чистка метаданих» — фінал після генерації
+без анонімних тегів, з випадковою датою; 📈 перемикач «Апскейл до 4К» —
+фінал масштабується до 3840×2160 (або 2160×3840 для вертикальних) lanczos+unsharp:
+чесно — нових деталей не додає, але YouTube дає 4К-завантаженням вищий бітрейт,
+тож після стиснення YouTube картинка виглядає краще. Обидва — fail-open.
 """
 import array
 import asyncio
@@ -240,7 +246,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.33 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.34 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -516,7 +522,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v33"}
+            d = {"app": "Генератор відео v34"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -654,7 +660,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v33"}
+                "app": "Генератор відео v34"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1482,20 +1488,70 @@ def metadata_snapshot(path):
         return {}
 
 
-def scrub_metadata(path, deep, say):
+def ffmpeg_run_progress(cmd, total, say, tag, every=6):
+    """⏱ v34: запуск ffmpeg з -progress pipe:1 і ETA у журнал:
+    «⏱ Глибоко 34% • 1.2x • лишилось ~1 хв 40 с». total — тривалість входу
+    у секундах (0 = прогресу не показувати). Fail-open: все зламалось —
+    тихо переходжу на звичайний запуск. Повертає returncode."""
+    real = list(cmd[:-1]) + ["-progress", "pipe:1", "-nostats", cmd[-1]]
+    try:
+        pr = subprocess.Popen(real, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              text=True, encoding="utf-8", errors="ignore")
+        out_us, speed, last = 0.0, 1.0, 0.0
+        for line in pr.stdout:
+            line = line.strip()
+            if line.startswith("out_time_us="):
+                try:
+                    out_us = float(line.split("=")[1]) / 1000000.0
+                except Exception:
+                    pass
+            elif line.startswith("speed="):
+                m = re.search(r"([\d.]+)x", line)
+                if m:
+                    speed = max(0.01, float(m.group(1)))
+            now = time.time()
+            if total and total > 0 and now - last >= every:
+                last = now
+                done = min(100.0, 100.0 * out_us / total)
+                left = max(0.0, (total - out_us) / speed)
+                say("⏱ {} {:.0f}% • швидкість {:.1f}x • лишилось ~{} хв {} с".format(
+                    tag, done, speed, int(left // 60), int(left % 60)))
+        pr.wait()
+        return pr.returncode
+    except Exception:
+        try:
+            prr = subprocess.run(list(cmd), capture_output=True, text=True,
+                                 encoding="utf-8", errors="ignore", timeout=7200)
+            return prr.returncode
+        except Exception:
+            return 1
+
+
+def scrub_metadata(path, deep, say, out_path=None):
     """🧬 v33: змінити метадані відео до невпізнаваності.
     Швидко: remux (-c copy) — випалює ВСІ теги, розділи, XMP-згадки і пише
     нову випадкову creation_time; секунди, якість не чіпається.
     Глибоко: + перекодування h264/aac з -fflags +bitexact — стирає ще й
-    відбитки кодека/статистику GOP; повільніше, якість ~crf 18.
-    Вихідний файл НІКОЛИ не змінюється: результат = <ім'я>_meta.mp4 поруч."""
+    відбитки кодека/статистику GOP; повільніше, якість ~crf 18; ⏱ v34: з ETA-прогресом.
+    Вихідний файл НІКОЛИ не змінюється: результат = <ім'я>_meta.mp4 поруч.
+    v34: out_path — перезаписати саме туда (наприклад, final.mp4 у конвеєрі):
+    пишу у тимчасовий .part-файл і атомарно os.replace — фінал ніколи не
+    буває «напівбитим»."""
     ff = ffmpeg_path()
     base = os.path.splitext(path)[0]
-    out = base + "_meta.mp4"
-    n = 1
-    while os.path.exists(out):
-        out = "{}_meta_{}.mp4".format(base, n)
-        n += 1
+    inplace = out_path is not None  # 🧹 v34: перезапис цільового файлу (конвеєр)
+    tmp = None
+    if inplace:
+        out = out_path
+        tmp = out + ".part.mp4"
+        real_out = tmp
+    else:
+        out = base + "_meta.mp4"
+        n = 1
+        while os.path.exists(out):
+            out = "{}_meta_{}.mp4".format(base, n)
+            n += 1
+        real_out = out
     rnd = random.Random()
     fake_time = "{}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.000000Z".format(
         rnd.randint(2016, 2025), rnd.randint(1, 12), rnd.randint(1, 28),
@@ -1512,12 +1568,65 @@ def scrub_metadata(path, deep, say):
         cmd += ["-c", "copy"]
     say("🧬 Переписую метадані" +
         (" (глибоко, з перекодуванням)…" if deep else " (швидко, без перекодування)…"))
-    pr = subprocess.run(cmd + [out], capture_output=True, text=True,
-                        encoding="utf-8", errors="ignore", timeout=7200)
-    if pr.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) < 1024:
+    prerr = ""
+    if deep:
+        try:
+            total = audio_duration(path)
+        except Exception:
+            total = 0
+        rc = ffmpeg_run_progress(cmd + [real_out], total, say, "🧬 Глибоко", every=6)
+    else:
+        pr = subprocess.run(cmd + [real_out], capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=7200)
+        rc = pr.returncode
+        prerr = pr.stderr or ""
+    if rc != 0 or not os.path.isfile(real_out) or os.path.getsize(real_out) < 1024:
+        if os.path.isfile(real_out):
+            os.remove(real_out)
+        raise RuntimeError((prerr or "")[-400:] or "ffmpeg не дав файл")
+    if inplace:
+        os.replace(real_out, out)  # атомарно: ціль ніколи не лишається битою
+    return out
+
+
+def upscale_4k(path, say):
+    """📈 v34: апскейл фіналу до 4К (3840×2160 / 2160×3840 для вертикальних).
+    Чесно: нових деталей не додає (lanczos ×2 + легке шевко) — але YouTube
+    кодує 4К-завантаження вищим бітрейтом → після стиснення YouTube картинка
+    виглядає краще. Апаратний кодек, якщо є GPU. ⏱ ETA у журнал.
+    Fail-open: не вийшло / вихід уже 4К — повертаю None, фінал лишається."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        pr = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", path],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=60)
+        m = re.search(r",\s(\d{2,5})x(\d{2,5})[\s,]", pr.stderr or "")
+        if not m:
+            return None
+        w, h = int(m.group(1)), int(m.group(2))
+    except Exception:
+        return None
+    if max(w, h) >= 3840 or min(w, h) < 480:
+        say("📈 Апскейл не потрібен: роздільність {}x{}".format(w, h))
+        return None
+    out = os.path.splitext(path)[0] + "_4k.mp4"
+    vf = "scale=3840:-2:flags=lanczos,unsharp=5:5:0.35" if w >= h else \
+         "scale=-2:3840:flags=lanczos,unsharp=5:5:0.35"
+    enc = best_video_encoder_args()
+    q = ["-crf", "18"] if enc[1] == "libx264" else []
+    cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-i", path,
+           "-vf", vf, *enc, *q, "-pix_fmt", "yuv420p", "-c:a", "copy",
+           "-movflags", "+faststart", out]
+    try:
+        total = audio_duration(path)
+    except Exception:
+        total = 0
+    rc = ffmpeg_run_progress(cmd, total, say, "📈 4К", every=6)
+    if rc != 0 or not os.path.isfile(out) or os.path.getsize(out) < 1024:
         if os.path.isfile(out):
             os.remove(out)
-        raise RuntimeError((pr.stderr or "")[-400:] or "ffmpeg не дав файл")
+        raise RuntimeError("4К-рендер не вдався")
     return out
 
 
@@ -2474,7 +2583,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -2763,6 +2872,22 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             loudnorm_master(os.path.join(workdir, "final.mp4"), say, workdir)
         except Exception as e:
             say("⚠️ Майстеринг гучності не вийшов ({}), лишаю як є".format(str(e)[:120]))
+    if upscale4k:  # 📈 v34: фінал у 4К — YouTube дає 4К-завантаженням вищий бітрейт
+        try:
+            say("📈 Апскейл фіналу до 4К…")
+            p4 = upscale_4k(os.path.join(workdir, "final.mp4"), say)
+            if p4:
+                os.replace(p4, os.path.join(workdir, "final.mp4"))
+                say("📈 Фінал тепер 4К")
+        except Exception as e:
+            say("⚠️ Апскейл до 4К не вийшов ({}), лишаю вихідну роздільність".format(str(e)[:120]))
+    if autoscrape:  # 🧹 v34: авто-чистка метаданих фіналу (нуль тегів, випадкова дата)
+        try:
+            scrub_metadata(os.path.join(workdir, "final.mp4"), False, say,
+                           out_path=os.path.join(workdir, "final.mp4"))
+            say("🧹 Метадані фіналу очищено (final.mp4 без тегів, дата випадкова)")
+        except Exception as e:
+            say("⚠️ Чистка метаданих не вийшла ({}), фінал лишається як є".format(str(e)[:120]))
     if pack_mb:  # 📦 v27: копія під точний розмір (Discord/пошта/Shorts) — поруч з оригіналом
         try:
             compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
@@ -2885,7 +3010,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -3114,6 +3239,22 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             loudnorm_master(os.path.join(workdir, "final.mp4"), say, workdir)
         except Exception as e:
             say("⚠️ Майстеринг гучності не вийшов ({}), лишаю як є".format(str(e)[:120]))
+    if upscale4k:  # 📈 v34: фінал у 4К — YouTube дає 4К-завантаженням вищий бітрейт
+        try:
+            say("📈 Апскейл фіналу до 4К…")
+            p4 = upscale_4k(os.path.join(workdir, "final.mp4"), say)
+            if p4:
+                os.replace(p4, os.path.join(workdir, "final.mp4"))
+                say("📈 Фінал тепер 4К")
+        except Exception as e:
+            say("⚠️ Апскейл до 4К не вийшов ({}), лишаю вихідну роздільність".format(str(e)[:120]))
+    if autoscrape:  # 🧹 v34: авто-чистка метаданих фіналу (нуль тегів, випадкова дата)
+        try:
+            scrub_metadata(os.path.join(workdir, "final.mp4"), False, say,
+                           out_path=os.path.join(workdir, "final.mp4"))
+            say("🧹 Метадані фіналу очищено (final.mp4 без тегів, дата випадкова)")
+        except Exception as e:
+            say("⚠️ Чистка метаданих не вийшла ({}), фінал лишається як є".format(str(e)[:120]))
     if pack_mb:  # 📦 v27: копія під точний розмір (Discord/пошта/Shorts) — поруч з оригіналом
         try:
             compress_to_size(os.path.join(workdir, "final.mp4"), pack_mb, say, workdir)
@@ -4295,6 +4436,14 @@ class App:
                                selected_hover_color=self.ACCENT_H,
                                unselected_color=self.HOVER,
                                command=self._switch_pub_platform).pack(anchor="w", padx=14, pady=(4, 0))
+        self.upscale4k = ctk.BooleanVar(value=False)  # 📈 v34: апскейл фіналу до 4К
+        ctk.CTkSwitch(self.extra_body, text="📈 Апскейл фіналу до 4К (вищий бітрейт YouTube)",
+                      variable=self.upscale4k, font=self._f(12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(4, 0))
+        self.autoscrape = ctk.BooleanVar(value=False)  # 🧹 v34: авто-чистка метаданих фіналу
+        ctk.CTkSwitch(self.extra_body, text="🧹 Авоскраб — авто-чистка метаданих фіналу",
+                      variable=self.autoscrape, font=self._f(12),
+                      progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 4))
         self.tts_rate = ctk.DoubleVar(value=0)  # 🎚 v28: темп озвучки edge-tts (−20…+30%)
         self.tts_rate_lbl = ctk.CTkLabel(self.extra_body, text="🎚 Темп озвучки: +0%",
                                          font=self._f(11), text_color=self.MUTED, anchor="w")
@@ -4568,7 +4717,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v33 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 інструмент метаданих (змінити до невпізнаваності).\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v34 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка і 📈 4К-апскейл фіналу.\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5886,13 +6035,16 @@ class App:
             rt = int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0  # 🎚 v28: темп озвучки
             pv = (self.pub_platform.get() if getattr(self, "pub_platform", None)
                   and self.pub_platform.get() != "Не" else None)  # 📺 v32: платформа публікації
+            up4 = bool(self.upscale4k.get()) if hasattr(self, "upscale4k") else False  # 📈 v34: 4К
+            asc = bool(self.autoscrape.get()) if hasattr(self, "autoscrape") else False  # 🧹 v34: авоскраб
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
                                       getattr(self, "music_path", "").strip(), self.say,
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
-                                      no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv)
+                                      no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
+                                      upscale4k=up4, autoscrape=asc)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -5918,7 +6070,8 @@ class App:
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv)
+                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
+                                       upscale4k=up4, autoscrape=asc)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
