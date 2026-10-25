@@ -117,6 +117,12 @@ v35: 🌐 Асистент уміє думати ОНЛАЙН — безкошт
 БЕЗ ключів і БЕЗ встановлення (анонімна модель gpt-oss-20b, ліміт ~1 запит/15 с);
 POST /openai (OpenAI-формат) + GET-фолбек, пауза між запитами, усе fail-open —
 мережі нема — Асистент працює як раніше (парсер правил).
+v36: ⚡ Kilo Code — ще один БЕЗКЛЮЧОВИЙ онлайн-LLM (api.kilo.ai/api/gateway,
+free-пул ~200 запитів/год — у рази щільніше за Pollinations, теж без встановлення);
+🔑 «Ключ» — безкоштовні фрітір-ключі (Groq / GitHub Models / Gemini, OpenAI-сумісні,
+Bearer) з tools/freekeys.json — файл лише на твоєму комп'ютері, як ключ Pixabay;
+гроші — нуль, картка ніде не потрібна; 🎤 авто-субтитри — Whisper на Groq:
+будь-яке відео → .srt + .txt (~8 год аудіо/день безкоштовно). Усе fail-open.
 """
 import array
 import asyncio
@@ -251,12 +257,20 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.35 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.36 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
 OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: URL+модель+провайдер, лише локально
 POLLINATIONS_URL = "https://text.pollinations.ai"  # 🌐 v35: безкоштовний онлайн-LLM БЕЗ ключів (Pollinations)
+KILO_URL = "https://api.kilo.ai/api/gateway"  # ⚡ v36: безкоштовний шлюз Kilo Code — 200 зап/год БЕЗ ключа
+FREEKEYS_FILE = os.path.join(TOOLS_DIR, "freekeys.json")  # 🔑 v36: безкоштовні фрітір-ключі, лише локально
+# 🔑 v36: OpenAI-сумісні бази безкоштовних фрітір-ключів (усі — без картки; гроші — нуль)
+FREEKEY_ENGINES = {
+    "groq": {"url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
+    "github": {"url": "https://models.github.ai/inference", "model": "openai/gpt-4o"},
+    "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
+}
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
@@ -528,7 +542,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v35"}
+            d = {"app": "Генератор відео v36"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -666,7 +680,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v35"}
+                "app": "Генератор відео v36"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2140,21 +2154,205 @@ def pollinations_chat(url, model, prompt, system=None, timeout=120):
     return ""
 
 
+def load_freekeys():
+    """🔑 v36: безкоштовні фрітір-ключі (groq/github/gemini) з tools/freekeys.json —
+    файл лише на комп'ютері користувача, у код і GitHub не потрапляє (патерн Pixabay).
+    Кривий або нема — порожній словник (fail-open, гроші — нуль)."""
+    try:
+        with open(FREEKEYS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def freekey_engine():
+    """🔑 v36: який безкоштовний ключ є у freekeys.json (пріоритет Groq → GitHub →
+    Gemini: у Groq ще й Whisper-субтитри). Нема жодного — None (fail-open)."""
+    keys = load_freekeys()
+    for name in ("groq", "github", "gemini"):
+        if len(str(keys.get(name) or "").strip()) >= 20:
+            return name
+    return None
+
+
+def kilo_list_models(url, timeout=10):
+    """⚡ v36: Kilo Code — публічний OpenAI-сумісний шлюз БЕЗ ключа (free-пул
+    ~200 запитів/год). Список моделей через GET /models; лишаю безкоштовні
+    (суфікс free) — решта після реєстрації. Помилка — kilo-auto/free (fail-open)."""
+    try:
+        r = requests.get((url or KILO_URL).rstrip("/") + "/models",
+                         timeout=timeout, headers={"User-Agent": UA_STRING})
+        if r.status_code != 200:
+            return ["kilo-auto/free"]
+        data = r.json()
+        if isinstance(data, dict):
+            data = data.get("data") or data.get("models") or []
+        ids = [str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id")]
+        free = [i for i in ids if "free" in i.lower()]
+        return free or ["kilo-auto/free"]
+    except Exception:
+        return ["kilo-auto/free"]
+
+
+def kilo_chat(url, model, prompt, system=None, timeout=120):
+    """⚡ v36: один запит до Kilo Code БЕЗ ключа (POST /chat/completions,
+    OpenAI-формат; ~200 зап/год — у рази щільніше за Pollinations).
+    Не вдався (429 — вичерпали годинний пул) — "" (fail-open, нуль ключів)."""
+    body = {"model": (model or "").strip() or "kilo-auto/free",
+            "messages": ([{"role": "system", "content": system}] if system else [])
+            + [{"role": "user", "content": prompt}]}
+    try:
+        r = requests.post((url or KILO_URL).rstrip("/") + "/chat/completions",
+                          json=body, timeout=timeout, headers={"User-Agent": UA_STRING})
+        if r.status_code != 200:
+            return ""
+        ch = (r.json().get("choices") or [{}])[0]
+        return (((ch.get("message") or {}).get("content") or "")).strip()
+    except Exception:
+        return ""
+
+
+def freekey_list_models(url, timeout=10):
+    """🔑 v36: список моделей безкоштовного ключа (OpenAI-сумісний GET /models,
+    Bearer). Нема ключа/помилка — порожній список (fail-open)."""
+    eng = freekey_engine()
+    if not eng:
+        return []
+    conf = FREEKEY_ENGINES[eng]
+    try:
+        r = requests.get(conf["url"].rstrip("/") + "/models", timeout=timeout,
+                         headers={"Authorization": "Bearer " +
+                                  str(load_freekeys().get(eng) or "").strip()})
+        if r.status_code != 200:
+            return []
+        data = r.json().get("data") or []
+        return [str(m.get("id")) for m in data if m.get("id")][:30]
+    except Exception:
+        return []
+
+
+def freekey_chat(url, model, prompt, system=None, timeout=90):
+    """🔑 v36: один запит через безкоштовний фрітір-ключ (Groq / GitHub Models /
+    Gemini — OpenAI-сумісні, Bearer; модель підставляється своя для кожного).
+    Нема ключа/помилка/429 — "" (fail-open, гроші — нуль)."""
+    eng = freekey_engine()
+    if not eng:
+        return ""
+    conf = FREEKEY_ENGINES[eng]
+    m = (model or "").strip()
+    if not m or m == "модель не обрана":
+        m = conf["model"]
+    body = {"model": m,
+            "messages": ([{"role": "system", "content": system}] if system else [])
+            + [{"role": "user", "content": prompt}]}
+    try:
+        r = requests.post(conf["url"].rstrip("/") + "/chat/completions",
+                          json=body, timeout=timeout,
+                          headers={"Authorization": "Bearer " +
+                                   str(load_freekeys().get(eng) or "").strip()})
+        if r.status_code != 200:
+            return ""
+        ch = (r.json().get("choices") or [{}])[0]
+        return (((ch.get("message") or {}).get("content") or "")).strip()
+    except Exception:
+        return ""
+
+
+def groq_transcribe_srt(video, say):
+    """🎤 v36: авто-субтитри для будь-якого відео — Whisper на Groq (безкоштовний
+    фрітір ~8 год аудіо/день, ключ з tools/freekeys.json, картка не потрібна).
+    Витягує звук (16 кГц моно mp3), transcription verbose_json → сегменти →
+    .srt + .txt поруч з відео (відео не чіпаю). Fail-open: нема ключа/мережі/
+    файл >25 МБ — чесно кажу чому і не ламаюсь."""
+    key = str(load_freekeys().get("groq") or "").strip()
+    if len(key) < 20:
+        say("🔑 Нема ключа Groq — додай безкоштовний у freekeys.json (папка "
+            "AppData/Local/VideoGenerator): {\"groq\": \"gsk_…\"} — console.groq.com "
+            "→ API Keys, 2 хвилини, без картки")
+        return None
+    ensure_ffmpeg(say)
+    ff = ffmpeg_path()
+    aud = os.path.splitext(video)[0] + "._stt.mp3"
+    try:
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", video,
+             "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-q:a", "9", aud])
+        if os.path.getsize(aud) > 25 * 1024 * 1024:
+            say("🎤 Аудіо більше за 25 МБ — ліміт безкоштовного Groq; поріж відео на частини")
+            return None
+        say("🎤 Розпізнаю мову (Whisper на Groq — швидко і безкоштовно)…")
+        with open(aud, "rb") as fh:
+            r = requests.post(
+                FREEKEY_ENGINES["groq"]["url"].rstrip("/") + "/audio/transcriptions",
+                files={"file": (os.path.basename(aud), fh, "audio/mpeg")},
+                data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json"},
+                headers={"Authorization": "Bearer " + key}, timeout=600)
+        if r.status_code != 200:
+            say("🎤 Groq не прийняв аудіо (HTTP " + str(r.status_code) + ") — спробуй ще раз")
+            return None
+        d = r.json()
+        text = (d.get("text") or "").strip()
+        segs = d.get("segments") or []
+
+        def _fmt(t):
+            h, rem = divmod(max(float(t), 0.0), 3600)
+            mi, s = divmod(rem, 60)
+            return "{:02d}:{:02d}:{:06.3f}".format(int(h), int(mi), s).replace(".", ",")
+        srt = os.path.splitext(video)[0] + ".srt"
+        if segs:
+            blocks = []
+            for i, g in enumerate(segs, 1):
+                blocks.append("{}\n{} --> {}\n{}\n".format(
+                    i, _fmt(g.get("start") or 0), _fmt(g.get("end") or 0),
+                    str(g.get("text") or "").strip()))
+            with open(srt, "w", encoding="utf-8") as f:
+                f.write("\n".join(blocks))
+        elif text:
+            with open(srt, "w", encoding="utf-8") as f:
+                f.write("1\n00:00:00,000 --> 00:10:00,000\n" + text + "\n")
+        else:
+            say("🎤 Whisper нічого не розпізнав — у відео нема мовлення?")
+            return None
+        with open(os.path.splitext(video)[0] + ".txt", "w", encoding="utf-8") as f:
+            f.write(text + "\n")
+        say("🎤 Готово: {} реплік — {} (+ .txt з текстом)".format(
+            len(segs) or 1, os.path.basename(srt)))
+        return srt
+    except Exception as e:
+        say("🎤 Субтитри не вийшли: " + str(e)[:160])
+        return None
+    finally:
+        try:
+            os.remove(aud)
+        except OSError:
+            pass
+
+
 def llm_list_models(provider, url, timeout=8):
-    """🌐 v31/v35: список моделей за провайдером: Ollama, 9Router або Pollinations."""
+    """🌐 v31/v35/v36: список моделей за провайдером: Ollama, 9Router, Pollinations,
+    Kilo Code або безкоштовний ключ (Groq/GitHub/Gemini)."""
     if provider == "9router":
         return router_list_models(url, timeout)
     if provider == "pollinations":
         return pollinations_list_models(url, timeout)
+    if provider == "kilo":
+        return kilo_list_models(url, timeout)
+    if provider == "freekey":
+        return freekey_list_models(url, timeout)
     return ollama_list_models(url, timeout)
 
 
 def llm_chat(provider, url, model, prompt, system=None, timeout=90):
-    """🌐 v31/v35: один запит за провайдером: Ollama, 9Router або Pollinations."""
+    """🌐 v31/v35/v36: один запит за провайдером: Ollama, 9Router, Pollinations,
+    Kilo Code або безкоштовний ключ (Groq/GitHub/Gemini)."""
     if provider == "9router":
         return router_chat(url, model, prompt, system=system, timeout=timeout)
     if provider == "pollinations":
         return pollinations_chat(url, model, prompt, system=system, timeout=timeout)
+    if provider == "kilo":
+        return kilo_chat(url, model, prompt, system=system, timeout=timeout)
+    if provider == "freekey":
+        return freekey_chat(url, model, prompt, system=system, timeout=timeout)
     return ollama_chat(url, model, prompt, system=system, timeout=timeout)
 
 
@@ -4146,7 +4344,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🌐 Онлайн (Pollinations — безкоштовно, БЕЗ ключів і встановлення) або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🌐 Онлайн (Pollinations) або ⚡ Kilo Code — безкоштовно, БЕЗ ключів (Kilo — ~200 зап/год, щільніше); 🔑 Ключ — безкоштовні Groq / GitHub Models / Gemini (файл freekeys.json, тільки локально, без картки); або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -4155,13 +4353,16 @@ class App:
         ctk.CTkLabel(prow, text="Джерело:", font=self._f(11),
                      text_color=self.MUTED).pack(side="left", padx=(0, 6))
         self.llm_provider = ctk.CTkSegmentedButton(
-            prow, values=["Ollama", "9Router", "🌐 Онлайн"], font=self._f(11), height=28,
+            prow, values=["Ollama", "9Router", "🌐 Онлайн", "⚡ Kilo", "🔑 Ключ"],
+            font=self._f(11), height=28,
             fg_color=self.INSET, selected_color=self.ACCENT,
             selected_hover_color=self.ACCENT_H, unselected_color=self.HOVER,
             command=self._switch_llm_provider)
         _prov0 = (_oc.get("provider") or "ollama")
         self.llm_provider.set("🌐 Онлайн" if _prov0 == "pollinations"
-                              else ("9Router" if _prov0 == "9router" else "Ollama"))
+                              else ("9Router" if _prov0 == "9router"
+                                    else ("⚡ Kilo" if _prov0 == "kilo"
+                                          else ("🔑 Ключ" if _prov0 == "freekey" else "Ollama"))))
         self.llm_provider.pack(side="left")
         self.ollama_url = ctk.CTkEntry(ac, placeholder_text="http://localhost:11434",
                                        height=32, corner_radius=10, fg_color=self.INSET,
@@ -4590,6 +4791,22 @@ class App:
         ctk.CTkButton(mrow, text="🧬 Змінити", width=110, height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.meta_now).pack(side="right")
+        ctk.CTkLabel(self.tools_body, text="🎤 Авто-субтитри (Whisper на Groq — безкоштовний ключ)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.stt_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано відео",
+                                    font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.stt_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        sttrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        sttrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(sttrow, text="➕ Додати", width=84, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_stt_file).pack(side="left")
+        ctk.CTkButton(sttrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_stt_file).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(sttrow, text="🎤 Згенерувати", width=130, height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.stt_now).pack(side="right")
         ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
@@ -4785,7 +5002,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v35 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл і 🌐 онлайн AI-асистент (Pollinations, без ключів).\nКлюч Pixabay і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v36 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5737,6 +5954,36 @@ class App:
         finally:
             self.q.put(None)
 
+    def pick_stt_file(self):
+        """🎤 v36: обрати відео для авто-субтитрів (Whisper на Groq)."""
+        p = filedialog.askopenfilename(filetypes=[("Відео", "*.mp4 *.mov *.mkv *.avi *.webm")])
+        if p:
+            self.stt_file = p
+            self.stt_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🎤 Обрано: " + os.path.basename(p))
+
+    def clear_stt_file(self):
+        self.stt_file = None
+        self.stt_lbl.configure(text="Не обрано відео", text_color=self.MUTED)
+
+    def stt_now(self):
+        """🎤 v36: субтитри з відео — окремим потоком (ffmpeg + Whisper, Tk не блокується)."""
+        if not getattr(self, "stt_file", None) or not os.path.isfile(self.stt_file):
+            messagebox.showwarning("Стоп", "Спершу додай відео 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._stt_thread, daemon=True).start()
+
+    def _stt_thread(self):
+        p = getattr(self, "stt_file", None)
+        try:
+            groq_transcribe_srt(p, self.say)
+        except Exception as e:
+            self.say("❌ Субтитри: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
     def open_folder(self):
         if self.workdir and os.path.isdir(self.workdir):
             os.startfile(self.workdir)  # Windows
@@ -5837,7 +6084,8 @@ class App:
                 if _weak or _need_sc:
                     _prov = self._llm_provider()
                     self.say("🧠 {} ({}): думаю над фразою у фоні…".format(
-                        {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations"}.get(_prov, "Ollama"), _om))
+                        {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations",
+                         "kilo": "⚡ Kilo Code", "freekey": "🔑 Безкошт. ключ"}.get(_prov, "Ollama"), _om))
                     threading.Thread(target=self._agent_llm_thread,
                                     args=(cmd, _ou, _om, _weak, _need_sc, _prov),
                                     daemon=True).start()
@@ -5911,19 +6159,27 @@ class App:
             " і написала сценарій" if sc else ""))
 
     def _llm_provider(self):
-        """🌐 v31/v35: що обрано в картці Асистента: 'ollama', '9router' або 'pollinations'."""
+        """🌐 v31/v35/v36: що обрано в картці Асистента: 'ollama', '9router',
+        'pollinations', 'kilo' або 'freekey'."""
         try:
             val = self.llm_provider.get() or ""
             if val == "🌐 Онлайн":
                 return "pollinations"
+            if val == "⚡ Kilo":
+                return "kilo"
+            if val == "🔑 Ключ":
+                return "freekey"
             return "9router" if val == "9Router" else "ollama"
         except Exception:
             return "ollama"
 
     def _switch_llm_provider(self, val):
-        """🌐 v31/v35: перемикання Ollama ↔ 9Router ↔ Онлайн — дефолтний URL міняється слідом."""
+        """🌐 v31/v35/v36: перемикання Ollama ↔ 9Router ↔ Онлайн ↔ Kilo ↔ Ключ —
+        дефолтний URL міняється слідом."""
         defs = {"Ollama": "http://localhost:11434", "9Router": "http://localhost:20128",
-                "🌐 Онлайн": POLLINATIONS_URL}
+                "🌐 Онлайн": POLLINATIONS_URL, "⚡ Kilo": KILO_URL,
+                "🔑 Ключ": (FREEKEY_ENGINES.get(freekey_engine() or "groq", {})
+                            .get("url") or FREEKEY_ENGINES["groq"]["url"])}
         others = {v for k, v in defs.items() if k != val}
         cur = (self.ollama_url.get() or "").strip()
         if not cur or cur in others:
@@ -5934,20 +6190,32 @@ class App:
                 val, defs.get(val, "")))
 
     def ollama_check_now(self):
-        """🧠 v29 / 🌐 v31: «Перевірити» — список моделей провайдера у фоні, Tk не зависає."""
+        """🧠 v29 / 🌐 v31/v36: «Перевірити» — список моделей провайдера у фоні, Tk не зависає."""
         prov = self._llm_provider()
-        url = (self.ollama_url.get().strip()
-               or (POLLINATIONS_URL if prov == "pollinations"
-                   else ("http://localhost:20128" if prov == "9router" else "http://localhost:11434")))
-        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)"}.get(prov, "🧠 Ollama")
+        if prov == "freekey" and not freekey_engine():
+            self.ollama_status.configure(
+                text="🔑 Немає безкоштовного ключа — додай у freekeys.json (папка "
+                     "AppData/Local/VideoGenerator): {\"groq\": \"gsk_…\"} — console.groq.com, "
+                     "2 хвилини, без картки. Без ключа — «🌐 Онлайн».")
+            return
+        if not prov:
+            prov = "ollama"
+        defs = {"pollinations": POLLINATIONS_URL, "kilo": KILO_URL,
+                "9router": "http://localhost:20128"}
+        url = (self.ollama_url.get().strip() or defs.get(prov) or
+               (FREEKEY_ENGINES.get(freekey_engine() or "groq", {}).get("url")
+                if prov == "freekey" else "http://localhost:11434"))
+        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)",
+                "kilo": "⚡ Kilo Code (онлайн)", "freekey": "🔑 Безкошт. ключ"}.get(prov, "🧠 Ollama")
         self.ollama_status.configure(text="🔄 Шукаю {} на {}…".format(name, url))
         threading.Thread(target=lambda: self.q.put(
             ("ollama_check", (prov, url, llm_list_models(prov, url)))), daemon=True).start()
 
     def _ollama_check_done(self, payload):
-        """🧠 v29 / 🌐 v31: перевірку зроблено — меню моделей, збереження, статус."""
+        """🧠 v29 / 🌐 v31/v36: перевірку зроблено — меню моделей, збереження, статус."""
         prov, url, models = payload
-        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)"}.get(prov, "🧠 Ollama")
+        name = {"9router": "🌐 9Router", "pollinations": "🌐 Pollinations (онлайн)",
+                "kilo": "⚡ Kilo Code (онлайн)", "freekey": "🔑 Безкошт. ключ"}.get(prov, "🧠 Ollama")
         if not models:
             self.ollama_status.configure(
                 text="ℹ️ {} на {} не піднято — Асистент працює як раніше (парсер)".format(name, url))
