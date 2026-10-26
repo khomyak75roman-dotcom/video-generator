@@ -226,6 +226,16 @@ v47: 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер» у ка�
 СТАНДАРТНЕ, як у будь-яких програмах: Вирізати/Копіювати/
 Вставити/Виділити все/Очистити — у всіх полях (байнд жив не
 там — меню могло не відкритись узагалі; виправлено).
+v48: 📊 ВСІ напрацювання знань у чаті: ТАБЛИЦІ Markdown (| а | б |
++ |---|---|) — вирівняні колонки у моноширинному Consolas; ⚡
+швидкість стріму — симв/с у мітці джерела під час відповіді;
+🔗 кинь URL у повідомлення — агент сам прочитає сторінку;
+🤖 СПРАВЖНІЙ tool-use: модель має право відповісти «🔍ПОШУК:
+запит» — агент шукає в DuckDuckGo і модель відповідає ще раз
+уже з даними; 💾 кеш відповідей (24 год) — те саме питання
+миттєве і безкоштовне; 🌙 темна тема чату — кнопка у шапці;
+📡 мітка відповіді показує, ЯКИЙ шлюз ФАКТИЧНО відповів
+(навіть коли джерело — «Авто»/драбина). Усе fail-open.
 """
 import array
 import asyncio
@@ -361,7 +371,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.47 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.48 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -736,7 +746,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v47"}
+            d = {"app": "Генератор відео v48"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -874,7 +884,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v47"}
+                "app": "Генератор відео v48"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2610,6 +2620,23 @@ def agent_web_context(query, timeout=15):
     return ctx, "знайшов " + str(len(hits)) + " свіжих джерел у мережі"
 
 
+LLM_REPLY_CACHE = {}  # 💾 v48: ключ кешу → (відповідь, час) — те саме питання без повторної оплати
+LAST_STREAM_SOURCE = {"src": "", "t": 0.0}  # 📡 v48: який шлюз САМЕ щойно відповів стрімом
+
+
+def llm_cache_key(provider, model, prompt, system, history):
+    """💾 v48: ключ кешу відповіді — провайдер+модель+запит+система+історія.
+    Щось змінилось (навіть пам'ять або свіжі дані агента) — інший ключ,
+    застаріле не підсовую. Помилка — "" (кеш просто вимкнувся, fail-open)."""
+    try:
+        raw = "|".join([str(provider or ""), str(model or ""),
+                        str(prompt or ""), str(system or ""),
+                        json.dumps(history or [], ensure_ascii=False)])
+        return hashlib.md5(raw.encode("utf-8", "ignore")).hexdigest()
+    except Exception:
+        return ""
+
+
 BROWSER_HOMES = (  # 🏠 v47: домашні сторінки власного браузера
     ("🔎 DuckDuckGo", "https://lite.duckduckgo.com/lite/"),
     ("🟣 GLM Z.AI", "https://z.ai/manage-apikey/apikey-list"),
@@ -3385,6 +3412,9 @@ def llm_trace(kind, provider, model, t0, ok, chars):
     провайдер/модель/вид/мс/успіх/символи. Ротація: >64 КБ — лишаю останні
     500 рядків. Fail-open: журнал — лише діагностика, ніколи не ламає запит."""
     try:
+        if kind == "stream" and ok:  # 📡 v48: хто САМЕ відповів стрімом (робоча ступінь драбини)
+            LAST_STREAM_SOURCE["src"] = (provider or "").strip()
+            LAST_STREAM_SOURCE["t"] = time.time()
         os.makedirs(TOOLS_DIR, exist_ok=True)
         p = LLM_TRACE_FILE
         if os.path.isfile(p) and os.path.getsize(p) > 64 * 1024:
@@ -5151,6 +5181,17 @@ class App:
     CLAUDE_TEXT = "#141413"    # текст чату
     CLAUDE_MUTED = "#87867F"   # приглушений текст чату
     CLAUDE_LINE = "#E8E6DC"    # рамки чату
+    CLAUDE_BAR = "#FFFFFF"     # 🌙 v48: панель введення чату (світла)
+    CLAUDE_HOVER = "#E8E5D9"   # 🌙 v48: ховер кнопок чату (світла)
+    CHAT_THEMES = {  # 🌙 v48: теми чату — світла Claude і темна нічна
+        "light": {"BG": "#FAF9F5", "CARD": "#F0EEE6", "TEXT": "#141413",
+                  "MUTED": "#87867F", "ACCENT": "#D97757",
+                  "ACCENT_H": "#C15F3C", "LINE": "#E8E6DC",
+                  "BAR": "#FFFFFF", "HOVER": "#E8E5D9"},
+        "dark": {"BG": "#1F1E1D", "CARD": "#2A2926", "TEXT": "#F5F4F0",
+                 "MUTED": "#A8A29E", "ACCENT": "#D97757",
+                 "ACCENT_H": "#C15F3C", "LINE": "#3A3936",
+                 "BAR": "#2A2926", "HOVER": "#3A3936"}}
     GEN_BASE = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     STEPS = ("📝 Текст", "🎙 Озвучка", "💬 Субтитри", "🎬 Фон", "⚙️ Рендер")
     STEP_KEYS = (
@@ -6185,7 +6226,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v47 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v48 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7812,6 +7853,42 @@ class App:
         if val and val != "🔄 Як в картці":
             self.say("💬 Чат: джерело — " + val)
 
+    def _chat_theme_toggle(self):
+        """🌙 v48: темна тема чату одним кліком: палітра — на інстанс
+        (клас-світла лишається), вкладка перезбирається цілком — тема
+        лягає на бульбашки, шапку, поле введення. Історія і вибране
+        джерело не губляться; стрім іде — не міняю (fail-open)."""
+        if getattr(self, "_chat_busy", False):
+            self.say("💬 Дочекайся відповіді — тоді міняю тему")
+            return
+        dark = not getattr(self, "_chat_dark", False)
+        self._chat_dark = dark
+        t = self.CHAT_THEMES["dark" if dark else "light"]
+        self.CLAUDE_BG = t["BG"]          # палітра — на інстанс, клас не чіпаю
+        self.CLAUDE_CARD = t["CARD"]
+        self.CLAUDE_TEXT = t["TEXT"]
+        self.CLAUDE_MUTED = t["MUTED"]
+        self.CLAUDE_ACCENT = t["ACCENT"]
+        self.CLAUDE_ACCENT_H = t["ACCENT_H"]
+        self.CLAUDE_LINE = t["LINE"]
+        self.CLAUDE_BAR = t["BAR"]
+        self.CLAUDE_HOVER = t["HOVER"]
+        try:
+            pick = (self.chat_pick.get() or "🔄 Як в картці")
+        except Exception:
+            pick = "🔄 Як в картці"
+        try:
+            for w in self.tab_chat.winfo_children():
+                w.destroy()
+        except Exception:
+            pass
+        self._chat_build()
+        try:
+            self.chat_pick.set(pick)
+        except Exception:
+            pass
+        self.say("🌙 Темна тема чату" if dark else "☀️ Світла тема чату")
+
     def open_browser_win(self):
         """🌐 v47: СВІЙ БРАУЗЕР — вікно з адресою, історією, reader-режимом
         (сторінка → читабельний текст, без важкого движка — тому не тупить),
@@ -8095,14 +8172,14 @@ class App:
                              text_color=self.CLAUDE_TEXT, wraplength=430,
                              justify="left").pack(side="left", padx=10, pady=8)
                 ctk.CTkButton(row, text="🗑", width=40, height=30, corner_radius=15,
-                              fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                              fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                               text_color=self.CLAUDE_TEXT, font=self._f(13),
                               command=lambda idx=i: self._mem_forget(idx, rebuild)
                               ).pack(side="right", padx=8)
 
         rebuild()
         ctk.CTkButton(win, text="Очистити все", height=34, corner_radius=17,
-                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=lambda: (self._mem_save([]), rebuild(),
                                        self.say("🧠 Пам'ять чату очищено"))
@@ -8127,7 +8204,10 @@ class App:
              "(наприклад: «Shorts про космос, голос Поліна, караоке»). "
              "Ти ще й АГЕНТ: якщо нижче є «Свіжі дані з мережі» — це твій "
              "інструмент-пошук (DuckDuckGo): відповідай, спираючись на них, "
-             "і вкажи джерела URL-посиланнями.")
+             "і вкажи джерела URL-посиланнями. 🤖 Якщо для відповіді потрібні "
+             "свіжі дані з мережі, а їх у промпті нема — відповій ЛИШЕ "
+             "рядком «🔍ПОШУК: що знайти» — агент знайде і передасть тобі "
+             "дані для другої відповіді.")
         rules = project_rules()  # 📏 v32: правила проєкту — обов'язкові для моделі
         if rules:
             s += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
@@ -8208,7 +8288,7 @@ class App:
             head, width=200, height=28, font=self._f(11),
             fg_color=self.CLAUDE_CARD, button_color=self.CLAUDE_LINE,
             button_hover_color=self.CLAUDE_ACCENT_H, text_color=self.CLAUDE_TEXT,
-            dropdown_fg_color="#FFFFFF", dropdown_text_color=self.CLAUDE_TEXT,
+            dropdown_fg_color=self.CLAUDE_BAR, dropdown_text_color=self.CLAUDE_TEXT,
             dropdown_hover_color=self.CLAUDE_LINE,
             values=["🔄 Як в картці", "🤖 Claude онлайн", "💬 ChatGPT онлайн",
                     "🇪🇺 Mistral онлайн"]
@@ -8224,13 +8304,21 @@ class App:
                       command=self._chat_new).pack(side="right", padx=(8, 16),
                                                    pady=(10, 4))
         ctk.CTkButton(head, text="🌐 Браузер", height=30, corner_radius=15,  # 🌐 v47
-                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self.open_browser_win).pack(side="right",
                                                           padx=(0, 8),
                                                           pady=(10, 4))
+        ctk.CTkButton(head, text=("☀️" if getattr(self, "_chat_dark", False)
+                                  else "🌙"), width=44, height=30,
+                      corner_radius=15,  # 🌙 v48: темна тема чату — одним кліком
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._chat_theme_toggle).pack(side="right",
+                                                            padx=(0, 8),
+                                                            pady=(10, 4))
         ctk.CTkButton(head, text="🧠 Пам'ять", height=30, corner_radius=15,
-                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_memory_win).pack(side="right", pady=(10, 4))
 
@@ -8240,7 +8328,7 @@ class App:
         self.chat_scroll.pack(fill="both", expand=True, side="top")
 
         # панель введення — як у Claude: біла картка з рамкою
-        bar = ctk.CTkFrame(win, fg_color="#FFFFFF", corner_radius=16,
+        bar = ctk.CTkFrame(win, fg_color=self.CLAUDE_BAR, corner_radius=16,
                           border_width=1, border_color=self.CLAUDE_LINE)
         bar.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
         self.chat_input = ctk.CTkTextbox(bar, height=92, font=self._f(13),
@@ -8258,20 +8346,20 @@ class App:
         row = ctk.CTkFrame(bar, fg_color="transparent")
         row.pack(fill="x", padx=10, pady=(2, 10))
         ctk.CTkButton(row, text="📥 Вставити", height=34, corner_radius=17,
-                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=lambda: self.paste_into(self.chat_input)).pack(
                           side="left")
         ctk.CTkButton(row, text="📎 Файл", height=34, corner_radius=17,
-                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_attach).pack(side="left", padx=(8, 0))
         ctk.CTkButton(row, text="🌐 Пошук", height=34, corner_radius=17,  # 🕵️ v47: агент
-                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_web_send).pack(side="left", padx=(8, 0))
         ctk.CTkButton(row, text="⚙️ у поля генератора", height=34, corner_radius=17,
-                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_to_fields).pack(side="left", padx=(8, 0))
         self.chat_send_btn = ctk.CTkButton(
@@ -8282,9 +8370,11 @@ class App:
         self.chat_send_btn.pack(side="right")
         ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
                      "📎 Файл — додати txt/srt/… у контекст • 🌐 Пошук — агент "
-                     "знайде свіже в мережі • ✏️ під своїм повідомленням — "
+                     "знайде свіже в мережі • 🔗 кинь URL у повідомлення — агент "
+                     "прочитає сторінку • ✏️ під своїм повідомленням — "
                      "редагувати • Ctrl+K — нова розмова • 🖱 ПКМ — як у всіх "
-                     "програмах • 🎯 джерело думання — меню у шапці чату",
+                     "програмах • 🎯 джерело думання — меню у шапці • 🌙 — тема "
+                     "• ⚡ у мітці під час стріму — швидкість, симв/с",
                      font=self._f(10), text_color=self.CLAUDE_MUTED,
                      anchor="w", wraplength=560).pack(fill="x", padx=16,
                                                      pady=(0, 6))
@@ -8304,7 +8394,7 @@ class App:
         for chip in self.CHAT_CHIPS:
             ctk.CTkButton(self.chat_scroll, text=chip, anchor="w", height=40,
                           corner_radius=16, fg_color=self.CLAUDE_CARD,
-                          hover_color="#E8E5D9", text_color=self.CLAUDE_TEXT,
+                          hover_color=self.CLAUDE_HOVER, text_color=self.CLAUDE_TEXT,
                           font=self._f(12),
                           command=lambda t=chip: self._chat_chip(t)).pack(
                               fill="x", padx=16, pady=3)
@@ -8324,6 +8414,9 @@ class App:
             box.tag_config("mdq", font=("Segoe UI", 12, "normal", "italic"),
                            foreground="#87867F")
             box.tag_config("mdcode", font=("Consolas", 12))
+            box.tag_config("mdth", font=("Consolas", 12, "bold"),  # 📊 v48: заголовок таблиці
+                           background=getattr(self, "CLAUDE_CARD", "#F0EEE6"))
+            box.tag_config("mdtr", font=("Consolas", 11))  # 📊 v48: рядок таблиці
         except Exception:
             pass  # теги не піднялися — текст лишається читабельним (fail-open)
 
@@ -8342,14 +8435,31 @@ class App:
                 box.insert("end", part)
 
     def _md_text_into(self, box, text):
-        """🎨 v42: Markdown-рендер блока тексту: заголовки, списки, цитати,
-        інлайн-розмітка. Кожен рядок — з тегом; усе fail-open."""
+        """🎨 v42/v48: Markdown-рендер блока тексту: заголовки, списки, цитати,
+        інлайн-розмітка + ТАБЛИЦІ (| а | б | + |---|---|) — вирівняні колонки.
+        Кожен рядок — з тегом; усе fail-open."""
+        lines = (text or "").split("\n")
         first = True
-        for line in (text or "").split("\n"):
+        i = 0
+        while i < len(lines):
+            s = lines[i].strip()
+            # 📊 v48: блок-таблиця — рядок з |, а наступний — розділювач |---|
+            if s.startswith("|") and i + 1 < len(lines) \
+                    and re.match(r"^\|[\s:\-|]+\|?\s*$", lines[i + 1].strip()):
+                j = i
+                rows = []
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    rows.append(lines[j].strip())
+                    j += 1
+                if not first:
+                    box.insert("end", "\n")
+                self._md_table(box, rows)
+                first = False
+                i = j
+                continue
             if not first:
                 box.insert("end", "\n")
             first = False
-            s = line.strip()
             if s.startswith("### ") or s.startswith("## ") or s.startswith("# "):
                 box.insert("end", s.lstrip("# ").strip(), "mdh")
             elif s.startswith("- ") or s.startswith("• ") or s.startswith("* "):
@@ -8358,7 +8468,38 @@ class App:
             elif s.startswith("> "):
                 box.insert("end", "│ " + s[2:].strip(), "mdq")
             else:
-                self._md_inline(box, line)
+                self._md_inline(box, lines[i])
+            i += 1
+
+    def _md_table(self, box, rows):
+        """📊 v48: Markdown-таблиця → вирівняні колонки (Consolas): заголовок
+        тисну жирним на підкладці, розділювач |---| ховаю, маркери **/` у
+        клітинках прибираю — чистий текст. Крива таблиця — що встигло,
+        те й показав (fail-open)."""
+        try:
+            cells = []
+            for r in rows:
+                cells.append([re.sub(r"\*\*|`|\*", "", c.strip()) for c in
+                              r.strip().strip("|").split("|")])
+            if len(cells) >= 2 and cells[1] and \
+                    all(re.match(r"^[\s:\-]*$", c) for c in cells[1]):
+                cells.pop(1)  # розділювач |---|---| не показую
+            if not cells:
+                return
+            ncol = max(len(r) for r in cells)
+            widths = [0] * ncol
+            for r in cells:
+                for k in range(min(len(r), ncol)):
+                    widths[k] = max(widths[k], len(r[k]))
+            for ri, r in enumerate(cells):
+                parts = []
+                for k in range(ncol):
+                    c = r[k] if k < len(r) else ""
+                    parts.append(c + " " * max(widths[k] - len(c), 0) + "  ")
+                box.insert("end", "│ " + "│ ".join(parts) + "│",
+                           "mdth" if ri == 0 else "mdtr")
+        except Exception:
+            pass  # крива таблиця — що встигло, те й показав (fail-open)
 
     def _md_split(self, text):
         """📦 v42: розрізати відповідь на текст і код-блоки (``` мова … ```).
@@ -8397,7 +8538,7 @@ class App:
                          anchor="e", padx=14, pady=(8, 10))
         if idx is not None:
             ctk.CTkButton(b, text="✏️ Редагувати", height=24, corner_radius=12,
-                          fg_color="transparent", hover_color="#E8E5D9",
+                          fg_color="transparent", hover_color=self.CLAUDE_HOVER,
                           text_color=self.CLAUDE_MUTED, font=self._f(10),
                           command=lambda i=idx: self._chat_edit(i)).pack(
                               side="right", padx=(4, 10), pady=(0, 6))
@@ -8416,16 +8557,16 @@ class App:
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x", padx=12, pady=(2, 8))
         ctk.CTkButton(row, text="📋 Копіювати", height=28, corner_radius=14,
-                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(11),
                       command=lambda c=code: self._chat_copy(c)).pack(side="left")
         ctk.CTkButton(row, text="💾 Зберегти", height=28, corner_radius=14,
-                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(11),
                       command=lambda c=code, l=lang: self._chat_artifact_save(
                           c, l)).pack(side="left", padx=(6, 0))
         ctk.CTkButton(row, text="⤏ у поля генератора", height=28, corner_radius=14,
-                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(11),
                       command=lambda c=code: self._chat_artifact_to_fields(c)
                       ).pack(side="left", padx=(6, 0))
@@ -8478,12 +8619,12 @@ class App:
             acts = ctk.CTkFrame(a, fg_color="transparent")
             acts.pack(fill="x", anchor="w", pady=(0, 2))
             ctk.CTkButton(acts, text="📋 Копіювати", height=26, corner_radius=13,
-                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                          fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                           text_color=self.CLAUDE_MUTED, font=self._f(10),
                           command=lambda tx=text: self._chat_copy(tx)).pack(
                               side="left")
             ctk.CTkButton(acts, text="🔁 Ще раз", height=26, corner_radius=13,
-                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                          fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                           text_color=self.CLAUDE_MUTED, font=self._f(10),
                           command=self._chat_regen).pack(side="left",
                                                          padx=(6, 0))
@@ -8558,11 +8699,12 @@ class App:
         self.chat_input.delete("1.0", "end")
         self._chat_send_now(text)
 
-    def _chat_send_now(self, text, add_user=True, force_web=False):
+    def _chat_send_now(self, text, add_user=True, force_web=False, no_cache=False):
         """💬 v42/v47: репліка юзера → СТРІМІНГ у фоні: токени прилітають у чергу
         і малюються одразу (Tk не блокується). «запам'ятай: …» — локальна
         пам'ять, без запиту до моделі. 🕵️ force_web — агент ОБОВ'ЯЗКОВО шукає
-        свіже в мережі перед відповіддю (кнопка «🌐 Пошук» у чаті)."""
+        свіже в мережі перед відповіддю (кнопка «🌐 Пошук» у чаті).
+        💾 v48 no_cache — «🔁 Ще раз»: кеш оминаю, відповідь свіжа."""
         if getattr(self, "_chat_busy", False):
             self.say("💬 Чат: вже думаю над відповіддю — ⏹ Стоп або зачекай")
             return
@@ -8587,10 +8729,10 @@ class App:
         self._chat_stream_box = None
         self._chat_stream_frame = None
         self._chat_typing(True)
-        threading.Thread(target=self._chat_thread, args=(text, force_web),
-                         daemon=True).start()
+        threading.Thread(target=self._chat_thread,
+                         args=(text, force_web, no_cache), daemon=True).start()
 
-    def _chat_thread(self, text, force_web=False):
+    def _chat_thread(self, text, force_web=False, no_cache=False):
         """⚡ v42/v47: стрімінг-запит у фоні: джерело з картки + історія
         розмови; кожен токен — у чергу (chat_stream), фінал — chat_done.
         🕵️ v47 АГЕНТ: просиш свіже («знайди/новини/погода…») або тиснеш
@@ -8612,6 +8754,21 @@ class App:
         except Exception:
             pass
         system = self._chat_system()
+        history = self._chat_history_for_llm()
+        try:  # 🔗 v48: URL у повідомленні — агент читає сторінки у фоні
+            urls = re.findall(r"https?://[^\s\)\]\">]+", text or "")[:2]
+            pages = []
+            for u in urls:
+                pg = fetch_page_text(u, timeout=15, limit=4000)
+                if pg:
+                    pages.append("Вміст сторінки " + u + " (витяг):\n" + pg[:4000])
+            if pages:
+                system = (system or "") + "\n\n" + "\n\n".join(pages)
+                self.q.put(("chat_stream",
+                            "🔗 Агент: прочитав " + str(len(pages))
+                            + " сторінку(і) з твого посилання…\n\n"))
+        except Exception:
+            pass  # сторінка не далась — модель відповість як вміє (fail-open)
         try:  # 🕵️ v47: агент — свіжі дані з мережі, поки Tk навіть не здогадується
             if force_web or agent_wants_web(text):
                 ctx, note = agent_web_context(text, timeout=15)
@@ -8621,11 +8778,51 @@ class App:
                                 "🔎 Агент: " + note + " — відповідаю з ними…\n\n"))
         except Exception:
             pass  # пошук впав — модель відповість як вміє (fail-open)
+        key = ""  # 💾 v48: кеш — постав те саме питання, відповідь миттєва
+        try:
+            key = llm_cache_key(prov, model, text, system, history)
+            if no_cache:  # «🔁 Ще раз» — стару відповідь викидаю зі свіжого життя
+                LLM_REPLY_CACHE.pop(key, None)
+            hit = None if no_cache else LLM_REPLY_CACHE.get(key)
+            if hit and time.time() - hit[1] < 86400:  # свіжість кешу — 24 год
+                self.q.put(("chat_stream", hit[0]))
+                llm_trace("cache", prov, model or "-", t0, True,
+                          len(hit[0] or ""))
+                self.q.put(("chat_done", hit[0]))
+                return
+        except Exception:
+            pass  # кеш закапризував — живу як без нього (fail-open)
         full = llm_stream(prov, url, model, text, system=system,
-                          history=self._chat_history_for_llm(),
+                          history=history,
                           on_delta=lambda d: self.q.put(("chat_stream", d)),
                           stop=lambda: getattr(self, "_chat_cancel", False),
                           timeout=180)
+        try:  # 🤖 v48: справжній tool-use — модель просять мережу, агент дає дані (1 раунд)
+            m = re.match(r"^\s*🔍ПОШУК:\s*(.+?)\s*$", (full or "").strip(), re.S)
+            if m and not getattr(self, "_chat_cancel", False):
+                query = m.group(1).strip()[:300]
+                ctx, note = agent_web_context(query, timeout=15)
+                if ctx:
+                    self.q.put(("chat_stream",
+                                "🔎 Агент шукає: " + query + " — " + note
+                                + "…\n\n"))
+                    full = llm_stream(prov, url, model, text,
+                                      system=(system or "") + "\n\n" + ctx,
+                                      history=history,
+                                      on_delta=lambda d: self.q.put(
+                                          ("chat_stream", d)),
+                                      stop=lambda: getattr(self,
+                                                           "_chat_cancel", False),
+                                      timeout=180) or full
+        except Exception:
+            pass  # раунд агента впав — лишається перша відповідь (fail-open)
+        try:  # 💾 v48: зберегти у кеш — наступне таке саме питання миттєве
+            if key and full:
+                LLM_REPLY_CACHE[key] = (full, time.time())
+                if len(LLM_REPLY_CACHE) > 300:  # не роздуваємо пам'ять
+                    LLM_REPLY_CACHE.pop(next(iter(LLM_REPLY_CACHE)))
+        except Exception:
+            pass  # не збереглось — просто без кешу (fail-open)
         llm_trace("chat", prov, model or "-", t0, bool(full), len(full or ""))
         self.q.put(("chat_done", full))
 
@@ -8660,12 +8857,29 @@ class App:
                 self._chat_stream_frame, self._chat_stream_box = \
                     self._chat_render_assistant("", self._chat_source(),
                                                 buttons=False)
+                self._chat_stream_chars = 0   # ⚡ v48: лічильник швидкості стріму
+                self._chat_stream_t0 = time.time()
+                self._chat_speed_tick = 0.0
             box = self._chat_stream_box
             box.insert("end", piece)  # v43: бокс read-only через _ro_selectable — нормальний стан не шкодить
             lines = int(box.index("end-1c").split(".")[0])
             box.configure(height=min(500, max(30, lines * 20 + 10)))
             box.see("end")
             self.chat_scroll._parent_canvas.yview_moveto(1.0)
+            # ⚡ v48: швидкість стріму — симв/с у мітці джерела (не частіше 0.4 с)
+            self._chat_stream_chars = getattr(self, "_chat_stream_chars", 0) \
+                + len(piece)
+            now = time.time()
+            if now - getattr(self, "_chat_speed_tick", 0.0) > 0.4:
+                self._chat_speed_tick = now
+                el = max(now - getattr(self, "_chat_stream_t0", now), 0.2)
+                try:
+                    self.chat_src_lbl.configure(
+                        text="Джерело думання: " + self._chat_source()
+                        + " • ⚡ " + str(int(self._chat_stream_chars / el))
+                        + " симв/с")
+                except Exception:
+                    pass
         except Exception:
             pass  # вікно закрили — тихо (fail-open)
 
@@ -8694,10 +8908,23 @@ class App:
                 return  # ⏹ зупинили до перших токенів — тихо, без фейків
             full = ("Джерела мовчать (ліміт або нема мережі) — спробуй ще раз "
                     "чи перемкни джерело в картці Асистента.")
+        src = self._chat_source()
+        try:  # 📡 v48: «Авто»/драбина — показую, ЯКИЙ шлюз фактично відповів
+            a = (LAST_STREAM_SOURCE.get("src") or "")
+            if a in self.CHAT_PRETTY and \
+                    time.time() - (LAST_STREAM_SOURCE.get("t") or 0) < 30:
+                src = "📡 " + self.CHAT_PRETTY[a]
+        except Exception:
+            pass  # невідомо хто — лишається обране джерело (fail-open)
         self.chat_messages.append({"role": "assistant", "text": full,
-                                   "src": self._chat_source()})
+                                   "src": src})
         self._chat_save()
-        self._chat_render_assistant(full, self._chat_source())
+        self._chat_render_assistant(full, src)
+        try:  # ⚡ v48: мітку повертаю — там під час стріму жила швидкість
+            self.chat_src_lbl.configure(text="Джерело думання: "
+                                       + self._chat_source())
+        except Exception:
+            pass
 
     def _chat_stop(self):
         """⏹ v42: Стоп — обриваю стрім, ЗБЕРІГАЮЧИ те, що встигло (як у
@@ -8705,6 +8932,11 @@ class App:
         self._chat_cancel = True
         self._chat_busy = False
         self._chat_typing(False)
+        try:  # ⚡ v48: мітку повертаю і при зупинці стріму
+            self.chat_src_lbl.configure(text="Джерело думання: "
+                                       + self._chat_source())
+        except Exception:
+            pass
         self.say("💬 Чат: зупинив")
 
     def _chat_copy(self, text):
@@ -8733,7 +8965,7 @@ class App:
             self.say("💬 Чат: нема запиту, який перепитати")
             return
         self._chat_rerender()
-        self._chat_send_now(last_user, add_user=False)
+        self._chat_send_now(last_user, add_user=False, no_cache=True)  # 💾 v48: оминати кеш
 
     def _chat_edit(self, idx):
         """✏️ v42: редагувати своє повідомлення — розмова відкочується до
