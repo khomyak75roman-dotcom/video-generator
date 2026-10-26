@@ -191,6 +191,17 @@ v43: 🖱 правий клік — всюди: «📋 Вставити» і «�
 і 🤖 Google AI Studio (Gemini) — усі OpenAI-сумісні, ключі лише локально;
 💬 чат Асистента — ТЕПЕР ВКЛАДКА «💬 Чат» у головному вікні: жодного
 спливного вікна, повний функціонал Claude зі стрімінгом і артефактами.
+v44: 🔑 вікно безкоштовних ключів (кнопка «🔑 Ключі» або перемикач
+«Ключ»): обери шлюз → «🌐 Отримати ключ» — сторінка шлюзу відкриється
+у Google Chrome → встав ключ → «💾 Запам'ятати назавжди» — запишеться
+у tools/freekeys.json (папка програми, живе назавжди, у код не потрапляє);
+«🔑 Авторизуватись через Google» — Google AI Studio у Chrome (акаунт
+Google → Create API key → встав → запам'яталось); нема жодного ключа і
+ти тиснеш «Ключ» — Chrome САМ відкриває сторінку отримання; 🧠 вибір
+моделей у картці: Claude — Sonnet/Haiku/Opus, Mistral — лінійка,
+Groq — gpt-oss (ChatGPT-подібні), 🟣 GLM — безкоштовний шлюз Zhipu
+(glm-4.5-flash) + GLM:free у OpenRouter; Kilo/LLM7 — ChatGPT-шляхи
+без ключа. Усе fail-open, гроші — нуль.
 """
 import array
 import asyncio
@@ -325,7 +336,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.43 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.44 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -357,9 +368,59 @@ FREEKEY_ENGINES = {
     "nvidia": {"url": "https://integrate.api.nvidia.com/v1", "model": "meta/llama-3.3-70b-instruct"},  # 🟩 v43: NVIDIA NIM — стартові кредити
     "sambanova": {"url": "https://api.sambanova.ai/v1", "model": "Meta-Llama-3.3-70B-Instruct"},  # 🟧 v43: SambaNova — безкоштовний фрітір
     "huggingface": {"url": "https://router.huggingface.co/v1", "model": "meta-llama/Llama-3.3-70B-Instruct"},  # 🤗 v43: HF Inference Router — пробний токен
+    "zhipu": {"url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4.5-flash"},  # 🟣 v44: GLM (Zhipu AI) — glm-4.5-flash безкоштовний, фрітір без картки
 }
 FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
-                 "gemini", "openrouter", "nvidia", "sambanova", "huggingface")  # 🪜 v43: порядок драбини «Авто»
+                 "gemini", "openrouter", "nvidia", "sambanova", "huggingface",
+                 "zhipu")  # 🪜 v43/v44: порядок драбини «Авто»
+# 🌐 v44: де взяти безкоштовний ключ — сторінка відкривається у Chrome
+KEY_SIGNUP = {
+    "puter": "https://puter.com/dashboard#account",  # Create token
+    "anthropic": "https://console.anthropic.com/settings/keys",
+    "cerebras": "https://cloud.cerebras.ai/",
+    "groq": "https://console.groq.com/keys",
+    "mistral": "https://console.mistral.ai/api-keys",
+    "github": "https://github.com/settings/tokens",
+    "gemini": "https://aistudio.google.com/apikey",  # 🔑 Google AI Studio (акаунт Google)
+    "openrouter": "https://openrouter.ai/settings/keys",
+    "nvidia": "https://build.nvidia.com/",
+    "sambanova": "https://cloud.sambanova.ai/apis",
+    "huggingface": "https://huggingface.co/settings/tokens",
+    "zhipu": "https://open.bigmodel.cn/userapi/apikey",  # 🟣 GLM
+}
+# 🔑 v44: коротка інструкція для кожного шлюзу (показується у вікні ключів)
+KEY_HINTS = {
+    "puter": "🤖 Claude без картки: реєстрація на puter.com → Dashboard → Account → «Create token» → скопіюй токен.",
+    "anthropic": "🤖 Claude напряму: console.anthropic.com → API Keys — безкоштовні $5-кредити новим акаунтам.",
+    "cerebras": "⚡ Cerebras: реєстрація на cloud.cerebras.ai (Google-акаунт) → API Keys — 1 млн токенів/день.",
+    "groq": "🔑 Groq: console.groq.com (Google-акаунт) → API Keys → Create API Key — картка не потрібна.",
+    "mistral": "🇪🇺 Mistral: console.mistral.ai → API Keys — experiment-план: безкоштовні запити.",
+    "github": "🐙 GitHub Models: github.com → Settings → Developer settings → Personal access tokens (Fine-grained).",
+    "gemini": "🤖 Google AI Studio: aistudio.google.com/apikey — увійди акаунтом Google → «Create API key».",
+    "openrouter": "🧭 OpenRouter: openrouter.ai → Keys → Create Key — у каталозі шукай моделі з суфіксом :free.",
+    "nvidia": "🟩 NVIDIA NIM: build.nvidia.com → Log in → Get API Key — стартові кредити, картка не потрібна.",
+    "sambanova": "🟧 SambaNova: cloud.sambanova.ai → APIs → Create API Key — безкоштовний фрітір.",
+    "huggingface": "🤗 HF: huggingface.co → Settings → Access Tokens → New token (Read).",
+    "zhipu": "🟣 GLM (Zhipu): open.bigmodel.cn → API Keys — glm-4.5-flash БЕЗКОШТОВНИЙ у фрітірі.",
+}
+# 🧠 v44: вибір моделей для кожного шлюзу (у т.ч. трійка Claude — як Sonnet/Haiku/Opus)
+FREEKEY_MODELS = {
+    "puter": ["anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5", "anthropic/claude-opus-5-5"],
+    "anthropic": ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"],
+    "cerebras": ["llama-3.3-70b", "llama3.1-8b"],
+    "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"],
+    "mistral": ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest",
+                "open-mistral-nemo", "magistral-small-latest"],
+    "github": ["openai/gpt-4o", "openai/gpt-4o-mini", "microsoft/phi-4"],
+    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    "openrouter": ["google/gemini-2.0-flash-exp:free", "z-ai/glm-4.5-air:free",
+                   "z-ai/glm-4.5-flash:free", "deepseek/deepseek-chat-v3.1:free",
+                   "qwen/qwen3-235b-a22b:free", "meta-llama/llama-3.3-70b-instruct:free"],
+    "nvidia": ["meta/llama-3.3-70b-instruct", "openai/gpt-oss-120b", "qwen/qwen3-235b-a22b-instruct"],
+    "sambanova": ["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-8B-Instruct"],
+    "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "openai/gpt-oss-120b"],
+    "zhipu": ["glm-4.5-flash", "glm-4.6", "glm-4.5-air", "glm-4.5", "glm-4-flash-250414"],
+}
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 CHAT_FILE = os.path.join(TOOLS_DIR, "chat.json")  # 💬 v41: історія чату Асистента, лише локально
 MEMORY_FILE = os.path.join(TOOLS_DIR, "memory.json")  # 🧠 v42: пам'ять чату (факти про користувача), лише локально
@@ -633,7 +694,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v43"}
+            d = {"app": "Генератор відео v44"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -771,7 +832,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v43"}
+                "app": "Генератор відео v44"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2276,6 +2337,27 @@ def load_freekeys():
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
+
+
+def open_in_chrome(url):
+    """🌐 v44: відкрити сторінку у Google Chrome — там, де отримують ключі.
+    Шукаю chrome.exe у типових місцях Windows; нема Chrome — браузер за
+    замовчуванням. Нічого не знайшлося — тихо (fail-open)."""
+    cands = (r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+             os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"))
+    for p in cands:
+        if p and os.path.exists(p):
+            try:
+                subprocess.Popen([p, url])
+                return True
+            except Exception:
+                pass
+    try:
+        webbrowser.open(url)
+        return True
+    except Exception:
+        return False
 
 
 def freekey_engine():
@@ -5008,7 +5090,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; файл freekeys.json, тільки локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів; 🔑 ключі: Groq / GitHub / 🤖 Google AI Studio / ⚡ Cerebras / 🇪🇺 Mistral / 🧭 OpenRouter / 🟩 NVIDIA / 🟧 SambaNova / 🤗 HF — усе безкоштовні фрітіри, без картки; 🔄 Авто (за замовчуванням) — драбина всіх джерел: вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; вікно «🔑 Ключі» — сторінка у Chrome, ключ запам'ятається назавжди, лише локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів (ChatGPT-подібні моделі); 🔑 ключі: Groq / GitHub / 🤖 Google AI Studio (авторизація через Google) / ⚡ Cerebras / 🇪🇺 Mistral / 🧭 OpenRouter / 🟩 NVIDIA / 🟧 SambaNova / 🤗 HF / 🟣 GLM (Zhipu) — усе безкоштовні фрітіри, без картки; моделі на вибір: Claude Sonnet/Haiku/Opus, GLM, gpt-oss, Mistral-лінійка; 🔄 Авто (за замовчуванням) — драбина всіх джерел: вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -5044,9 +5126,14 @@ class App:
         self.ollama_model.pack(side="left", fill="x", expand=True)
         if _oc.get("model") and _oc["model"] in (_oc.get("models") or []):
             self.ollama_model.set(_oc["model"])
+        if _prov0 == "freekey":  # 🧠 v44: старт із збереженим «Ключем» — моделі шлюзу
+            self._freekey_model_menu(freekey_engine())
         ctk.CTkButton(orow, text="🔄 Перевірити", height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.ollama_check_now).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(orow, text="🔑 Ключі", height=32, corner_radius=16,  # 🔑 v44: вікно ключів
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self._key_window).pack(side="left", padx=(8, 0))
         self.ollama_status = ctk.CTkLabel(
             ac, text="🌐 Онлайн працює одразу — нічого не встановлювати. Перевір — підпишу модель. Налаштування лише локально; без AI — Асистент як раніше (парсер).",
             font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
@@ -5801,7 +5888,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v43 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF) і 🤖 Claude через Puter-токен; 🔄 Авто (за замовчуванням) — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v44 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM, gpt-oss; 🔄 Авто (за замовчуванням) — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7333,6 +7420,7 @@ class App:
                    "cerebras": "⚡ Cerebras", "mistral": "🇪🇺 Mistral",
                    "openrouter": "🧭 OpenRouter", "nvidia": "🟩 NVIDIA NIM",
                    "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
+                   "zhipu": "🟣 GLM (Zhipu)",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
@@ -8079,6 +8167,204 @@ class App:
         except Exception:
             return "ollama"
 
+    def _key_window(self):
+        """🔑 v44: вікно безкоштовних ключів — обери шлюз → «🌐 Отримати ключ»
+        (потрібна сторінка відкриється у Chrome) → встав ключ → «💾 Запам'ятати
+        назавжди» (запишеться у tools/freekeys.json — папка програми, живе
+        назавжди; у код і GitHub не потрапляє). «🔑 Авторизуватись через
+        Google» — сторінка Google AI Studio у Chrome: увійди акаунтом
+        Google → Create API key → встав тут."""
+        try:  # не відкривати двічі — просто підняти існуюче
+            if getattr(self, "_key_win", None) is not None:
+                if self._key_win.winfo_exists():
+                    self._key_win.focus_set()
+                    return
+        except Exception:
+            pass
+        win = ctk.CTkToplevel(self.root)
+        win.title("🔑 Безкоштовні ключі AI-мозку")
+        win.geometry("660x660")
+        win.attributes("-topmost", True)
+        win.after(400, lambda: win.attributes("-topmost", False))
+        win.configure(fg_color=self.CLAUDE_BG)
+        self._key_win = win
+        ctk.CTkLabel(win, text="🔑 Безкоштовні ключі — обери шлюз",
+                     font=self._f(15, "bold"),
+                     text_color=self.CLAUDE_TEXT).pack(fill="x", padx=16,
+                                                      pady=(14, 2))
+        ctk.CTkLabel(win, text="Ключ — це «пароль» від безкоштовного фрітіру шлюзу. "
+                     "Живе ЛИШЕ на цьому комп'ютері у tools/freekeys.json "
+                     "(як ключ Pixabay) — у код і GitHub не потрапляє.",
+                     font=self._f(11), text_color=self.CLAUDE_MUTED, anchor="w",
+                     wraplength=620, justify="left").pack(fill="x", padx=16)
+        names = [self.CHAT_PRETTY.get(n, n) for n in FREEKEY_ORDER]
+        self._key_eng = ctk.CTkOptionMenu(
+            win, values=names, width=320, height=34, corner_radius=10,
+            fg_color=self.CLAUDE_CARD, text_color=self.CLAUDE_TEXT,
+            button_color="#E8E5D9", font=self._f(12), command=lambda _v: self._key_pick())
+        self._key_eng.set(self.CHAT_PRETTY.get(freekey_engine() or FREEKEY_ORDER[0],
+                                               FREEKEY_ORDER[0]))
+        self._key_eng.pack(padx=16, anchor="w", pady=(10, 2))
+        self._key_hint = ctk.CTkLabel(win, text="", font=self._f(11),
+                                      text_color=self.CLAUDE_MUTED, anchor="w",
+                                      wraplength=620, justify="left")
+        self._key_hint.pack(fill="x", padx=16, pady=(4, 2))
+        row1 = ctk.CTkFrame(win, fg_color="transparent")
+        row1.pack(fill="x", padx=16, pady=(6, 2))
+        ctk.CTkButton(row1, text="🌐 Отримати ключ (Chrome)", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
+                      text_color="#FFFFFF", font=self._f(12),
+                      command=self._key_open_signup).pack(side="left")
+        ctk.CTkButton(row1, text="🔑 Авторизуватись через Google", height=34,
+                      corner_radius=17, fg_color=self.CLAUDE_CARD,
+                      hover_color="#E8E5D9", text_color=self.CLAUDE_TEXT,
+                      font=self._f(12), command=self._key_google).pack(
+                          side="left", padx=(8, 0))
+        self._key_entry = ctk.CTkEntry(win, height=36, corner_radius=10,
+                                       placeholder_text="Встав ключ сюди (Ctrl+V)",
+                                       fg_color=self.CLAUDE_CARD, font=self._f(12))
+        self._key_entry.pack(fill="x", padx=16, pady=(10, 2))
+        self.attach_paste_menu(self._key_entry)  # 🖱 v44: ПКМ «Вставити» і тут
+        row2 = ctk.CTkFrame(win, fg_color="transparent")
+        row2.pack(fill="x", padx=16, pady=(4, 2))
+        ctk.CTkButton(row2, text="💾 Запам'ятати назавжди", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
+                      text_color="#FFFFFF", font=self._f(12),
+                      command=self._key_save).pack(side="left")
+        ctk.CTkButton(row2, text="🗑 Прибрати ключ", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._key_remove).pack(side="left", padx=(8, 0))
+        self._key_state = ctk.CTkLabel(win, text="", font=self._f(11),
+                                       text_color=self.CLAUDE_MUTED, anchor="w",
+                                       wraplength=620, justify="left")
+        self._key_state.pack(fill="x", padx=16, pady=(8, 2))
+        ctk.CTkLabel(win, text="🔄 Драбина «Авто» сама підхопить усе, що збережеш: "
+                     "Puter → Anthropic → Cerebras → Groq → Mistral → GitHub → "
+                     "Google AI Studio → OpenRouter → NVIDIA → SambaNova → HF → GLM "
+                     "→ Kilo → LLM7 → Pollinations. ChatGPT-подібні безкоштовні "
+                     "моделі — у Groq (gpt-oss) і Kilo/LLM7; Claude — через Puter "
+                     "або Anthropic; GLM — Zhipu (:free) або OpenRouter.",
+                     font=self._f(10), text_color=self.CLAUDE_MUTED, anchor="w",
+                     wraplength=620, justify="left").pack(fill="x", padx=16,
+                                                          pady=(6, 8))
+        self._key_pick()
+
+    def _key_name(self):
+        """🔑 v44: внутрішнє ім'я обраного у вікні шлюзу (pretty → ключ)."""
+        try:
+            pretty = self._key_eng.get()
+            for n in FREEKEY_ORDER:
+                if self.CHAT_PRETTY.get(n, n) == pretty:
+                    return n
+        except Exception:
+            pass
+        return freekey_engine() or FREEKEY_ORDER[0]
+
+    def _key_pick(self):
+        """🔑 v44: обрав шлюз — показую підказку і стан ключа."""
+        name = self._key_name()
+        try:
+            self._key_hint.configure(text=KEY_HINTS.get(name, ""))
+        except Exception:
+            pass
+        self._key_refresh()
+
+    def _key_refresh(self):
+        """🔑 v44: стан ключа обраного шлюзу (є/нема, без повного ключа)."""
+        try:
+            name = self._key_name()
+            k = str(load_freekeys().get(name) or "").strip()
+            if k:
+                self._key_state.configure(
+                    text="✅ Ключ " + name + " збережений (" + k[:6] + "…" +
+                         ") — живе у папці назавжди.")
+            else:
+                self._key_state.configure(
+                    text="— ключа " + name + " ще нема: «🌐 Отримати ключ» → "
+                         "встав → «💾 Запам'ятати назавжди».")
+        except Exception:
+            pass
+
+    def _key_open_signup(self):
+        """🌐 v44: сторінка отримання ключа обраного шлюзу — у Chrome."""
+        name = self._key_name()
+        open_in_chrome(KEY_SIGNUP.get(name) or "https://aistudio.google.com/apikey")
+        self.say("🌐 Відкрив Chrome: отримай ключ " + name + " і встав у вікно")
+
+    def _key_google(self):
+        """🔑 v44: авторизація через Google — сторінка Google AI Studio
+        (Gemini) у Chrome: увійди своїм Google-акаунтом → Create API key →
+        встав ключ у вікно → «Запам'ятати назавжди» — авторизація
+        запам'ятається у папці програми назавжди."""
+        try:
+            self._key_eng.set(self.CHAT_PRETTY.get("gemini", "🤖 Google AI Studio"))
+        except Exception:
+            pass
+        self._key_pick()
+        open_in_chrome(KEY_SIGNUP.get("gemini"))
+        self.say("🔑 Google AI Studio: увійди акаунтом Google → Create API key → встав тут")
+
+    def _key_save(self):
+        """💾 v44: записати ключ у tools/freekeys.json — папка програми,
+        запам'ятовується назавжди (у код і GitHub не потрапляє)."""
+        name = self._key_name()
+        k = (self._key_entry.get() or "").strip()
+        if len(k) < 20:
+            self.say("⚠️ Ключ надто короткий — схоже, це не він. Встав ВЕСЬ ключ.")
+            return
+        keys = load_freekeys()
+        keys[name] = k
+        try:
+            os.makedirs(TOOLS_DIR, exist_ok=True)
+            with open(FREEKEYS_FILE, "w", encoding="utf-8") as f:
+                json.dump(keys, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.say("⚠️ Не вийшло зберегти ключ: " + str(e)[:80])
+            return
+        try:
+            self._key_entry.delete(0, "end")
+        except Exception:
+            pass
+        self.say("💾 Запам'ятав ключ " + name + " НАЗАВЖДИ — tools/freekeys.json "
+                 "(лише локально, як ключ Pixabay)")
+        self._key_refresh()
+        self._freekey_model_menu(freekey_engine())
+        try:  # чат відкритий — оновити мітку джерела
+            self.chat_src_lbl.configure(text="Джерело думання: " + self._chat_source())
+        except Exception:
+            pass
+
+    def _key_remove(self):
+        """🗑 v44: прибрати ключ шлюзу з freekeys.json (fail-open)."""
+        name = self._key_name()
+        keys = load_freekeys()
+        if name in keys:
+            del keys[name]
+            try:
+                with open(FREEKEYS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(keys, f, ensure_ascii=False, indent=2)
+                self.say("🗑 Прибрав ключ " + name + " — шлюз випав з драбини")
+            except Exception as e:
+                self.say("⚠️ Не вийшло прибрати: " + str(e)[:80])
+        self._key_refresh()
+
+    def _freekey_model_menu(self, eng):
+        """🧠 v44: меню моделей шлюзу у картці Асистента: Claude — трійка
+        Sonnet/Haiku/Opus (puter — з префіксом anthropic/), GLM — уся
+        безкоштовна серія, Mistral — лінійка, інші — свої. Fail-open."""
+        try:
+            conf = FREEKEY_ENGINES.get(eng or "", {})
+            models = list(FREEKEY_MODELS.get(eng) or
+                          ([conf["model"]] if conf.get("model") else
+                           [FREEKEY_ENGINES["groq"]["model"]]))
+            cur = (self.ollama_model.get() or "").strip()
+            self.ollama_model.configure(values=models)
+            if cur not in models:
+                self.ollama_model.set(models[0])
+        except Exception:
+            pass
+
     def _switch_llm_provider(self, val):
         """🌐 v31/v35/v36: перемикання Ollama ↔ 9Router ↔ Онлайн ↔ Kilo ↔ Ключ —
         дефолтний URL міняється слідом."""
@@ -8092,11 +8378,27 @@ class App:
         if not cur or cur in others:
             self.ollama_url.delete(0, "end")
             self.ollama_url.insert(0, defs.get(val, "http://localhost:11434"))
+        if val == "🔑 Ключ":  # 🔑 v44: вікно ключів; нема ключа — Chrome на сторінці отримання
+            eng = freekey_engine()
+            self._freekey_model_menu(eng)
+            if not eng:
+                open_in_chrome(KEY_SIGNUP.get(FREEKEY_ORDER[0], "https://puter.com"))
+                self.ollama_status.configure(
+                    text="🔑 Немає ключа — відкрив Chrome на сторінці отримання "
+                         "(Puter, без картки). Отримай ключ → встав у вікно → "
+                         "«💾 Запам'ятати назавжди».")
+                self._key_window()
+            else:
+                self.ollama_status.configure(
+                    text="🔑 Джерело: {} — ключ збережений. «🔑 Ключі» — поміняти, "
+                         "«Перевірити» — підписати модель.".format(
+                             self.CHAT_PRETTY.get(eng, eng)))
+            return
         if val == "🔄 Авто":
             self.ollama_status.configure(
                 text="🔄 Авто — драбина: 🤖 Claude (Puter) → Claude (Anthropic) → ⚡ Cerebras → "
                      "Groq → 🇪🇺 Mistral → GitHub → 🤖 Google AI Studio → 🧭 OpenRouter → 🟩 NVIDIA → "
-                     "🟧 SambaNova → 🤗 HF → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
+                     "🟧 SambaNova → 🤗 HF → 🟣 GLM → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
                      "Вичерпався — сам перескакує: Асистент не впирається в ліміти.")
         else:
             self.ollama_status.configure(
@@ -8118,11 +8420,10 @@ class App:
             return
         if prov == "freekey" and not freekey_engine():
             self.ollama_status.configure(
-                text="🔑 Немає ключа — додай у freekeys.json (папка "
-                     "AppData/Local/VideoGenerator). 🤖 Claude: безкоштовний акаунт "
-                     "puter.com → dashboard#account → Create token → {\"puter\": \"токен\"} "
-                     "(без картки); або Groq: {\"groq\": \"gsk_…\"} — console.groq.com, "
-                     "2 хвилини. Без ключа — «🌐 Онлайн».")
+                text="🔑 Немає ключа — натисни кнопку «🔑 Ключі»: обери шлюз → "
+                     "«🌐 Отримати ключ» (сторінка відкриється у Chrome, без картки) → "
+                     "встав ключ → «💾 Запам'ятати назавжди». Google AI Studio — кнопка "
+                     "«Авторизуватись через Google». 2 хвилини — і драбина повна.")
             return
         if not prov:
             prov = "ollama"
