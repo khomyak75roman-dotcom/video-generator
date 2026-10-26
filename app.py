@@ -216,11 +216,22 @@ v46: 💬 чат більше НЕ ТУПИТЬ і вміє все: у шапц�
 (freekey_engine_for), а лежачий/лімітний шлюз сам обмінюється
 драбиною решти живих ключів — відповідь прилітає завжди; нема
 ключа — чат чесно пише, де його взяти, а не мовчить.
+v47: 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер» у картці Асистента і в
+чаті): адреса чи запит → reader-режим (читабельний текст, кеш
+10 хв — не тупить), історія ⬅➡, пошук DuckDuckGo БЕЗ ключів,
+«🌍 У Chrome» для сторінок з входом/JS. 🕵️ СВІЙ АГЕНТ у чаті:
+«знайди/новини/погода…» або кнопка «🌐 Пошук» — агент спершу
+йдить в DuckDuckGo, знайдене підмішується моделі — відповідь
+свіжа, з джерелами-посиланнями. 🖱 ПКМ-меню виправлено і тепер
+СТАНДАРТНЕ, як у будь-яких програмах: Вирізати/Копіювати/
+Вставити/Виділити все/Очистити — у всіх полях (байнд жив не
+там — меню могло не відкритись узагалі; виправлено).
 """
 import array
 import asyncio
 import base64
 import hashlib
+import html
 import json
 import os
 import queue
@@ -350,7 +361,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.46 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.47 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -725,7 +736,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v46"}
+            d = {"app": "Генератор відео v47"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -863,7 +874,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v46"}
+                "app": "Генератор відео v47"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2481,6 +2492,134 @@ def chat_pick_steps(name):
                       "назавжди».")
     return None, ("💬 Невідоме джерело — перемкни у шапці чату на "
                   "«🔄 Як в картці».")
+
+
+PAGE_CACHE = {}  # 🌐 v47: url → (текст, час) — кеш 10 хв, щоб браузер не тупив
+
+
+def fetch_page_text(url, timeout=20, limit=48000):
+    """🌐 v47: сторінка → ЧИТАБЕЛЬНИЙ текст (міні-браузер без важкого
+    движка: сценарії/стилі прибираю, теги — у переноси рядків, мнемоніки
+    HTML — у звичайні символи). Кеш 10 хв у пам'яті — повторні відкриття
+    миттєві, браузер не тупить. Нема мережі/404 — виняток нагору, той,
+    хто викликав, показує свою підказку (fail-open)."""
+    now = time.time()
+    hit = PAGE_CACHE.get(url)
+    if hit and now - hit[1] < 600:
+        return hit[0]
+    r = requests.get(url, timeout=timeout,
+                     headers={"User-Agent": UA_STRING,
+                              "Accept-Language": "uk,en;q=0.8"})
+    if r.status_code != 200:
+        raise Exception("HTTP " + str(r.status_code))
+    if not r.encoding or r.encoding.lower() in ("iso-8859-1", "ascii"):
+        r.encoding = "utf-8"
+    h = r.text
+    h = re.sub(r"(?is)<(script|style|noscript|svg|iframe|head)[^>]*>.*?</\1>",
+               " ", h)
+    h = re.sub(r"(?i)<br\s*/?>", "\n", h)
+    h = re.sub(r"(?i)</(p|div|li|h[1-6]|tr|section|article|blockquote)>",
+               "\n", h)
+    h = re.sub(r"(?i)<li[^>]*>", " • ", h)
+    h = re.sub(r"<[^>]+>", " ", h)
+    txt = html.unescape(h).replace("\xa0", " ")
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in txt.split("\n")]
+    out = "\n".join(ln for ln in lines if ln)
+    if len(out) > limit:
+        out = out[:limit] + "\n… (дальше обрізав — «🌍 У Chrome» побачиш усе)"
+    if len(PAGE_CACHE) > 40:  # не роздуваємо пам'ять
+        try:
+            PAGE_CACHE.pop(next(iter(PAGE_CACHE)))
+        except Exception:
+            pass
+    PAGE_CACHE[url] = (out, now)
+    return out
+
+
+def ddg_search(query, timeout=15, max_hits=5):
+    """🔎 v47: DuckDuckGo Lite — ПОШУК БЕЗ КЛЮЧІВ (анонімний, ~1 с).
+    Повертає [{title, url, snip}] — заголовок, посилання, витяг.
+    Лежить/429/порожньо — [] (fail-open, гроші — нуль)."""
+    q = (query or "").strip()
+    if not q:
+        return []
+    now = time.time()
+    hit = PAGE_CACHE.get("ddg:" + q)
+    if hit and now - hit[1] < 600:
+        return hit[0]
+    hits = []
+    try:
+        r = requests.post("https://lite.duckduckgo.com/lite/", data={"q": q},
+                          timeout=timeout, headers={"User-Agent": UA_STRING})
+        if r.status_code == 200:
+            links = re.findall(
+                r"<a[^>]*class=['\"]result-link['\"][^>]*href=['\"]"
+                r"([^'\"]+)['\"][^>]*>(.*?)</a>", r.text, re.S)
+            snips = re.findall(
+                r"(?i)<td[^>]*class=['\"]result-snippet['\"][^>]*>(.*?)</td>",
+                r.text, re.S)
+            for i, (u, t) in enumerate(links):
+                title = html.unescape(re.sub(r"<[^>]+>", " ", t)).strip()
+                snip = ""
+                if i < len(snips):
+                    snip = html.unescape(re.sub(r"<[^>]+>", " ",
+                                                 snips[i])).strip()
+                if u.startswith("http") and title:
+                    hits.append({"title": title, "url": html.unescape(u),
+                                 "snip": snip})
+                if len(hits) >= max_hits:
+                    break
+    except Exception:
+        hits = []
+    PAGE_CACHE["ddg:" + q] = (hits, now)
+    return hits
+
+
+AGENT_WEB_WORDS = ("знайди", "пошукай", "погугли", "новин", "актуальн",
+                   "сьогодн", "погода", "курс ", "рейтин", "search",
+                   "find latest", "who is", "скільки кошту")
+
+
+def agent_wants_web(text):
+    """🕵️ v47: чи просить користувач свіжого з мережі — агент сам бере
+    DuckDuckGo і не мучить модель застарілими знаннями."""
+    t = " " + (text or "").lower() + " "
+    return any(w in t for w in AGENT_WEB_WORDS)
+
+
+def agent_web_context(query, timeout=15):
+    """🕵️ v47: АГЕНТ — свіжі дані з мережі для відповіді: 5 хітів DuckDuckGo
+    (заголовок+посилання+витяг) + читабельний витяг першої сторінки.
+    (ctx, note) — note для мітки чату; нічого не знайшлось — ("", "")."""
+    hits = ddg_search(query, timeout=timeout)
+    if not hits:
+        return "", ""
+    parts = []
+    for i, h in enumerate(hits, 1):
+        parts.append("[{}] {} — {}\n{}".format(i, h["title"], h["url"],
+                                               h["snip"]))
+    ctx = ("Свіжі дані з мережі (пошук DuckDuckGo, без ключів) — обов'язково "
+           "використай їх у відповіді і зазнач джерела ПОСИЛАННЯМИ "
+           "(просто URL у тексті):\n" + "\n".join(parts))
+    try:  # глибина: перша сторінка — коротким витягом (фоновий потік і так)
+        page = fetch_page_text(hits[0]["url"], timeout=timeout, limit=3000)
+        if page:
+            ctx += ("\n\nВитяг з " + hits[0]["url"] + ":\n" + page[:3000])
+    except Exception:
+        pass  # сторінка не далась — хітів і так вистачить (fail-open)
+    return ctx, "знайшов " + str(len(hits)) + " свіжих джерел у мережі"
+
+
+BROWSER_HOMES = (  # 🏠 v47: домашні сторінки власного браузера
+    ("🔎 DuckDuckGo", "https://lite.duckduckgo.com/lite/"),
+    ("🟣 GLM Z.AI", "https://z.ai/manage-apikey/apikey-list"),
+    ("🤖 Google AI Studio", "https://aistudio.google.com/apikey"),
+    ("🧭 OpenRouter", "https://openrouter.ai/settings/keys"),
+    ("🌊 SiliconFlow", "https://cloud.siliconflow.cn/account/ak"),
+    ("🟠 ModelScope", "https://modelscope.cn/my/myaccesstoken"),
+    ("▶ YouTube Studio", "https://studio.youtube.com"),
+    ("📦 Репозиторій", "https://github.com/khomyak75roman-dotcom/video-generator"),
+)
 
 
 def kilo_list_models(url, timeout=10):
@@ -5289,6 +5428,9 @@ class App:
         ctk.CTkButton(orow, text="🔑 Ключі", height=32, corner_radius=16,  # 🔑 v44: вікно ключів
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self._key_window).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(orow, text="🌐 Браузер", height=32, corner_radius=16,  # 🌐 v47: свій браузер
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.open_browser_win).pack(side="left", padx=(8, 0))
         self.ollama_status = ctk.CTkLabel(
             ac, text="🌐 Онлайн працює одразу — нічого не встановлювати. Перевір — підпишу модель. Налаштування лише локально; без AI — Асистент як раніше (парсер).",
             font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
@@ -6043,7 +6185,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v46 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v47 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6287,18 +6429,78 @@ class App:
         self.say("📋 Вставлено: " + clip[:80])
 
     def attach_paste_menu(self, widget, can_paste=True, can_clear=True):
-        """🖱 ПКМ у полі — меню «📋 Вставити» / «📄 Копіювати» / «🧹 Очистити».
-        v43: «📄 Копіювати» — виділене (нема виділення — уесь текст) → буфер
-        обміну. Read-only поля (відповіді чату, журнал) — лише копіювання."""
+        """🖱 v43/v47: ПКМ у полі — СТАНДАРТНЕ меню, як у будь-яких програмах:
+        «✂️ Вирізати» / «📄 Копіювати» / «📋 Вставити» / «☑️ Виділити все» /
+        «🧹 Очистити». v47 ВИПРАВЛЕННЯ: байнд <Button-3> раніше жив усередині
+        copy_from — меню НІКОЛИ не відкривалось (казус курки й яйця);
+        тепер байнд тут, при створенні меню. Read-only поля — лише копіювання."""
         menu = tkinter.Menu(widget, tearoff=0, bg="#1C1C1E", fg="#F5F5F7",
                             activebackground="#3A3A3C", activeforeground="#FFFFFF",
                             font=("Segoe UI", 11))
         if can_paste:
-            menu.add_command(label="📋 Вставити", command=lambda: self.paste_into(widget))
+            menu.add_command(label="✂️ Вирізати",
+                             command=lambda: self.cut_from(widget))
         menu.add_command(label="📄 Копіювати", command=lambda: self.copy_from(widget))
+        if can_paste:
+            menu.add_command(label="📋 Вставити", command=lambda: self.paste_into(widget))
+        menu.add_command(label="☑️ Виділити все",
+                         command=lambda: self.select_all_in(widget))
         if can_clear:
             menu.add_command(label="🧹 Очистити", command=lambda: self.clear_field(widget))
         widget._paste_menu = menu
+
+        def _popup(event):  # 🖱 v47: байнд тут — ПКМ працює з першого кліку
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            except Exception:
+                pass
+            finally:
+                try:
+                    menu.grab_release()
+                except Exception:
+                    pass
+        self._bind_safe(widget, "<Button-3>", _popup, add="+")
+
+    def cut_from(self, widget):
+        """✂️ v47: Вирізати — копіюю виділене (нема виділення — усе поле)
+        і прибираю його з поля; read-only захищений (не редагується — тихо)."""
+        try:
+            if isinstance(widget, ctk.CTkTextbox):
+                txt = ""
+                try:
+                    txt = widget.get("sel.first", "sel.last")
+                except Exception:
+                    txt = ""
+                if txt.strip():
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(txt)
+                    widget.delete("sel.first", "sel.last")
+                    self.say("✂️ Вирізано: " + txt[:80].replace("\n", " "))
+                else:
+                    self.copy_from(widget)
+            else:
+                try:
+                    txt = widget.selection_get()
+                except Exception:
+                    txt = widget.get()
+                self.root.clipboard_clear()
+                self.root.clipboard_append(txt)
+                widget.delete(0, "end")
+                self.say("✂️ Вирізано: " + str(txt)[:80])
+        except Exception:
+            pass  # read-only поле — без трагедій, fail-open
+
+    def select_all_in(self, widget):
+        """☑️ v47: Виділити все — як у будь-яких програмах (Ctrl+A мишею)."""
+        try:
+            if isinstance(widget, ctk.CTkTextbox):
+                widget.tag_add("sel", "1.0", "end")
+                widget.focus_set()
+            else:
+                widget.select_range(0, "end")
+                widget.focus_set()
+        except Exception:
+            pass  # fail-open
 
     def copy_from(self, widget):
         """📄 v43: копіювати з поля у буфер обміну — виділене, а нема
@@ -6326,13 +6528,6 @@ class App:
         self.root.clipboard_clear()
         self.root.clipboard_append(txt)
         self.say("📄 Скопійовано: " + txt[:80].replace("\n", " "))
-
-        def _popup(event):
-            try:
-                menu.tk_popup(event.x_root, event.y_root)
-            finally:
-                menu.grab_release()
-        self._bind_safe(widget, "<Button-3>", _popup, add="+")
 
     def clear_field(self, widget):
         """🧹 Очистити поле (пункт меню ПКМ)."""
@@ -7425,6 +7620,8 @@ class App:
                     self._chat_stream_delta(msg[1])
                 elif kind == "chat_done":  # ⚡ v42: відповідь допливла повністю
                     self._chat_done(msg[1])
+                elif kind == "brow_page":  # 🌐 v47: сторінка свого браузера готова
+                    self._brow_page_done(msg[1])
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -7584,6 +7781,7 @@ class App:
     CHAT_CHIPS = ("Налаштуй Shorts про космос, голосом Поліни, з караоке",
                   "Напиши сценарій: коротка історія штучного інтелекту",
                   "Запам'ятай: я знімаю Shorts про космос і ШІ",
+                  "Знайди в мережі свіжі новини про ШІ",  # 🕵️ v47: агент піде у DuckDuckGo
                   "Що ти вмієш і які у тебе джерела думання?")
 
     def _chat_source(self):
@@ -7613,6 +7811,215 @@ class App:
             pass
         if val and val != "🔄 Як в картці":
             self.say("💬 Чат: джерело — " + val)
+
+    def open_browser_win(self):
+        """🌐 v47: СВІЙ БРАУЗЕР — вікно з адресою, історією, reader-режимом
+        (сторінка → читабельний текст, без важкого движка — тому не тупить),
+        пошуком DuckDuckGo БЕЗ ключів і кнопкою «🌍 У Chrome» для сторінок
+        із входом/JS. Все у фоні, кеш 10 хв (fail-open)."""
+        try:
+            if getattr(self, "_brow_win", None) is not None \
+                    and self._brow_win.winfo_exists():
+                self._brow_win.lift()
+                return
+        except Exception:
+            pass
+        self._brow_hist = getattr(self, "_brow_hist", [])
+        self._brow_pos = getattr(self, "_brow_pos", -1)
+        self._brow_results = []
+        win = ctk.CTkToplevel(self.root)
+        win.title("🌐 Свій браузер — Генератор відео")
+        win.geometry("980x660")
+        self._brow_win = win
+        try:
+            win.attributes("-topmost", True)
+            win.after(400, lambda: win.attributes("-topmost", False))
+        except Exception:
+            pass
+        nav = ctk.CTkFrame(win, fg_color="transparent")
+        nav.pack(fill="x", padx=10, pady=(10, 4))
+        ctk.CTkButton(nav, text="⬅", width=40, height=32, corner_radius=16,
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
+                      font=self._f(13), command=self._brow_back).pack(
+                          side="left")
+        ctk.CTkButton(nav, text="➡", width=40, height=32, corner_radius=16,
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
+                      font=self._f(13), command=self._brow_fwd).pack(
+                          side="left", padx=(6, 0))
+        ctk.CTkButton(nav, text="🔄", width=40, height=32, corner_radius=16,
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
+                      font=self._f(13),
+                      command=lambda: self._brow_go(force=True)).pack(
+                          side="left", padx=(6, 0))
+        self._brow_url = ctk.CTkEntry(nav, height=32, font=self._f(12))
+        self._brow_url.pack(side="left", fill="x", expand=True, padx=(8, 4))
+        self.attach_paste_menu(self._brow_url)  # 🖱 ПКМ — як усюди
+        self._bind_safe(self._brow_url, "<Return>",
+                        lambda e: self._brow_go())
+        ctk.CTkButton(nav, text="➡ Йти", height=32, corner_radius=16,
+                      fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
+                      text_color="#FFFFFF", font=self._f(12),
+                      command=self._brow_go).pack(side="left")
+        ctk.CTkButton(nav, text="🌍 У Chrome", height=32, corner_radius=16,
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
+                      font=self._f(12),
+                      command=self._brow_chrome).pack(side="left", padx=(8, 0))
+        self._brow_home_menu = ctk.CTkOptionMenu(
+            nav, width=170, height=32, font=self._f(11),
+            values=[n for n, u in BROWSER_HOMES],
+            command=self._brow_home)
+        self._brow_home_menu.set("🔎 DuckDuckGo")
+        self._brow_home_menu.pack(side="left", padx=(8, 0))
+        self._brow_view = ctk.CTkTextbox(win, font=self._f(13), wrap="word")
+        self._brow_view.pack(fill="both", expand=True, padx=10, pady=(4, 2))
+        self._ro_selectable(self._brow_view)  # виділення + Ctrl+A/C + ПКМ-копіювання
+        self._brow_status = ctk.CTkLabel(
+            win, text="Введи адресу або запит (не адреса — знайду в DuckDuckGo, "
+                      "без ключів) • номер знайденого результату → відкрию його • "
+                      "вхід у акаунти — «🌍 У Chrome»",
+            font=self._f(10), text_color=self.CLAUDE_MUTED, anchor="w",
+            wraplength=940)
+        self._brow_status.pack(fill="x", padx=14, pady=(0, 8))
+        self._brow_put("👋 Це твій браузер: адреса або запит угорі — і «➡ Йти».\n"
+                       "Reader-режим показує ЧИТАБЕЛЬНИЙ текст сторінки (без "
+                       "реклами і скриптів) — тому миттєво.\nСторінки з входом "
+                       "(ключі, акаунти) — кнопка «🌍 У Chrome».\nГарного дня! 🌞")
+        self._brow_go(url="https://lite.duckduckgo.com/lite/")
+
+    def _brow_put(self, text, status=None):
+        """🌐 v47: намалювати текст сторінки у вікні браузера (як відповідь
+        чату: ЖИВЕ виділення і копіювання, друкувати не даю)."""
+        try:
+            self._brow_view.configure(state="normal")
+            self._brow_view.delete("1.0", "end")
+            self._brow_view.insert("1.0", text)
+            self._brow_view.yview_moveto(0.0)
+            if status is not None:
+                self._brow_status.configure(text=status)
+        except Exception:
+            pass  # вікно закрили — тихо (fail-open)
+
+    def _brow_current(self):
+        """🌐 v47: адреса зараз на екрані."""
+        try:
+            if 0 <= getattr(self, "_brow_pos", -1) < len(self._brow_hist):
+                return self._brow_hist[self._brow_pos]
+        except Exception:
+            pass
+        return ""
+
+    def _brow_go(self, url=None, force=False, remember=True):
+        """🌐 v47: відкрити адресу/запит У ФОНІ (Tk не блокується, не тупить):
+        не адреса — пошук DuckDuckGo; № — результат пошуку; кеш 10 хв."""
+        try:
+            cur = self._brow_url.get().strip()
+        except Exception:
+            cur = ""
+        target = (url or cur).strip()
+        if not target and not force:
+            return
+        if not target:  # 🔄 порожньо — оновлюю поточну (або стартова DuckDuckGo)
+            target = self._brow_current() or "https://lite.duckduckgo.com/lite/"
+        if target.isdigit() and self._brow_results:  # № результату пошуку
+            i = int(target) - 1
+            if 0 <= i < len(self._brow_results):
+                target = self._brow_results[i]["url"]
+                try:
+                    self._brow_url.delete(0, "end")
+                    self._brow_url.insert(0, target)
+                except Exception:
+                    pass
+        if not target.startswith("http"):  # запит словами → DuckDuckGo
+            if "://" in target or "." in target.split(" ")[0]:
+                target = "https://" + target
+            else:
+                target = "https://lite.duckduckgo.com/lite/?q=" + quote_plus(target)
+        if remember and target != self._brow_current():
+            try:
+                self._brow_hist = self._brow_hist[:self._brow_pos + 1] + [target]
+                self._brow_pos = len(self._brow_hist) - 1
+            except Exception:
+                pass
+        try:
+            self._brow_status.configure(text="⏳ Завантажую " + target[:80] + "…")
+        except Exception:
+            pass
+
+        def job():
+            try:
+                text = fetch_page_text(target, timeout=20)
+                kind = "page"
+            except Exception as e:
+                text = ("⚠️ Сторінка не далась: " + str(e)[:120]
+                        + "\nСпробуй ще раз або «🌍 У Chrome» — можливо, "
+                          "сторінці потрібен JavaScript чи вхід.")
+                kind = "err"
+            try:
+                if kind == "page" and "lite.duckduckgo.com" in target:
+                    hits = ddg_search(
+                        (target.split("q=")[-1].replace("+", " ")
+                         if "q=" in target else ""), timeout=15)
+                    if hits:
+                        self._brow_results = hits
+                        text = "\n".join(
+                            "{}. {} — {}\n   {}".format(i, h["title"],
+                                                        h["url"], h["snip"])
+                            for i, h in enumerate(hits, 1))
+                        text = ("🔎 Знайшов " + str(len(hits))
+                                + " (без ключів). Введи номер — відкрию "
+                                  "результат:\n\n" + text)
+                        kind = "search"
+            except Exception:
+                pass
+            self.q.put(("brow_page", (target, text, kind)))
+        threading.Thread(target=job, daemon=True).start()
+
+    def _brow_page_done(self, payload):
+        """🌐 v47: сторінка допливла — малюю у вікні (черга _poll)."""
+        url, text, kind = payload
+        status = ("✅ Готово: " + url[:90] + " • ПКМ — копіювати/виділити • "
+                  "⬅➡ — історія")
+        if kind == "err":
+            status = "⚠️ Не завантажилось: " + url[:90]
+        self._brow_put(text, status)
+
+    def _brow_back(self):
+        """🌐 v47: назад по історії (з кешу — миттєво, не тупить)."""
+        try:
+            if self._brow_pos > 0:
+                self._brow_pos -= 1
+                self._brow_go(url=self._brow_hist[self._brow_pos],
+                              remember=False)
+        except Exception:
+            pass
+
+    def _brow_fwd(self):
+        """🌐 v47: вперед по історії."""
+        try:
+            if self._brow_pos < len(self._brow_hist) - 1:
+                self._brow_pos += 1
+                self._brow_go(url=self._brow_hist[self._brow_pos],
+                              remember=False)
+        except Exception:
+            pass
+
+    def _brow_chrome(self):
+        """🌐 v47: потрібен справжній браузер (вхід, JavaScript) — у Chrome."""
+        u = self._brow_current() or (self._brow_url.get().strip() or "")
+        if u:
+            open_in_chrome(u if u.startswith("http") else "https://" + u)
+
+    def _brow_home(self, name):
+        """🌐 v47: домашня сторінка з меню."""
+        for n, u in BROWSER_HOMES:
+            if n == name:
+                try:
+                    self._brow_url.delete(0, "end")
+                    self._brow_url.insert(0, u)
+                except Exception:
+                    pass
+                self._brow_go(url=u)
+                return
 
     def _mem_load(self):
         """🧠 v42: пам'ять чату — факти про користувача з tools/memory.json
@@ -7717,7 +8124,10 @@ class App:
              "води. Великий код (сценарій, JSON, команди) оформляй блоком у "
              "три гратки ``` — він стане артефактом з кнопками. Якщо просять "
              "налаштувати генерацію — дай ОДНУ готову фразу для поля Асистента "
-             "(наприклад: «Shorts про космос, голос Поліна, караоке»).")
+             "(наприклад: «Shorts про космос, голос Поліна, караоке»). "
+             "Ти ще й АГЕНТ: якщо нижче є «Свіжі дані з мережі» — це твій "
+             "інструмент-пошук (DuckDuckGo): відповідай, спираючись на них, "
+             "і вкажи джерела URL-посиланнями.")
         rules = project_rules()  # 📏 v32: правила проєкту — обов'язкові для моделі
         if rules:
             s += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
@@ -7813,6 +8223,12 @@ class App:
                       text_color="#FFFFFF", font=self._f(12),
                       command=self._chat_new).pack(side="right", padx=(8, 16),
                                                    pady=(10, 4))
+        ctk.CTkButton(head, text="🌐 Браузер", height=30, corner_radius=15,  # 🌐 v47
+                      fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self.open_browser_win).pack(side="right",
+                                                          padx=(0, 8),
+                                                          pady=(10, 4))
         ctk.CTkButton(head, text="🧠 Пам'ять", height=30, corner_radius=15,
                       fg_color="#FFFFFF", hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
@@ -7850,6 +8266,10 @@ class App:
                       fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_attach).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(row, text="🌐 Пошук", height=34, corner_radius=17,  # 🕵️ v47: агент
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._chat_web_send).pack(side="left", padx=(8, 0))
         ctk.CTkButton(row, text="⚙️ у поля генератора", height=34, corner_radius=17,
                       fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
@@ -7861,9 +8281,10 @@ class App:
             command=self._chat_send)
         self.chat_send_btn.pack(side="right")
         ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
-                     "📎 Файл — додати txt/srt/… у контекст • ✏️ під своїм "
-                     "повідомленням — редагувати • Ctrl+K — нова розмова • "
-                     "🎯 джерело думання — меню у шапці чату",
+                     "📎 Файл — додати txt/srt/… у контекст • 🌐 Пошук — агент "
+                     "знайде свіже в мережі • ✏️ під своїм повідомленням — "
+                     "редагувати • Ctrl+K — нова розмова • 🖱 ПКМ — як у всіх "
+                     "програмах • 🎯 джерело думання — меню у шапці чату",
                      font=self._f(10), text_color=self.CLAUDE_MUTED,
                      anchor="w", wraplength=560).pack(fill="x", padx=16,
                                                      pady=(0, 6))
@@ -8137,10 +8558,11 @@ class App:
         self.chat_input.delete("1.0", "end")
         self._chat_send_now(text)
 
-    def _chat_send_now(self, text, add_user=True):
-        """💬 v42: репліка юзера → СТРІМІНГ у фоні: токени прилітають у чергу
+    def _chat_send_now(self, text, add_user=True, force_web=False):
+        """💬 v42/v47: репліка юзера → СТРІМІНГ у фоні: токени прилітають у чергу
         і малюються одразу (Tk не блокується). «запам'ятай: …» — локальна
-        пам'ять, без запиту до моделі."""
+        пам'ять, без запиту до моделі. 🕵️ force_web — агент ОБОВ'ЯЗКОВО шукає
+        свіже в мережі перед відповіддю (кнопка «🌐 Пошук» у чаті)."""
         if getattr(self, "_chat_busy", False):
             self.say("💬 Чат: вже думаю над відповіддю — ⏹ Стоп або зачекай")
             return
@@ -8165,11 +8587,16 @@ class App:
         self._chat_stream_box = None
         self._chat_stream_frame = None
         self._chat_typing(True)
-        threading.Thread(target=self._chat_thread, args=(text,), daemon=True).start()
+        threading.Thread(target=self._chat_thread, args=(text, force_web),
+                         daemon=True).start()
 
-    def _chat_thread(self, text):
-        """⚡ v42: стрімінг-запит у фоні: джерело з картки + історія розмови;
-        кожен токен — у чергу (chat_stream), фінал — chat_done. llm_trace."""
+    def _chat_thread(self, text, force_web=False):
+        """⚡ v42/v47: стрімінг-запит у фоні: джерело з картки + історія
+        розмови; кожен токен — у чергу (chat_stream), фінал — chat_done.
+        🕵️ v47 АГЕНТ: просиш свіже («знайди/новини/погода…») або тиснеш
+        «🌐 Пошук» — спершу DuckDuckGo БЕЗ ключів (у фоні, Tk не тупить),
+        знайдене підмішу моделі у системний промпт: відповідь свіжа,
+        з джерелами-посиланнями. Нічого не знайшлось — як раніше (fail-open)."""
         t0 = time.time()
         prov = self._llm_provider()
         try:  # 🎯 v46: джерело, обране в шапці чату, головніше за картку
@@ -8184,13 +8611,41 @@ class App:
             model = (self.ollama_model.get() or "").strip()
         except Exception:
             pass
-        full = llm_stream(prov, url, model, text, system=self._chat_system(),
+        system = self._chat_system()
+        try:  # 🕵️ v47: агент — свіжі дані з мережі, поки Tk навіть не здогадується
+            if force_web or agent_wants_web(text):
+                ctx, note = agent_web_context(text, timeout=15)
+                if ctx:
+                    system = (system or "") + "\n\n" + ctx
+                    self.q.put(("chat_stream",
+                                "🔎 Агент: " + note + " — відповідаю з ними…\n\n"))
+        except Exception:
+            pass  # пошук впав — модель відповість як вміє (fail-open)
+        full = llm_stream(prov, url, model, text, system=system,
                           history=self._chat_history_for_llm(),
                           on_delta=lambda d: self.q.put(("chat_stream", d)),
                           stop=lambda: getattr(self, "_chat_cancel", False),
                           timeout=180)
         llm_trace("chat", prov, model or "-", t0, bool(full), len(full or ""))
         self.q.put(("chat_done", full))
+
+    def _chat_web_send(self):
+        """🌐 v47: «Пошук» у чаті — фраза з поля летить АГЕНТУ: спершу
+        DuckDuckGo (без ключів), потім модель відповідає зі свіжими
+        даними і посиланнями. Порожньо — підказка, не тупить."""
+        text = ""
+        try:
+            text = self.chat_input.get("1.0", "end").strip()
+        except Exception:
+            pass
+        if not text:
+            self.say("🌐 Напиши у полі, ЩО знайти — потім «🌐 Пошук»")
+            return
+        try:
+            self.chat_input.delete("1.0", "end")
+        except Exception:
+            pass
+        self._chat_send_now(text, force_web=True)
 
     def _chat_stream_delta(self, piece):
         """⚡ v42: токени стріму — малюються ОДРАЗУ, як у Claude; перший
