@@ -202,6 +202,13 @@ Google → Create API key → встав → запам'яталось); нем�
 Groq — gpt-oss (ChatGPT-подібні), 🟣 GLM — безкоштовний шлюз Zhipu
 (glm-4.5-flash) + GLM:free у OpenRouter; Kilo/LLM7 — ChatGPT-шляхи
 без ключа. Усе fail-open, гроші — нуль.
+v45: 🟣 GLM всюди і ще LLM-платформи: GLM (Z.AI міжнародний) —
+glm-4.7-flash (200K контекст), glm-4.5-flash, glm-4.6v-flash —
+$0 за токен; GLM (Zhipu КНР) — оновлений список; 🌊 SiliconFlow —
+фрітір ~1000 зап/хв (Qwen3-8B безкоштовна); 🟠 ModelScope (Alibaba)
+— Qwen3.5/Qwen3 безкоштовно, ~2000 зап/день; OpenRouter — GLM:free
+(z-ai/glm-5.2, glm-4.5-air, glm-4.5-flash). Драбина «Авто» — 18
+ступенів: усі безкоштовні GLM і LLM, ключі — лише локально.
 """
 import array
 import asyncio
@@ -336,7 +343,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.44 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.45 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -368,11 +375,14 @@ FREEKEY_ENGINES = {
     "nvidia": {"url": "https://integrate.api.nvidia.com/v1", "model": "meta/llama-3.3-70b-instruct"},  # 🟩 v43: NVIDIA NIM — стартові кредити
     "sambanova": {"url": "https://api.sambanova.ai/v1", "model": "Meta-Llama-3.3-70B-Instruct"},  # 🟧 v43: SambaNova — безкоштовний фрітір
     "huggingface": {"url": "https://router.huggingface.co/v1", "model": "meta-llama/Llama-3.3-70B-Instruct"},  # 🤗 v43: HF Inference Router — пробний токен
-    "zhipu": {"url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4.5-flash"},  # 🟣 v44: GLM (Zhipu AI) — glm-4.5-flash безкоштовний, фрітір без картки
+    "zhipu": {"url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4.7-flash"},  # 🟣 v44/v45: GLM (Zhipu КНР) — glm-*-flash безкоштовні, фрітір без картки
+    "zai": {"url": "https://api.z.ai/api/paas/v4", "model": "glm-4.7-flash"},  # 🟣 v45: GLM (Z.AI міжнародний) — glm-4.7-flash (200K), 4.5-flash, 4.6v-flash — $0
+    "siliconflow": {"url": "https://api.siliconflow.cn/v1", "model": "Qwen/Qwen3-8B"},  # 🌊 v45: SiliconFlow — фрітір 1000 зап/хв, Qwen3-8B безкоштовна
+    "modelscope": {"url": "https://api-inference.modelscope.cn/v1", "model": "Qwen/Qwen3-8B"},  # 🟠 v45: ModelScope (Alibaba) — Qwen безкоштовно, ~2000 зап/день
 }
 FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
                  "gemini", "openrouter", "nvidia", "sambanova", "huggingface",
-                 "zhipu")  # 🪜 v43/v44: порядок драбини «Авто»
+                 "zhipu", "zai", "siliconflow", "modelscope")  # 🪜 v43–v45: порядок драбини «Авто»
 # 🌐 v44: де взяти безкоштовний ключ — сторінка відкривається у Chrome
 KEY_SIGNUP = {
     "puter": "https://puter.com/dashboard#account",  # Create token
@@ -386,7 +396,10 @@ KEY_SIGNUP = {
     "nvidia": "https://build.nvidia.com/",
     "sambanova": "https://cloud.sambanova.ai/apis",
     "huggingface": "https://huggingface.co/settings/tokens",
-    "zhipu": "https://open.bigmodel.cn/userapi/apikey",  # 🟣 GLM
+    "zhipu": "https://open.bigmodel.cn/userapi/apikey",  # 🟣 GLM (КНР)
+    "zai": "https://z.ai/manage-apikey/apikey-list",  # 🟣 GLM (міжнародний)
+    "siliconflow": "https://cloud.siliconflow.cn/account/ak",  # 🌊 SiliconFlow
+    "modelscope": "https://modelscope.cn/my/myaccesstoken",  # 🟠 ModelScope
 }
 # 🔑 v44: коротка інструкція для кожного шлюзу (показується у вікні ключів)
 KEY_HINTS = {
@@ -401,7 +414,10 @@ KEY_HINTS = {
     "nvidia": "🟩 NVIDIA NIM: build.nvidia.com → Log in → Get API Key — стартові кредити, картка не потрібна.",
     "sambanova": "🟧 SambaNova: cloud.sambanova.ai → APIs → Create API Key — безкоштовний фрітір.",
     "huggingface": "🤗 HF: huggingface.co → Settings → Access Tokens → New token (Read).",
-    "zhipu": "🟣 GLM (Zhipu): open.bigmodel.cn → API Keys — glm-4.5-flash БЕЗКОШТОВНИЙ у фрітірі.",
+    "zhipu": "🟣 GLM (Zhipu КНР): open.bigmodel.cn → API Keys — glm-4.7-flash і glm-4.5-flash БЕЗКОШТОВНІ (телефон КНР для реєстрації).",
+    "zai": "🟣 GLM (Z.AI міжнародний): z.ai → API Keys → Create key — glm-4.7-flash (200K контекст!), glm-4.5-flash і glm-4.6v-flash — $0 за токен, без картки.",
+    "siliconflow": "🌊 SiliconFlow: cloud.siliconflow.cn → API-ключі — безкоштовні моделі позначені «Free» (Qwen3-8B), ~1000 зап/хв у фрітірі.",
+    "modelscope": "🟠 ModelScope (Alibaba): modelscope.cn → Access Tokens — токен без картки; Qwen3.5/Qwen3 — безкоштовно, ~2000 зап/день.",
 }
 # 🧠 v44: вибір моделей для кожного шлюзу (у т.ч. трійка Claude — як Sonnet/Haiku/Opus)
 FREEKEY_MODELS = {
@@ -413,13 +429,21 @@ FREEKEY_MODELS = {
                 "open-mistral-nemo", "magistral-small-latest"],
     "github": ["openai/gpt-4o", "openai/gpt-4o-mini", "microsoft/phi-4"],
     "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-    "openrouter": ["google/gemini-2.0-flash-exp:free", "z-ai/glm-4.5-air:free",
-                   "z-ai/glm-4.5-flash:free", "deepseek/deepseek-chat-v3.1:free",
-                   "qwen/qwen3-235b-a22b:free", "meta-llama/llama-3.3-70b-instruct:free"],
+    "openrouter": ["z-ai/glm-4.5-air:free", "z-ai/glm-5.2:free",
+                   "z-ai/glm-4.5-flash:free", "google/gemini-2.0-flash-exp:free",
+                   "deepseek/deepseek-chat-v3.1:free", "qwen/qwen3-235b-a22b:free",
+                   "meta-llama/llama-3.3-70b-instruct:free"],
     "nvidia": ["meta/llama-3.3-70b-instruct", "openai/gpt-oss-120b", "qwen/qwen3-235b-a22b-instruct"],
     "sambanova": ["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-8B-Instruct"],
     "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "openai/gpt-oss-120b"],
-    "zhipu": ["glm-4.5-flash", "glm-4.6", "glm-4.5-air", "glm-4.5", "glm-4-flash-250414"],
+    "zhipu": ["glm-4.7-flash", "glm-4.5-flash", "glm-4.6v-flash", "glm-4.6",
+              "glm-4.5-air", "glm-4.5", "glm-4-flash-250414"],
+    "zai": ["glm-4.7-flash", "glm-4.5-flash", "glm-4.6v-flash", "glm-4.6",
+            "glm-4.5-air", "glm-4.5"],
+    "siliconflow": ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct",
+                    "Qwen/Qwen3-Coder-30B-A3B-Instruct"],
+    "modelscope": ["Qwen/Qwen3-8B", "Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-27B",
+                   "Qwen/Qwen2.5-7B-Instruct"],
 }
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 CHAT_FILE = os.path.join(TOOLS_DIR, "chat.json")  # 💬 v41: історія чату Асистента, лише локально
@@ -694,7 +718,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v44"}
+            d = {"app": "Генератор відео v45"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -832,7 +856,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v44"}
+                "app": "Генератор відео v45"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -5090,7 +5114,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; вікно «🔑 Ключі» — сторінка у Chrome, ключ запам'ятається назавжди, лише локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів (ChatGPT-подібні моделі); 🔑 ключі: Groq / GitHub / 🤖 Google AI Studio (авторизація через Google) / ⚡ Cerebras / 🇪🇺 Mistral / 🧭 OpenRouter / 🟩 NVIDIA / 🟧 SambaNova / 🤗 HF / 🟣 GLM (Zhipu) — усе безкоштовні фрітіри, без картки; моделі на вибір: Claude Sonnet/Haiku/Opus, GLM, gpt-oss, Mistral-лінійка; 🔄 Авто (за замовчуванням) — драбина всіх джерел: вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; вікно «🔑 Ключі» — сторінка у Chrome, ключ запам'ятається назавжди, лише локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів (ChatGPT-подібні моделі); 🔑 ключі: Groq / GitHub / 🤖 Google AI Studio (авторизація через Google) / ⚡ Cerebras / 🇪🇺 Mistral / 🧭 OpenRouter / 🟩 NVIDIA / 🟧 SambaNova / 🤗 HF / 🟣 GLM Zhipu / 🟣 GLM Z.AI / 🌊 SiliconFlow / 🟠 ModelScope — усе безкоштовні фрітіри, без картки; моделі на вибір: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash безкоштовна, 200K), Qwen, gpt-oss, Mistral-лінійка; 🔄 Авто (за замовчуванням) — драбина всіх джерел: вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -5888,7 +5912,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v44 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM, gpt-oss; 🔄 Авто (за замовчуванням) — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v45 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7420,7 +7444,8 @@ class App:
                    "cerebras": "⚡ Cerebras", "mistral": "🇪🇺 Mistral",
                    "openrouter": "🧭 OpenRouter", "nvidia": "🟩 NVIDIA NIM",
                    "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
-                   "zhipu": "🟣 GLM (Zhipu)",
+                   "zhipu": "🟣 GLM (Zhipu)", "zai": "🟣 GLM (Z.AI)",
+                   "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
@@ -8241,10 +8266,11 @@ class App:
         self._key_state.pack(fill="x", padx=16, pady=(8, 2))
         ctk.CTkLabel(win, text="🔄 Драбина «Авто» сама підхопить усе, що збережеш: "
                      "Puter → Anthropic → Cerebras → Groq → Mistral → GitHub → "
-                     "Google AI Studio → OpenRouter → NVIDIA → SambaNova → HF → GLM "
-                     "→ Kilo → LLM7 → Pollinations. ChatGPT-подібні безкоштовні "
-                     "моделі — у Groq (gpt-oss) і Kilo/LLM7; Claude — через Puter "
-                     "або Anthropic; GLM — Zhipu (:free) або OpenRouter.",
+                     "Google AI Studio → OpenRouter → NVIDIA → SambaNova → HF → "
+                     "GLM (Zhipu) → GLM (Z.AI) → SiliconFlow → ModelScope → Kilo → "
+                     "LLM7 → Pollinations. GLM — дві платформи (glm-4.7-flash "
+                     "безкоштовна!) і GLM:free у OpenRouter; ChatGPT-подібні — "
+                     "Groq (gpt-oss) і Kilo/LLM7; Claude — Puter/Anthropic.",
                      font=self._f(10), text_color=self.CLAUDE_MUTED, anchor="w",
                      wraplength=620, justify="left").pack(fill="x", padx=16,
                                                           pady=(6, 8))
@@ -8398,7 +8424,8 @@ class App:
             self.ollama_status.configure(
                 text="🔄 Авто — драбина: 🤖 Claude (Puter) → Claude (Anthropic) → ⚡ Cerebras → "
                      "Groq → 🇪🇺 Mistral → GitHub → 🤖 Google AI Studio → 🧭 OpenRouter → 🟩 NVIDIA → "
-                     "🟧 SambaNova → 🤗 HF → 🟣 GLM → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
+                     "🟧 SambaNova → 🤗 HF → 🟣 GLM (Zhipu) → 🟣 GLM (Z.AI) → 🌊 SiliconFlow → "
+                     "🟠 ModelScope → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
                      "Вичерпався — сам перескакує: Асистент не впирається в ліміти.")
         else:
             self.ollama_status.configure(
