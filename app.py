@@ -167,6 +167,17 @@ v41: 💬 чат Асистента — дизайн і функціонал у 
 Джерело думання чату — що обрано в картці Асистента (Claude/Kilo/
 LLM7/драбина — без ключів). Кожен запит — у llm_trace.jsonl, усе
 fail-open, гроші — нуль.
+v42: 💬 чат — копія функціоналу Claude і його механіки: справжній
+СТРІМІНГ (stream=True, чанки одразу; «Авто» стрімить по драбині,
+не вийшло — фолбек на звичайний запит, fail-open), markdown-рендер
+відповідей (заголовки/жирний/курсив/`код`/```блоки``` — теги Text),
+список РОЗМОВ (tools/chat.json, до 30, перемикання/видалення/нові;
+старий v41-формат мігрується сам), ✏️ редагування повідомлень юзера,
+🧩 артефакти (кожен код-блок 3+ рядки — окреме вікно: копіювати/
+зберегти; html/svg — зберегти і відкрити), вибір МОДЕЛІ у шапці
+(тійка Claude для Puter/Anthropic; каталоги Kilo/Pollinations/Ollama),
+📎 файл у контекст (до 24 тис. симв.), лічильник контексту. Гроші —
+нуль, ключі — лише локально, усе fail-open.
 """
 import array
 import asyncio
@@ -301,7 +312,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.41 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.42 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -600,7 +611,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v41"}
+            d = {"app": "Генератор відео v42"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -738,7 +749,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v41"}
+                "app": "Генератор відео v42"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2819,6 +2830,159 @@ def llm_chat(provider, url, model, prompt, system=None, timeout=90, history=None
                            history=history)
     return ollama_chat(url, model, prompt, system=system, timeout=timeout,
                        history=history)
+
+
+def _oai_stream(endpoint, key, model, messages, timeout=90, on_chunk=None):
+    """💬 v42: справжній СТРІМІНГ відповіді — OpenAI-сумісний ендпоінт
+    (stream=True): чуночок тексту прилітає одразу, як у Claude. Повертає
+    чи було ХОЧ щось (True — можна продовжувати показ). Лежачий шлюз/429/
+    таймаут ДО першого чанка — False (ступінь драбини чесно пропускається,
+    fail-open)."""
+    started = False
+    try:
+        headers = {"User-Agent": UA_STRING}
+        if key:
+            headers["Authorization"] = "Bearer " + (key or "")
+        r = requests.post(endpoint, json={"model": (model or "").strip(),
+                                           "messages": messages, "stream": True},
+                           timeout=timeout, stream=True, headers=headers)
+        if r.status_code != 200:
+            return False
+        for line in r.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if line == "[DONE]":
+                break
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            ch = (d.get("choices") or [{}])[0]
+            delta = ((ch.get("delta") or {}).get("content")
+                     or (ch.get("message") or {}).get("content") or "")
+            if delta:
+                started = True
+                if on_chunk:
+                    on_chunk(delta)
+        return started
+    except Exception:
+        return started  # почалось і впало — частковий текст вже у чунках
+
+
+def _ollama_stream(url, model, messages, timeout=90, on_chunk=None):
+    """💬 v42: стрімінг локального Ollama (/api/chat, stream=true, NDJSON —
+    кожен рядок — чанок message.content). Fail-open як у _oai_stream."""
+    started = False
+    try:
+        r = requests.post((url or "").rstrip("/") + "/api/chat",
+                          json={"model": model, "stream": True, "messages": messages},
+                          timeout=timeout, stream=True)
+        if r.status_code != 200:
+            return False
+        for line in r.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get("done"):
+                break
+            c = ((d.get("message") or {}).get("content")) or ""
+            if c:
+                started = True
+                if on_chunk:
+                    on_chunk(c)
+        return started
+    except Exception:
+        return started
+
+
+def llm_chat_stream(provider, url, model, prompt, system=None, timeout=120,
+                    history=None, on_chunk=None):
+    """💬 v42: чат зі СТРІМІНГОМ — так це реалізовано у Claude: текст
+    прибуває чанками одразу. Джерела OpenAI-сумісні (Puter/Anthropic/Groq/
+    GitHub/Gemini/Kilo/LLM7/9Router/Ollama) стрімять по-справжньому;
+    🔄 «Авто» — драбина пробує ступені стрімінгом, Pollinations — одним
+    куском; Pollinations напряму — одним куском. Ніде не вийшло стрімити
+    — чесний фолбек на звичайний llm_chat (fail-open, гроші — нуль)."""
+    step_t = min(int(timeout or 120), 90)
+    msgs = ([{"role": "system", "content": system}] if system else []) \
+        + (history or []) + [{"role": "user", "content": prompt}]
+    buf = []
+
+    def _cb(t):
+        buf.append(t)
+        if on_chunk:
+            on_chunk(t)
+
+    prov = provider or "ollama"
+    if prov == "ollama":
+        ok = _ollama_stream(url, model, msgs, timeout=step_t, on_chunk=_cb)
+    elif prov == "9router":
+        ok = _oai_stream((url or "").rstrip("/") + "/v1/chat/completions", None,
+                         model, msgs, timeout=step_t, on_chunk=_cb)
+    elif prov == "kilo":
+        ok = _oai_stream((url or KILO_URL).rstrip("/") + "/chat/completions",
+                         None, (model or "").strip() or "kilo-auto/free", msgs,
+                         timeout=step_t, on_chunk=_cb)
+    elif prov == "llm7":
+        ok = _oai_stream((url or LLM7_URL).rstrip("/") + "/chat/completions",
+                         "unused", (model or "").strip() or "gpt-5.5", msgs,
+                         timeout=step_t, on_chunk=_cb)
+    elif prov == "freekey":
+        eng = freekey_engine()
+        if not eng:
+            ok = False
+        else:
+            conf = FREEKEY_ENGINES[eng]
+            m = (model or "").strip()
+            if not m or m == "модель не обрана":
+                m = conf["model"]
+            ok = _oai_stream(conf["url"].rstrip("/") + "/chat/completions",
+                             str(load_freekeys().get(eng) or "").strip(), m,
+                             msgs, timeout=step_t, on_chunk=_cb)
+    elif prov == "auto":  # 🔄 драбина: ступінь за ступенем, перший живий стрімить
+        ok = False
+        for st in auto_chain_steps():
+            t0 = time.time()
+            if st["kind"] == "pollinations":
+                txt = pollinations_chat(st["url"], st["model"], prompt,
+                                         system=system, timeout=step_t,
+                                         history=history)
+                if txt:
+                    _cb(txt)  # одним куском — усе ж краще, ніж нічого
+                llm_trace("chat", st["label"], st["model"], t0, bool(txt),
+                          len(txt or ""))
+                if txt:
+                    ok = True
+                    break
+                continue
+            if st["kind"] == "kilo":
+                ok = _oai_stream((st["url"] or KILO_URL).rstrip("/")
+                                 + "/chat/completions", None, st["model"], msgs,
+                                 timeout=step_t, on_chunk=_cb)
+            elif st["kind"] == "llm7":
+                ok = _oai_stream((st["url"] or LLM7_URL).rstrip("/")
+                                 + "/chat/completions", "unused", st["model"],
+                                 msgs, timeout=step_t, on_chunk=_cb)
+            else:  # puter / anthropic / groq / github / gemini — OpenAI-сумісні
+                ok = _oai_stream(st["url"].rstrip("/") + "/chat/completions",
+                                 st["key"], st["model"], msgs,
+                                 timeout=step_t, on_chunk=_cb)
+            llm_trace("chat", st["label"], st["model"], t0, bool(ok and buf),
+                      sum(len(x) for x in buf))
+            if ok and buf:
+                break
+            ok = False
+    else:  # pollinations напряму та невідомі — без стрімінгу
+        ok = False
+    if not buf:  # ніде не вийшло — чесний фолбек на звичайний запит
+        return llm_chat(prov, url, model, prompt, system=system,
+                        timeout=timeout, history=history)
+    return "".join(buf)
 
 
 def llm_trace(kind, provider, model, t0, ok, chars):
@@ -5613,7 +5777,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v41 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен; 🔄 Авто — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — багатохідна розмова з пам'яттю, історія збережена лише локально, кнопки Копіювати/Ще раз/⏹ Стоп і ефект друку, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v42 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен; 🔄 Авто — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом — копія функціоналу Claude: справжній стрімінг відповідей, markdown-рендер, список розмов, артефакти для коду, редагування повідомлень, файли у контексті (історія збережена лише локально), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6959,8 +7123,10 @@ class App:
                     self._agent_llm_done(msg[1])
                 elif kind == "ollama_check":  # 🧠 v29: перевірка Ollama готова
                     self._ollama_check_done(msg[1])
-                elif kind == "chat_reply":  # 💬 v41: відповідь чату Асистента
-                    self._chat_reply(msg[1])
+                elif kind == "chat_chunk":  # 💬 v42: чанок стрімінгу чату
+                    self._chat_chunk(msg[1])
+                elif kind == "chat_done":  # 💬 v42: відповідь чату готова
+                    self._chat_done(msg[1])
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -7096,11 +7262,19 @@ class App:
         self.say("🧠 AI-модель підказала{} — перевір поля й пиши «давай»".format(
             " і написала сценарій" if sc else ""))
 
-    # 💬 v41: чат Асистента у стилі Claude — окреме вікно-розмова (дизайн:
-    # крем claude ivory, теракотовий акцент, бульбашка юзера праворуч, текст
-    # асистента зліва; функціонал: багатохідна розмова з пам'яттю, збережена
-    # історія у tools/chat.json (лише локально), кнопки Копіювати / Ще раз,
-    # ⏹ Стоп, ефект друку, чіпси-підказки; джерело — що обрано в картці).
+    # 💬 v42: чат Асистента — копія функціоналу Claude і механіки його
+    # реалізації: справжній СТРІМІНГ (stream=True, чанки одразу, як у
+    # Claude), MARKDOWN-рендер відповідей (жирний/курсив/код/заголовки/
+    # цитати/списки — теги Text-віджета), список РОЗМОВ (Projects: скільки
+    # завгодно чатів у tools/chat.json, перемикання/видалення/нові),
+    # ✏️ редагування повідомлень юзера (перепиши і надішли знову),
+    # 🧩 АРТЕФАКТИ (кожен код-блок 3+ рядки — кнопка: окреме вікно з
+    # кодом, зберегти у файл, HTML/SVG — зберегти і відкрити), вибір
+    # МОДЕЛІ у шапці (Claude-трійця для Puter/Anthropic; каталоги Kilo/
+    # Pollinations/Ollama), 📎 файл у контекст (txt/md/srt/py/json),
+    # лічильник контексту, ⏹ Стоп (часткова відповідь лишається, як у
+    # Claude), 📋 Копіювати, 🔁 Ще раз, чіпси-підказки. Все fail-open,
+    # ключі лише локально, гроші — нуль.
 
     CHAT_PRETTY = {"puter": "🤖 Claude (Puter)", "anthropic": "🤖 Claude (Anthropic)",
                    "groq": "🔑 Groq", "github": "🔑 GitHub", "gemini": "🔑 Gemini",
@@ -7112,7 +7286,7 @@ class App:
                   "Що ти вмієш і які у тебе джерела думання?")
 
     def _chat_source(self):
-        """💬 v41: гарна назва обраного джерела для шапки і міток чату."""
+        """💬 v42: гарна назва обраного джерела для шапки і міток чату."""
         try:
             p = self._llm_provider()
             if p == "freekey":
@@ -7124,57 +7298,193 @@ class App:
             return "🧠 Ollama"
 
     def _chat_system(self):
-        """💬 v41: системний промпт чату — характер і завдання Асистента."""
+        """💬 v42: системний промпт чату — характер, завдання і дозвіл на
+        markdown (рендериться у бульбашках, код — у артефакти)."""
         s = ("Ти — Асистент «Генератора відео» (український десктопний генератор "
              "Shorts і відео: озвучка, субтитри, фон з YouTube чи фото, рендер). "
              "Відповідай українською, тепло і стисло, як Claude: конкретика, без "
-             "води, приклади. Якщо просять налаштувати генерацію — дай ОДНУ готову "
-             "фразу для поля Асистента у головному вікні (наприклад: «Shorts про "
-             "космос, голос Поліна, караоке»). Користувач може натиснути «⚙️ у поля» — "
-             "твоя порада стане командою генератору.")
+             "води, приклади. Форматуй відповідь markdown-ом: **жирний**, "
+             "*курсив*, `код`, ```блоки коду``` (з мовою: python/html/js), "
+             "### заголовки, списки. Якщо просять налаштувати генерацію — дай "
+             "ОДНУ готову фразу для поля Асистента (наприклад: «Shorts про "
+             "космос, голос Поліна, караоке»). Користувач може натиснути "
+             "«⚙️ у поля» — твоя порада стане командою генератору.")
         rules = project_rules()  # 📏 v32: правила проєкту — обов'язкові для моделі
         if rules:
             s += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
         return s
 
     def _chat_history_for_llm(self):
-        """💬 v41: останні репліки розмови у форматі messages (контекст чату)."""
+        """💬 v42: останні репліки розмови у форматі messages (контекст чату);
+        📎 доданий файл — вміст їде разом зі своїм повідомленням."""
         out = []
         for m in (getattr(self, "chat_messages", None) or [])[-12:]:
-            if m.get("role") in ("user", "assistant") and m.get("text"):
-                out.append({"role": m["role"], "content": str(m["text"])[:1200]})
+            if m.get("role") not in ("user", "assistant") or not m.get("text"):
+                continue
+            content = str(m["text"])[:1200]
+            att = m.get("attach")
+            if isinstance(att, dict) and att.get("content"):
+                content += ("\n\n[Доданий файл: " + str(att.get("name") or "файл")
+                            + "]\n" + str(att["content"])[:8000])
+            out.append({"role": m["role"], "content": content})
         return out
 
-    def _chat_load(self):
-        """💬 v41: історія чату з tools/chat.json — лише локально (як ключ
-        Pixabay); нема/кривий файл — порожній список (fail-open)."""
+    # ——— розмови (Projects Claude): список чатів у tools/chat.json ———
+
+    def _chats_load(self):
+        """💬 v42: розмови з tools/chat.json — лише локально (як ключ Pixabay).
+        Старий v41-формат {"messages": …} мігрую в одну розмову. Кривий/нема
+        файл — порожній список (fail-open)."""
         try:
             with open(CHAT_FILE, encoding="utf-8") as f:
                 d = json.load(f)
-            msgs = d.get("messages") if isinstance(d, dict) else d
-            if isinstance(msgs, list):
-                return [{"role": m.get("role"), "text": str(m.get("text") or "")[:4000],
-                         "src": m.get("src") or ""}
-                        for m in msgs if isinstance(m, dict)
-                        and m.get("role") in ("user", "assistant")][-60:]
+            convs = d.get("conversations") if isinstance(d, dict) else None
+            if not convs and isinstance(d, dict) and d.get("messages"):
+                convs = [{"id": "c1", "title": "Перенесена розмова v41",
+                          "updated": "", "messages": d["messages"]}]
+            out = []
+            for i, c in enumerate(convs or []):
+                if not isinstance(c, dict) or not isinstance(c.get("messages"), list):
+                    continue
+                msgs = []
+                for m in c["messages"]:
+                    if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+                        att = m.get("attach")
+                        msgs.append({"role": m["role"],
+                                     "text": str(m.get("text") or "")[:6000],
+                                     "src": m.get("src") or "",
+                                     "ts": m.get("ts") or "",
+                                     "attach": ({"name": str(att.get("name") or "файл"),
+                                                 "content": str(att.get("content") or "")[:20000]}
+                                                if isinstance(att, dict) else None)})
+                out.append({"id": str(c.get("id") or ("c" + str(i))),
+                            "title": str(c.get("title") or "Розмова")[:60],
+                            "updated": str(c.get("updated") or ""),
+                            "messages": msgs})
+            out = out[-30:]
+            cur = str((d.get("current") if isinstance(d, dict) else "") or "")
+            if not any(c["id"] == cur for c in out):
+                cur = out[-1]["id"] if out else ""
+            return out, cur
         except Exception:
-            pass
-        return []
+            return [], ""
 
-    def _chat_save(self):
-        """💬 v41: зберегти історію чату (останні 60 реплік). Не вийшло —
-        тихо пропускаю: чат працює і без збереження (fail-open)."""
+    def _chats_save(self):
+        """💬 v42: зберегти всі розмови (до 30; порожні — крім поточної —
+        прибираю). Не вийшло — тихо: чат працює далі (fail-open)."""
         try:
             os.makedirs(TOOLS_DIR, exist_ok=True)
+            cur = getattr(self, "chat_cur", None)
+            keep = [c for c in getattr(self, "chats", [])
+                    if c.get("messages") or c["id"] == cur]
+            self.chats = keep
             with open(CHAT_FILE, "w", encoding="utf-8") as f:
-                json.dump({"messages": (getattr(self, "chat_messages", None) or [])[-60:]},
+                json.dump({"conversations": keep, "current": cur},
                           f, ensure_ascii=False, indent=1)
         except Exception:
             pass
 
+    def _chat_conv(self):
+        """💬 v42: поточна розмова (за self.chat_cur)."""
+        return next((c for c in getattr(self, "chats", [])
+                     if c["id"] == getattr(self, "chat_cur", None)), None)
+
+    # ——— markdown-рендер (так рендерить і Claude: багатий текст) ———
+
+    def _md_fonts(self):
+        """💬 v42: шрифти markdown: звичайний/жирний/курсив/заголовок/код."""
+        if not hasattr(self, "_md_f"):
+            self._md_f = {"base": self._f(13),
+                          "bold": self._f(13, "bold"),
+                          "italic": ctk.CTkFont(family="Segoe UI", size=13, slant="italic"),
+                          "h": self._f(15, "bold"),
+                          "mut": self._f(12),
+                          "code": ctk.CTkFont(family="Consolas", size=12)}
+        return self._md_f
+
+    def _md_inline(self, box, s):
+        """💬 v42: інлайн-markdown: **жирний**, *курсив*, `код` — теги Text."""
+        for tok in re.split(r"(\*\*.+?\*\*|`[^`\n]+`|\*[^*\n]+\*)", s or ""):
+            if not tok:
+                continue
+            if tok.startswith("**") and tok.endswith("**") and len(tok) > 4:
+                box.insert("end", tok[2:-2], ("b",))
+            elif tok.startswith("`") and tok.endswith("`") and len(tok) > 2:
+                box.insert("end", tok[1:-1], ("code",))
+            elif tok.startswith("*") and tok.endswith("*") and len(tok) > 2:
+                box.insert("end", tok[1:-1], ("i",))
+            else:
+                box.insert("end", tok)
+
+    def _md_lines(self, box, part):
+        """💬 v42: рядковий markdown: ### заголовки, > цитати, списки."""
+        for ln in str(part or "").split("\n"):
+            s = ln.rstrip()
+            low = s.lstrip()
+            if low.startswith("### ") or low.startswith("## ") or low.startswith("# "):
+                box.insert("end", "\n")
+                box.insert("end", low.split(" ", 1)[1].strip() + "\n", ("h",))
+            elif low.startswith("> "):
+                box.insert("end", low[2:].strip() + "\n", ("mut",))
+            elif low.startswith("- ") or low.startswith("* ") or low.startswith("• "):
+                box.insert("end", "•  ")
+                self._md_inline(box, low[2:])
+                box.insert("end", "\n")
+            else:
+                self._md_inline(box, s)
+                box.insert("end", "\n")
+
+    def _md_render(self, box, text):
+        """💬 v42: markdown → теги Text-віджета: ```кодові блоки``` окремим
+        стилем, решта — заголовки/жирний/курсив/списки/цитати."""
+        box.configure(state="normal")
+        box.delete("1.0", "end")
+        f = self._md_fonts()
+        box.tag_config("h", font=f["h"], foreground=self.CLAUDE_TEXT)
+        box.tag_config("b", font=f["bold"])
+        box.tag_config("i", font=f["italic"])
+        box.tag_config("code", font=f["code"], background=self.CLAUDE_CARD)
+        box.tag_config("cb", font=f["code"], background="#EDEAE0",
+                       lmargin1=10, lmargin2=10)
+        box.tag_config("mut", font=f["mut"], foreground=self.CLAUDE_MUTED,
+                       lmargin1=10)
+        parts = str(text or "").split("```")
+        for pi, part in enumerate(parts):
+            if pi % 2 == 1:  # код-блок (може з мовою на першому рядку)
+                lns = part.split("\n")
+                first = (lns[0] if lns else "").strip()
+                if first and " " not in first and len(first) <= 12:
+                    lns = lns[1:]
+                body = "\n".join(lns).strip("\n")
+                if body:
+                    box.insert("end", "\n")
+                    box.insert("end", body + "\n", ("cb",))
+            else:
+                self._md_lines(box, part)
+        box.configure(state="disabled")
+
+    def _md_height(self, text):
+        """💬 v42: оцінка висоти текстового боксу (≈72 символи в рядку)."""
+        lines = 0
+        for ln in str(text or "").split("\n"):
+            lines += max(1, -(-len(ln) // 72))
+        extra = str(text or "").count("```") // 2 * 2 + 2
+        return max(60, min(460, (lines + extra) * 19 + 16))
+
+    def _chat_md_box(self, parent, text):
+        """💬 v42: готовий markdown-бокс для відповіді асистента."""
+        box = ctk.CTkTextbox(parent, height=self._md_height(text),
+                             font=self._f(13), wrap="word",
+                             fg_color="transparent", text_color=self.CLAUDE_TEXT,
+                             border_width=0)
+        self._md_render(box, text)
+        return box
+
+    # ——— вікно чату ———
+
     def open_chat_window(self):
-        """💬 v41: вікно чату — дизайн і функціонал у стилі Claude: крем-фон,
-        бульбашки, багатохідна розмова, ⏹ Стоп, ефект друку відповіді."""
+        """💬 v42: вікно чату — функціонал Claude: сайдбар розмов, стрімінг,
+        markdown, артефакти, вибір моделі, файли у контексті."""
         if getattr(self, "chat_win", None) is not None:
             try:
                 if self.chat_win.winfo_exists():
@@ -7184,10 +7494,22 @@ class App:
                 pass
         self._chat_busy = False
         self._chat_cancel = False
-        self.chat_messages = self._chat_load()
+        self.chat_attach = None
+        self._chat_live_box = None
+        self._chat_live_frame = None
+        self._chat_live_text = ""
+        self.chats, cur = self._chats_load()
+        if not self.chats:
+            self.chats = [{"id": "c" + str(int(time.time() * 1000))[-9:],
+                           "title": "Нова розмова",
+                           "updated": time.strftime("%d.%m %H:%M"), "messages": []}]
+            cur = self.chats[0]["id"]
+        self.chat_cur = cur or self.chats[-1]["id"]
+        self.chat_messages = self._chat_conv()["messages"]
+
         win = ctk.CTkToplevel(self.root)
         win.title("✳ Асистент — чат")
-        win.geometry("780x840")
+        win.geometry("1000x840")
         win.attributes("-topmost", True)
         win.after(400, lambda: win.attributes("-topmost", False))
         try:
@@ -7197,30 +7519,59 @@ class App:
         win.configure(fg_color=self.CLAUDE_BG)
         self.chat_win = win
 
-        # шапка: ✳ мітка, джерело, «＋ Нова розмова» — як панель Claude
-        head = ctk.CTkFrame(win, fg_color=self.CLAUDE_CARD, corner_radius=0)
-        head.pack(fill="x", side="top")
-        ctk.CTkLabel(head, text="✳ Асистент", font=self._f(16, "bold"),
-                     text_color=self.CLAUDE_TEXT).pack(side="left", padx=(16, 8),
-                                                       pady=(12, 4))
-        self.chat_src_lbl = ctk.CTkLabel(
-            head, text="Джерело думання: " + self._chat_source(),
-            font=self._f(11), text_color=self.CLAUDE_MUTED)
-        self.chat_src_lbl.pack(side="left", padx=(0, 8), pady=(14, 4))
-        ctk.CTkButton(head, text="＋ Нова розмова", height=30, corner_radius=15,
+        # сайдбар розмов (як Projects у Claude)
+        side = ctk.CTkFrame(win, width=212, fg_color=self.CLAUDE_CARD, corner_radius=0)
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
+        ctk.CTkLabel(side, text="✳ Розмови", font=self._f(13, "bold"),
+                     text_color=self.CLAUDE_TEXT, anchor="w").pack(
+                         fill="x", padx=14, pady=(12, 4))
+        ctk.CTkButton(side, text="＋ Нова розмова", height=34, corner_radius=17,
                       fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
                       text_color="#FFFFFF", font=self._f(12),
-                      command=self._chat_new).pack(side="right", padx=(8, 16),
-                                                   pady=(10, 4))
+                      command=self._chat_new).pack(fill="x", padx=10, pady=(0, 6))
+        self.chats_list = ctk.CTkScrollableFrame(side, fg_color="transparent",
+                                                 corner_radius=0)
+        self.chats_list.pack(fill="both", expand=True, padx=6, pady=4)
+
+        # праворуч: шапка + стрічка + введення
+        right = ctk.CTkFrame(win, fg_color="transparent")
+        right.pack(side="right", fill="both", expand=True)
+        head = ctk.CTkFrame(right, fg_color=self.CLAUDE_CARD, corner_radius=0)
+        head.pack(fill="x", side="top")
+        row1 = ctk.CTkFrame(head, fg_color="transparent")
+        row1.pack(fill="x", padx=16, pady=(10, 0))
+        ctk.CTkLabel(row1, text="✳ Асистент", font=self._f(16, "bold"),
+                     text_color=self.CLAUDE_TEXT).pack(side="left")
+        self.chat_src_lbl = ctk.CTkLabel(
+            row1, text=self._chat_source(), font=self._f(11),
+            text_color=self.CLAUDE_MUTED)
+        self.chat_src_lbl.pack(side="left", padx=(10, 0))
+        self.chat_ctx_lbl = ctk.CTkLabel(row1, text="контекст ≈ 0",
+                                         font=self._f(11),
+                                         text_color=self.CLAUDE_MUTED)
+        self.chat_ctx_lbl.pack(side="right")
+        row2 = ctk.CTkFrame(head, fg_color="transparent")
+        row2.pack(fill="x", padx=16, pady=(2, 10))
+        ctk.CTkLabel(row2, text="🧠 Модель:", font=self._f(11),
+                     text_color=self.CLAUDE_MUTED).pack(side="left")
+        self.chat_model = ctk.CTkOptionMenu(
+            row2, values=self._chat_models(), width=300, height=30,
+            corner_radius=15, fg_color="#FFFFFF", button_color="#E8E5D9",
+            button_hover_color="#DDD9CB", text_color=self.CLAUDE_TEXT,
+            font=self._f(12))
+        self.chat_model.set(self.chat_model.cget("values")[0]
+                            if self.chat_model.cget("values") else "—")
+        self.chat_model.pack(side="left", padx=(6, 0))
 
         # стрічка повідомлень
-        self.chat_scroll = ctk.CTkScrollableFrame(win, fg_color=self.CLAUDE_BG,
+        self.chat_scroll = ctk.CTkScrollableFrame(right, fg_color=self.CLAUDE_BG,
                                                    corner_radius=0)
-        self.chat_scroll.pack(fill="both", expand=True, side="top", pady=(0, 0))
+        self.chat_scroll.pack(fill="both", expand=True, side="top")
 
-        # панель введення — як у Claude: біла картка з рамкою, Enter — надіслати
-        bar = ctk.CTkFrame(win, fg_color="#FFFFFF", corner_radius=16,
-                          border_width=1, border_color=self.CLAUDE_LINE)
+        # панель введення — як у Claude
+        bar = ctk.CTkFrame(right, fg_color="#FFFFFF", corner_radius=16,
+                           border_width=1, border_color=self.CLAUDE_LINE)
         bar.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
         self.chat_input = ctk.CTkTextbox(bar, height=92, font=self._f(13),
                                          wrap="word", fg_color="transparent",
@@ -7240,6 +7591,10 @@ class App:
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=lambda: self.paste_into(self.chat_input)).pack(
                           side="left")
+        ctk.CTkButton(row, text="📎 Файл", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._chat_attach).pack(side="left", padx=(8, 0))
         ctk.CTkButton(row, text="⚙️ у поля генератора", height=34, corner_radius=17,
                       fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
@@ -7250,19 +7605,156 @@ class App:
             text_color="#FFFFFF", font=self._f(14, "bold"),
             command=self._chat_send)
         self.chat_send_btn.pack(side="right")
-        ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
-                     "⚙️ у поля — фраза з поля чату стає командою генератора",
-                     font=self._f(10), text_color=self.CLAUDE_MUTED,
-                     anchor="w").pack(fill="x", padx=16, pady=(0, 6))
 
-        if self.chat_messages:
-            for m in self.chat_messages:
-                self._chat_render(m["role"], m["text"], m.get("src") or "")
-        else:
+        # мітка прикріпленого файла (тап — прибрати)
+        self.chat_att_lbl = ctk.CTkLabel(right, text="", font=self._f(11),
+                                         text_color=self.CLAUDE_MUTED, anchor="w",
+                                         cursor="hand2", fg_color=self.CLAUDE_CARD,
+                                         corner_radius=8)
+        self.chat_att_lbl.bind("<Button-1>", lambda e: self._chat_att_click())
+        ctk.CTkLabel(right, text="Enter — надіслати • Shift+Enter — новий рядок • "
+                     "📎 файл у контекст • ⚙️ у поля — команда генератору",
+                     font=self._f(10), text_color=self.CLAUDE_MUTED,
+                     anchor="w").pack(fill="x", padx=16, pady=(0, 4), side="bottom")
+
+        self._chats_render()
+        self._chat_render_all()
+
+    def _chat_models(self):
+        """💬 v42: які моделі запропонувати у шапці (як селектор Claude):
+        трійка Claude для Puter/Anthropic-ключа, каталоги Kilo/Pollinations,
+        моделі Ollama/9Router; «Авто» — драбина сама обирає (fail-open)."""
+        try:
+            prov = self._llm_provider()
+            if prov == "auto":
+                return ["драбина сама обирає"]
+            if prov == "freekey":
+                eng = freekey_engine()
+                if eng == "puter":
+                    return ["за замовчуванням",
+                            "anthropic/claude-sonnet-5-5",
+                            "anthropic/claude-haiku-5-5",
+                            "anthropic/claude-opus-5-5"]
+                if eng == "anthropic":
+                    return ["за замовчуванням", "claude-sonnet-5-5",
+                            "claude-haiku-5-5", "claude-opus-5-5"]
+                conf = FREEKEY_ENGINES.get(eng) or {}
+                return ["за замовчуванням", conf.get("model") or "—"]
+            if prov == "kilo":
+                return ["за замовчуванням"] + kilo_list_models("", timeout=8)
+            if prov == "pollinations":
+                return ["за замовчуванням"] + pollinations_list_models("", timeout=8)
+            vals = []
+            try:
+                vals = [v for v in (self.ollama_model.cget("values") or [])
+                        if v and v != "модель не обрана"]
+            except Exception:
+                vals = []
+            return ["за замовчуванням"] + vals
+        except Exception:
+            return ["за замовчуванням"]
+
+    # ——— сайдбар: рендер/нова/перемикання/видалення ———
+
+    def _chats_render(self):
+        """💬 v42: намалювати сайдбар розмов (поточна підсвічена)."""
+        try:
+            for w in self.chats_list.winfo_children():
+                w.destroy()
+            for c in getattr(self, "chats", []):
+                cur = c["id"] == getattr(self, "chat_cur", None)
+                row = ctk.CTkFrame(self.chats_list,
+                                   fg_color=("#EAE6DA" if cur else "transparent"),
+                                   corner_radius=10)
+                row.pack(fill="x", pady=2, padx=2)
+                ctk.CTkButton(row, text=(c.get("title") or "Розмова")[:38],
+                              anchor="w", height=30, corner_radius=8,
+                              fg_color="transparent", hover_color="#E8E5D9",
+                              text_color=self.CLAUDE_TEXT, font=self._f(11),
+                              command=lambda cid=c["id"]: self._chat_switch(cid)
+                              ).pack(side="left", fill="x", expand=True)
+                ctk.CTkButton(row, text="✕", width=26, height=30,
+                              fg_color="transparent", hover_color="#E8E5D9",
+                              text_color=self.CLAUDE_MUTED, font=self._f(11),
+                              command=lambda cid=c["id"]: self._chat_delete(cid)
+                              ).pack(side="right")
+        except Exception:
+            pass  # сайдбар — декоративний: ніколи не ламає чат (fail-open)
+
+    def _chat_new(self):
+        """💬 v42: ＋ Нова розмова — чистий аркуш (як «New chat» у Claude)."""
+        conv = {"id": "c" + str(int(time.time() * 1000))[-9:],
+                "title": "Нова розмова",
+                "updated": time.strftime("%d.%m %H:%M"), "messages": []}
+        self.chats.append(conv)
+        self.chat_cur = conv["id"]
+        self.chat_messages = conv["messages"]
+        self._chats_save()
+        self._chats_render()
+        self._chat_render_all()
+
+    def _chat_switch(self, cid):
+        """💬 v42: перемкнутись на іншу розмову (історія збережена)."""
+        conv = next((c for c in getattr(self, "chats", []) if c["id"] == cid), None)
+        if not conv:
+            return
+        self.chat_cur = cid
+        self.chat_messages = conv["messages"]  # те саме посилання: append синхронний
+        self._chats_save()
+        self._chats_render()
+        self._chat_render_all()
+
+    def _chat_delete(self, cid):
+        """💬 v42: ✕ — видалити розмову (підтвердження; поточна видаляється
+        без сліду, відкриється найсвіжіша або нова порожня)."""
+        try:
+            if not messagebox.askyesno("Видалити розмову?",
+                                       "Розмову і її історію прибрати назавжди?"):
+                return
+        except Exception:
+            pass
+        self.chats = [c for c in getattr(self, "chats", []) if c["id"] != cid]
+        if getattr(self, "chat_cur", None) == cid:
+            self.chat_cur = self.chats[-1]["id"] if self.chats else None
+            if self.chats:
+                self.chat_messages = self._chat_conv()["messages"]
+            else:
+                self._chat_new()
+                return
+        self._chats_save()
+        self._chats_render()
+        self._chat_render_all()
+
+    # ——— рендер повідомлень ———
+
+    def _chat_render_all(self):
+        """💬 v42: перерендерити всі повідомлення поточної розмови."""
+        try:
+            for w in self.chat_scroll.winfo_children():
+                w.destroy()
+        except Exception:
+            pass
+        self._chat_live_box = None
+        self._chat_live_frame = None
+        self._chat_live_text = ""
+        msgs = getattr(self, "chat_messages", None) or []
+        if not msgs:
             self._chat_chips()
+        else:
+            for i, m in enumerate(msgs):
+                if m["role"] == "user":
+                    self._chat_render_user(i)
+                else:
+                    self._chat_render_assistant(i)
+        self._chat_ctx_update()
+        try:
+            self.chat_scroll.after(30, lambda:
+                                   self.chat_scroll._parent_canvas.yview_moveto(1.0))
+        except Exception:
+            pass
 
     def _chat_chips(self):
-        """💬 v41: порожній чат — підказки-запити, як стартовий екран Claude."""
+        """💬 v41/v42: порожній чат — підказки-запити (стартовий екран Claude)."""
         ctk.CTkLabel(self.chat_scroll, text="✳ Привіт! Я Асистент твого "
                      "Генератора відео — питай що завгодно\nабо тапни підказку:",
                      font=self._f(13), text_color=self.CLAUDE_TEXT,
@@ -7277,43 +7769,193 @@ class App:
                               fill="x", padx=16, pady=3)
 
     def _chat_chip(self, text):
-        """💬 v41: тап на підказку — фраза летить у розмову одразу."""
+        """💬 v41/v42: тап на підказку — фраза летить у розмову одразу."""
         self._chat_send_now(text)
 
-    def _chat_render(self, role, text, src=""):
-        """💬 v41: намалювати репліку: юзер — бульбашка праворуч; асистент —
-        текст зліва з міткою джерела і кнопками 📋 Копіювати / 🔁 Ще раз."""
-        wrap = 520
-        if role == "user":
-            b = ctk.CTkFrame(self.chat_scroll, fg_color=self.CLAUDE_CARD,
-                             corner_radius=18)
-            b.pack(anchor="e", fill="x", padx=(90, 16), pady=(8, 2))
-            ctk.CTkLabel(b, text=text, font=self._f(13), wraplength=wrap - 40,
-                         justify="left", text_color=self.CLAUDE_TEXT).pack(
-                             anchor="e", padx=14, pady=(8, 10))
-        else:
-            a = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
-            a.pack(anchor="w", fill="x", padx=(16, 60), pady=(8, 2))
-            ctk.CTkLabel(a, text="✳ " + (src or "Асистент") + " • " +
-                         time.strftime("%H:%M"), font=self._f(10),
-                         text_color=self.CLAUDE_MUTED, anchor="w").pack(fill="x")
-            lbl = ctk.CTkLabel(a, text=text, font=self._f(13), wraplength=wrap,
-                               justify="left", text_color=self.CLAUDE_TEXT)
-            lbl.pack(fill="x", anchor="w", pady=(2, 4))
-            acts = ctk.CTkFrame(a, fg_color="transparent")
-            acts.pack(fill="x", anchor="w", pady=(0, 2))
-            ctk.CTkButton(acts, text="📋 Копіювати", height=26, corner_radius=13,
-                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
-                          text_color=self.CLAUDE_MUTED, font=self._f(10),
-                          command=lambda t=text: self._chat_copy(t)).pack(side="left")
-            ctk.CTkButton(acts, text="🔁 Ще раз", height=26, corner_radius=13,
-                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
-                          text_color=self.CLAUDE_MUTED, font=self._f(10),
-                          command=self._chat_regen).pack(side="left", padx=(6, 0))
-        self.chat_scroll.after(30, lambda: self.chat_scroll._parent_canvas.yview_moveto(1.0))
+    def _chat_render_user(self, idx):
+        """💬 v42: бульбашка юзера праворуч + ✏️ Редагувати (як у Claude:
+        переписати своє повідомлення і надіслати знову)."""
+        m = self.chat_messages[idx]
+        show = str(m.get("text") or "")
+        att = m.get("attach")
+        if isinstance(att, dict) and att.get("name"):
+            show += "\n📎 " + str(att["name"])
+        b = ctk.CTkFrame(self.chat_scroll, fg_color=self.CLAUDE_CARD,
+                         corner_radius=18)
+        b.pack(anchor="e", fill="x", padx=(110, 16), pady=(8, 2))
+        ctk.CTkLabel(b, text=show, font=self._f(13), wraplength=480,
+                     justify="left", text_color=self.CLAUDE_TEXT).pack(
+                         anchor="e", padx=14, pady=(8, 2))
+        ctk.CTkButton(b, text="✏️ Редагувати", height=22, corner_radius=11,
+                      fg_color="transparent", hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_MUTED, font=self._f(9),
+                      command=lambda i=idx: self._chat_edit(i)).pack(
+                          anchor="e", padx=(10, 10), pady=(0, 6))
+
+    def _chat_render_assistant(self, idx):
+        """💬 v42: відповідь асистента: мітка джерела, markdown-бокс,
+        кнопки 📋 Копіювати / 🔁 Ще раз / 🧩 Артефакт."""
+        m = self.chat_messages[idx]
+        a = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+        a.pack(anchor="w", fill="x", padx=(16, 40), pady=(8, 2))
+        ctk.CTkLabel(a, text="✳ " + (m.get("src") or "Асистент") + " • "
+                     + (m.get("ts") or ""), font=self._f(10),
+                     text_color=self.CLAUDE_MUTED, anchor="w").pack(fill="x")
+        box = self._chat_md_box(a, str(m.get("text") or ""))
+        box.pack(fill="x", anchor="w", pady=(2, 4))
+        self._chat_actions(a, idx, str(m.get("text") or ""))
+
+    def _chat_actions(self, parent, idx, text):
+        """💬 v42: рядок дій під відповіддю: Копіювати / Ще раз / Артефакти."""
+        acts = ctk.CTkFrame(parent, fg_color="transparent")
+        acts.pack(fill="x", anchor="w", pady=(0, 2))
+        ctk.CTkButton(acts, text="📋 Копіювати", height=26, corner_radius=13,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_MUTED, font=self._f(10),
+                      command=lambda t=text: self._chat_copy(t)).pack(side="left")
+        ctk.CTkButton(acts, text="🔁 Ще раз", height=26, corner_radius=13,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_MUTED, font=self._f(10),
+                      command=self._chat_regen).pack(side="left", padx=(6, 0))
+        try:  # 🧩 артефакт на кожен код-блок 3+ рядки (до двох кнопок)
+            for lang, code in self._chat_artifacts(text)[:2]:
+                lbl = "🧩 Артефакт" + ((" · " + lang) if lang else "")
+                ctk.CTkButton(acts, text=lbl, height=26, corner_radius=13,
+                              fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                              text_color=self.CLAUDE_MUTED, font=self._f(10),
+                              command=lambda l=lang, c=code:
+                              self._chat_artifact_win(l, c)).pack(
+                                  side="left", padx=(6, 0))
+        except Exception:
+            pass
+
+    def _chat_artifacts(self, text):
+        """💬 v42: витягти код-блоки (артефакти): ```мова\\n…``` 3+ рядки."""
+        arts = []
+        try:
+            parts = str(text or "").split("```")
+            for i in range(1, len(parts), 2):
+                lns = parts[i].split("\n")
+                first = (lns[0] if lns else "").strip()
+                lang = ""
+                if first and " " not in first and len(first) <= 12:
+                    lang = first.lower()
+                    lns = lns[1:]
+                body = "\n".join(lns).strip("\n")
+                if body and len(body.splitlines()) >= 3:
+                    arts.append((lang, body))
+        except Exception:
+            arts = []
+        return arts
+
+    def _chat_artifact_win(self, lang, code):
+        """💬 v42: вікно артефакту (як панель Артефактів Claude): код,
+        редагувати, 📋 Копіювати, 💾 Зберегти у файл; html/svg — зберегти
+        і відкрити у браузері. Усе fail-open."""
+        win = ctk.CTkToplevel(self.root)
+        win.title("🧩 Артефакт" + ((" · " + lang) if lang else ""))
+        win.geometry("760x560")
+        win.attributes("-topmost", True)
+        win.after(400, lambda: win.attributes("-topmost", False))
+        win.configure(fg_color=self.CLAUDE_BG)
+        box = ctk.CTkTextbox(win, font=ctk.CTkFont(family="Consolas", size=12),
+                             wrap="none", fg_color="#FFFFFF",
+                             text_color=self.CLAUDE_TEXT, border_width=1,
+                             border_color=self.CLAUDE_LINE)
+        box.pack(fill="both", expand=True, padx=12, pady=(12, 4))
+        box.insert("1.0", code)
+        ext = {"python": ".py", "py": ".py", "javascript": ".js", "js": ".js",
+               "html": ".html", "css": ".css", "svg": ".svg", "json": ".json",
+               "bash": ".sh", "markdown": ".md", "md": ".md"}.get(lang, ".txt")
+        row = ctk.CTkFrame(win, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=(2, 12))
+        ctk.CTkButton(row, text="📋 Копіювати", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=lambda: self._chat_copy(box.get("1.0", "end").strip())
+                      ).pack(side="left")
+
+        def _save():
+            try:
+                p = filedialog.asksaveasfilename(
+                    title="Зберегти артефакт", defaultextension=ext,
+                    initialfile="artifact" + ext,
+                    filetypes=[(lang or "файл", "*" + ext), ("Усі файли", "*.*")])
+                if not p:
+                    return ""
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(box.get("1.0", "end").strip() + "\n")
+                self.say("🧩 Артефакт збережено: " + os.path.basename(p))
+                return p
+            except Exception as e:
+                self.say("🧩 Не вийшло зберегти: " + str(e)[:80])
+                return ""
+
+        def _save_open():
+            p = _save()
+            if p:
+                try:
+                    os.startfile(p)
+                except Exception:
+                    self.say("🧩 Відкрий файл сам: " + p)
+        ctk.CTkButton(row, text="💾 Зберегти у файл", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=_save).pack(side="left", padx=(8, 0))
+        if lang in ("html", "svg"):
+            ctk.CTkButton(row, text="🌐 Зберегти і відкрити", height=34,
+                          corner_radius=17, fg_color=self.CLAUDE_ACCENT,
+                          hover_color=self.CLAUDE_ACCENT_H, text_color="#FFFFFF",
+                          font=self._f(12), command=_save_open).pack(
+                              side="left", padx=(8, 0))
+
+    # ——— дії повідомлень ———
+
+    def _chat_edit(self, idx):
+        """💬 v42: ✏️ Редагувати — текст у поле вводу, історія від цього
+        повідомлення прибирається (як Edit у Claude); надішлеш — нова гілка."""
+        try:
+            m = self.chat_messages[idx]
+            self.chat_input.delete("1.0", "end")
+            self.chat_input.insert("1.0", str(m.get("text") or ""))
+            self.chat_messages = self.chat_messages[:idx]
+            self._chats_save()
+            self._chat_render_all()
+            self.chat_input.focus_set()
+        except Exception:
+            self.say("💬 Чат: не вийшло відкрити повідомлення на редагування")
+
+    def _chat_copy(self, text):
+        """💬 v41/v42: 📋 Копіювати — відповідь асистента у буфер обміну."""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.say("💬 Чат: скопійовано")
+        except Exception:
+            self.say("💬 Чат: не вийшло скопіювати")
+
+    def _chat_regen(self):
+        """💬 v41/v42: 🔁 Ще раз — перепитати останній запит юзера."""
+        if getattr(self, "_chat_busy", False):
+            return
+        msgs = getattr(self, "chat_messages", None) or []
+        last_user = None
+        for m in reversed(msgs):
+            if m["role"] == "user":
+                last_user = m["text"]
+                break
+        while msgs and msgs[-1]["role"] == "assistant":
+            msgs.pop()
+        if not last_user:
+            self.say("💬 Чат: нема запиту, який перепитати")
+            return
+        self._chat_render_all()
+        self._chat_send_now(last_user, add_user=False)
+
+    # ——— відправлення і стрімінг ———
 
     def _chat_typing(self, on):
-        """💬 v41: індикатор «✳ Думаю…» + кнопка ⬆↔⏹ — стан чату під час запиту."""
+        """💬 v41/v42: індикатор «✳ Думаю…» + кнопка ⬆↔⏹."""
         try:
             if on:
                 self._chat_typ_lbl = ctk.CTkLabel(
@@ -7328,10 +7970,10 @@ class App:
                     pass
                 self.chat_send_btn.configure(text="⬆", command=self._chat_send)
         except Exception:
-            pass  # 💬 v41: вікно могло закритись — тихо (fail-open)
+            pass  # вікно могло закритись — тихо (fail-open)
 
     def _chat_send(self):
-        """💬 v41: Enter/⬆ — фраза з поля летить у розмову."""
+        """💬 v41/v42: Enter/⬆ — фраза з поля летить у розмову."""
         text = self.chat_input.get("1.0", "end").strip()
         if not text:
             return
@@ -7339,8 +7981,8 @@ class App:
         self._chat_send_now(text)
 
     def _chat_send_now(self, text, add_user=True):
-        """💬 v41: репліка юзера → фоновий запит до обраного джерела з усією
-        історією розмови (Tk не блокується; відповідь — через чергу _poll)."""
+        """💬 v42: репліка юзера → фонова нитка зі СТРІМІНГОМ (чанки — у
+        чергу _poll, Tk не блокується). Перша репліва розмови стає назвою."""
         if getattr(self, "_chat_busy", False):
             self.say("💬 Чат: вже думаю над відповіддю — ⏹ Стоп або зачекай")
             return
@@ -7348,17 +7990,29 @@ class App:
         if not text:
             return
         if add_user:
-            self.chat_messages.append({"role": "user", "text": text, "src": ""})
-            self._chat_render("user", text)
-            self._chat_save()
+            att = getattr(self, "chat_attach", None)
+            self.chat_messages.append({"role": "user", "text": text, "src": "",
+                                       "ts": time.strftime("%H:%M"),
+                                       "attach": att})
+            if getattr(self, "chat_attach", None):
+                self.chat_attach = None
+                self._chat_att_hide()
+            conv = self._chat_conv()
+            if conv and len(self.chat_messages) == 1:
+                conv["title"] = text[:38]  # назва розмови — перше питання
+                conv["updated"] = time.strftime("%d.%m %H:%M")
+            self._chats_save()
+            self._chats_render()
+            self._chat_render_user(len(self.chat_messages) - 1)
+            self._chat_ctx_update()
         self._chat_cancel = False
         self._chat_busy = True
         self._chat_typing(True)
         threading.Thread(target=self._chat_thread, args=(text,), daemon=True).start()
 
     def _chat_thread(self, text):
-        """💬 v41: запит чату у фоні: джерело з картки Асистента + історія
-        розмови (до 12 останніх реплік). Кожен запит — у llm_trace.jsonl."""
+        """💬 v42: стрімінг-запит у фоні: джерело з картки Асистента + історія
+        розмови; кожен чанок — у чергу, журнал — llm_trace.jsonl."""
         t0 = time.time()
         prov = self._llm_provider()
         url = model = ""
@@ -7367,14 +8021,68 @@ class App:
             model = (self.ollama_model.get() or "").strip()
         except Exception:
             pass
-        txt = llm_chat(prov, url, model, text, system=self._chat_system(),
-                       timeout=180, history=self._chat_history_for_llm())
-        llm_trace("chat", prov, model or "-", t0, bool(txt), len(txt or ""))
-        self.q.put(("chat_reply", txt))
+        try:  # 🧠 модель із селектора шапки (за замовчуванням — джерело саме знає)
+            sel = (self.chat_model.get() or "").strip()
+            if sel and sel not in ("за замовчуванням", "драбина сама обирає", "—"):
+                model = sel
+        except Exception:
+            pass
+        hist = self._chat_history_for_llm()
+        if hist and hist[-1]["role"] == "user" and text in hist[-1]["content"]:
+            hist = hist[:-1]  # поточне повідомлення вже в prompt — не дублюю
 
-    def _chat_reply(self, txt):
-        """💬 v41: відповідь моделі (головний потік): репліка асистента +
-        ефект друку. Порожня — чесно кажу, що джерела мовчать (fail-open)."""
+        def on_chunk(t):
+            self.q.put(("chat_chunk", t))
+        txt = llm_chat_stream(prov, url, model, text, system=self._chat_system(),
+                              timeout=180, history=hist, on_chunk=on_chunk)
+        llm_trace("chat", prov, model or "-", t0, bool(txt), len(txt or ""))
+        self.q.put(("chat_done", txt or ""))
+
+    def _chat_chunk(self, t):
+        """💬 v42: чанок стрімінгу — текст прилітає у живу бульбашку
+        (як у Claude: відповідь росте на очах; ⏹ Стоп — зупиняє показ)."""
+        try:
+            if getattr(self, "_chat_cancel", False):
+                return
+            if getattr(self, "chat_win", None) is None:
+                return
+            if not self.chat_win.winfo_exists():
+                return
+            if getattr(self, "_chat_live_box", None) is None:
+                self._chat_typing(False)
+                a = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+                a.pack(anchor="w", fill="x", padx=(16, 40), pady=(8, 2))
+                self._chat_live_src = ctk.CTkLabel(
+                    a, text="✳ " + self._chat_source() + " • друкує…",
+                    font=self._f(10), text_color=self.CLAUDE_MUTED, anchor="w")
+                self._chat_live_src.pack(fill="x")
+                box = ctk.CTkTextbox(a, height=80, font=self._f(13),
+                                     wrap="word", fg_color="transparent",
+                                     text_color=self.CLAUDE_TEXT, border_width=0)
+                box.pack(fill="x", anchor="w", pady=(2, 4))
+                self._chat_live_box = box
+                self._chat_live_frame = a
+                self._chat_live_text = ""
+                try:
+                    self.chat_scroll._parent_canvas.yview_moveto(1.0)
+                except Exception:
+                    pass
+            self._chat_live_text += t
+            box = self._chat_live_box
+            box.configure(state="normal")
+            box.insert("end", t)
+            box.see("end")
+            box.configure(state="disabled")
+            h = self._md_height(self._chat_live_text)
+            if h > int(box.cget("height")):
+                box.configure(height=h)
+        except Exception:
+            pass  # вікно закрили — тихо (fail-open)
+
+    def _chat_done(self, txt):
+        """💬 v42: відповідь готова: markdown-фіналізація (жирний/код/
+        заголовки), кнопки дій, артефакти; збереження у розмову. Порожня —
+        чесно кажу, що джерела мовчать (fail-open)."""
         self._chat_busy = False
         self._chat_typing(False)
         if getattr(self, "chat_win", None) is None:
@@ -7384,101 +8092,116 @@ class App:
                 return
         except Exception:
             return
-        if self._chat_cancel:
-            return  # ⏹ Стоп — відповідь не потрібна
+        if getattr(self, "_chat_cancel", False):
+            txt = (getattr(self, "_chat_live_text", "") or "").strip()
+            if not txt:  # ще й не почалось друкувати — просто зупинились
+                self._chat_live_box = None
+                self._chat_live_frame = None
+                return
         if not txt:
             txt = ("Джерела мовчать (ліміт або нема мережі) — спробуй ще раз "
                    "чи перемкни джерело в картці Асистента.")
+        if getattr(self, "_chat_live_box", None) is None:  # стріму не було
+            a = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+            a.pack(anchor="w", fill="x", padx=(16, 40), pady=(8, 2))
+            ctk.CTkLabel(a, text="✳ " + self._chat_source(), font=self._f(10),
+                         text_color=self.CLAUDE_MUTED, anchor="w").pack(fill="x")
+            box = ctk.CTkTextbox(a, height=80, font=self._f(13), wrap="word",
+                                 fg_color="transparent",
+                                 text_color=self.CLAUDE_TEXT, border_width=0)
+            box.pack(fill="x", anchor="w", pady=(2, 4))
+            self._chat_live_box = box
+            self._chat_live_frame = a
         self.chat_messages.append({"role": "assistant", "text": txt,
-                                   "src": self._chat_source()})
-        self._chat_save()
-        self._chat_render("assistant", "", self._chat_source())
-        lbl = self._last_assistant_label()
-        self._chat_type(lbl, txt, 0)
-
-    def _last_assistant_label(self):
-        """💬 v41: мітка тексту щойно намальованої відповіді (для ефекту друку)."""
+                                   "src": self._chat_source(),
+                                   "ts": time.strftime("%H:%M"), "attach": None})
+        conv = self._chat_conv()
+        if conv:
+            conv["updated"] = time.strftime("%d.%m %H:%M")
+        self._chats_save()
+        box = self._chat_live_box
+        self._md_render(box, txt)  # фінальний markdown-рендер
+        box.configure(height=self._md_height(txt))
         try:
-            a = self.chat_scroll.winfo_children()[-1]
-            for w in reversed(a.winfo_children()):
-                if isinstance(w, ctk.CTkLabel) and w.cget("text") == "":
-                    return w
+            self._chat_live_src.configure(text="✳ " + self._chat_source()
+                                          + " • " + time.strftime("%H:%M"))
         except Exception:
             pass
-        return None
-
-    def _chat_type(self, lbl, text, i):
-        """💬 v41: ефект друку — відповіди з'являється плавно, як стрімінг
-        Claude (по 3 символи кожні 14 мс); ⏹ Стоп — показати все одразу."""
-        if lbl is None:
-            return
+        self._chat_actions(self._chat_live_frame,
+                           len(self.chat_messages) - 1, txt)
+        self._chat_live_box = None
+        self._chat_live_frame = None
+        self._chat_live_text = ""
+        self._chat_ctx_update()
         try:
-            if self._chat_cancel or i >= len(text):
-                lbl.configure(text=text)
-                return
-            lbl.configure(text=text[:i] + " ▌")
-            self.chat_win.after(14, lambda: self._chat_type(lbl, text, i + 3))
+            self.chat_scroll._parent_canvas.yview_moveto(1.0)
         except Exception:
-            pass  # вікно закрили — тихо
+            pass
 
     def _chat_stop(self):
-        """💬 v41: ⏹ Стоп — не чекати відповіді/зупинити ефект друку."""
+        """💬 v41/v42: ⏹ Стоп — як у Claude: показане часткове лишається,
+        решту чекати не будемо."""
         self._chat_cancel = True
         self._chat_busy = False
         self._chat_typing(False)
         self.say("💬 Чат: зупинив")
 
-    def _chat_copy(self, text):
-        """💬 v41: 📋 Копіювати — відповідь асистента у буфер обміну."""
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.say("💬 Чат: відповідь скопійовано")
-        except Exception:
-            self.say("💬 Чат: не вийшло скопіювати")
+    # ——— 📎 файл у контекст ———
 
-    def _chat_regen(self):
-        """💬 v41: 🔁 Ще раз — перепитати останній запит юзера (як у Claude:
-        відповідь генерується заново, попередня прибирається)."""
-        if getattr(self, "_chat_busy", False):
-            return
-        msgs = getattr(self, "chat_messages", None) or []
-        last_user = None
-        for m in reversed(msgs):
-            if m["role"] == "user":
-                last_user = m["text"]
-                break
-        while msgs and msgs[-1]["role"] == "assistant":
-            msgs.pop()
-        if not last_user:
-            self.say("💬 Чат: нема запиту, який перепитати")
-            return
-        try:  # прибрати попередні бульбашки з екрана (перерисую історію)
-            for w in self.chat_scroll.winfo_children():
-                w.destroy()
-            for m in msgs:
-                self._chat_render(m["role"], m["text"], m.get("src") or "")
+    def _chat_attach(self):
+        """💬 v42: 📎 — додати файл (txt/md/srt/py/json, до 24 тис. симв.) у
+        контекст розмови: модель читає його разом з наступним питанням
+        (як прикріплення у Claude). Кривий файл — тихо не додаю (fail-open)."""
+        try:
+            p = filedialog.askopenfilename(
+                title="Файл у контекст чату",
+                filetypes=[("Текст", "*.txt;*.md;*.srt;*.py;*.json"),
+                           ("Усі файли", "*.*")])
+            if not p:
+                return
+            with open(p, encoding="utf-8", errors="ignore") as f:
+                raw = f.read(24000)
+            if not raw.strip():
+                self.say("📎 Файл порожній")
+                return
+            self.chat_attach = {"name": os.path.basename(p), "content": raw}
+            self.chat_att_lbl.configure(text="📎 " + os.path.basename(p)
+                                        + "  — тапни, щоб прибрати")
+            self.chat_att_lbl.pack(fill="x", padx=16, pady=(2, 0), side="bottom")
+            self.say("📎 Файл долучено — питай про нього")
+        except Exception as e:
+            self.say("📎 Не вийшло прочитати файл: " + str(e)[:80])
+
+    def _chat_att_click(self):
+        """💬 v42: тап по мітці файла — прибрати прикріплення."""
+        self.chat_attach = None
+        self._chat_att_hide()
+
+    def _chat_att_hide(self):
+        """💬 v42: прибрати мітку файла з панелі."""
+        try:
+            self.chat_att_lbl.pack_forget()
         except Exception:
             pass
-        self._chat_send_now(last_user, add_user=False)
 
-    def _chat_new(self):
-        """💬 v41: ＋ Нова розмова — чистий аркуш: історія і chat.json
-        прибираються, з'являються підказки (як «New chat» у Claude)."""
-        self.chat_messages = []
-        self._chat_cancel = True  # старий запит не цікавить
-        self._chat_busy = False
-        self._chat_save()
+    # ——— дрібне ———
+
+    def _chat_ctx_update(self):
+        """💬 v42: лічильник контексту в шапці (скільки символів піде моделі)."""
         try:
-            for w in self.chat_scroll.winfo_children():
-                w.destroy()
+            tot = 0
+            for m in (getattr(self, "chat_messages", None) or [])[-12:]:
+                tot += len(str(m.get("text") or ""))
+                att = m.get("attach")
+                if isinstance(att, dict):
+                    tot += len(str(att.get("content") or ""))
+            self.chat_ctx_lbl.configure(
+                text="контекст ≈ {:.1f} тис. симв.".format(tot / 1000.0))
         except Exception:
             pass
-        self._chat_chips()
-        self.say("💬 Чат: нова розмова")
 
     def _chat_to_fields(self):
-        """💬 v41: ⚙️ у поля генератора — фраза з поля чату стає командою
+        """💬 v41/v42: ⚙️ у поля генератора — фраза з поля чату стає командою
         головного вікна (мостина між розмовою і генерацією відео)."""
         text = self.chat_input.get("1.0", "end").strip()
         if not text:
