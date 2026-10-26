@@ -209,6 +209,13 @@ $0 за токен; GLM (Zhipu КНР) — оновлений список; 🌊
 — Qwen3.5/Qwen3 безкоштовно, ~2000 зап/день; OpenRouter — GLM:free
 (z-ai/glm-5.2, glm-4.5-air, glm-4.5-flash). Драбина «Авто» — 18
 ступенів: усі безкоштовні GLM і LLM, ключі — лише локально.
+v46: 💬 чат більше НЕ ТУПИТЬ і вміє все: у шапці вкладки «Чат» —
+своє 🎯 меню джерела (🤖 Claude онлайн / 💬 ChatGPT онлайн /
+🇪🇺 Mistral онлайн + кожен шлюз окремо + Kilo/LLM7/Pollinations);
+«🔑 Ключ» тепер іде до шлюзу, якому належить ОБРАНА модель
+(freekey_engine_for), а лежачий/лімітний шлюз сам обмінюється
+драбиною решти живих ключів — відповідь прилітає завжди; нема
+ключа — чат чесно пише, де його взяти, а не мовчить.
 """
 import array
 import asyncio
@@ -343,7 +350,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.45 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.46 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -718,7 +725,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v45"}
+            d = {"app": "Генератор відео v46"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -856,7 +863,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v45"}
+                "app": "Генератор відео v46"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2398,6 +2405,84 @@ def freekey_engine():
     return None
 
 
+def freekey_engine_for(model):
+    """🔑 v46: шлюз, якому НАЛЕЖИТЬ обрана модель (раніше «Ключ» брав
+    перший-попало шлюз з ключем — модель GLM могла летіти до Groq, Claude
+    до SiliconFlow: 404, чат мовчав). Тепер: модель з меню → шлюз, у чиєму
+    списку вона є (і ключ наявний); не збіглась — перший живий (fail-open)."""
+    m = (model or "").strip()
+    if m and m != "модель не обрана":
+        keys = load_freekeys()
+        for name in FREEKEY_ORDER:
+            if len(str(keys.get(name) or "").strip()) < 20:
+                continue
+            models = list(FREEKEY_MODELS.get(name) or [])
+            conf = FREEKEY_ENGINES.get(name) or {}
+            if conf.get("model"):
+                models.append(conf["model"])
+            if m in models:
+                return name
+    return freekey_engine()
+
+
+def chat_pick_steps(name):
+    """💬 v46: джерело, обране в шапці чату → драбина кроків. Три онлайнові
+    режими (Claude/ChatGPT/Mistral), кожен шлюз з ключем окремо, безключові
+    Kilo/LLM7/Pollinations. Нема ключа взагалі — (None, текст-підказка):
+    чат чесно пояснює, що зробити, а не мовчить (fail-open, гроші — нуль)."""
+    keys = load_freekeys()
+
+    def have(n):
+        return len(str(keys.get(n) or "").strip()) >= 20
+
+    def eng(n):
+        c = FREEKEY_ENGINES.get(n) or {}
+        return {"label": n, "kind": "oai", "url": c.get("url", ""),
+                "model": c.get("model", ""), "key": str(keys.get(n) or "").strip()}
+    if "Claude онлайн" in name:
+        st = ([eng("puter")] if have("puter") else []) + \
+             ([eng("anthropic")] if have("anthropic") else [])
+        if st:
+            return st, ""
+        return None, ("🔑 Claude ще без ключа — кнопка «🔑 Ключі» у картці "
+                      "Асистента → «🤖 Claude (Puter)» → «🌐 Отримати ключ» "
+                      "(puter.com, без картки) → встав ключ → «💾 Запам'ятати "
+                      "назавжди» — і Claude заговорить у чаті.")
+    if "ChatGPT онлайн" in name:
+        st = ([eng("groq")] if have("groq") else [])
+        st.append({"label": "kilo", "kind": "kilo", "url": KILO_URL,
+                   "model": "kilo-auto/free", "key": None})
+        st.append({"label": "llm7", "kind": "llm7", "url": LLM7_URL,
+                   "model": "gpt-5.5", "key": None})
+        return st, ""
+    if "Mistral онлайн" in name:
+        if have("mistral"):
+            return [eng("mistral")], ""
+        return None, ("🔑 Mistral ще без ключа — кнопка «🔑 Ключі» у картці "
+                      "Асистента → «🇪🇺 Mistral» → «🌐 Отримати ключ» "
+                      "(console.mistral.ai, experiment-план — безкоштовні "
+                      "запити) → встав → «💾 Запам'ятати назавжди».")
+    if "Kilo" in name:
+        return [{"label": "kilo", "kind": "kilo", "url": KILO_URL,
+                 "model": "kilo-auto/free", "key": None}], ""
+    if "LLM7" in name:
+        return [{"label": "llm7", "kind": "llm7", "url": LLM7_URL,
+                 "model": "gpt-5.5", "key": None}], ""
+    if "Pollinations" in name:
+        return [{"label": "pollinations", "kind": "pollinations",
+                  "url": POLLINATIONS_URL, "model": "gpt-oss-20b",
+                  "key": None}], ""
+    if name in FREEKEY_ENGINES:
+        if have(name):
+            return [eng(name)], ""
+        return None, ("🔑 Цей шлюз ще без ключа — кнопка «🔑 Ключі» у картці "
+                      "Асистента → обери шлюз → «🌐 Отримати ключ» (сторінка "
+                      "відкриється у Chrome) → встав → «💾 Запам'ятати "
+                      "назавжди».")
+    return None, ("💬 Невідоме джерело — перемкни у шапці чату на "
+                  "«🔄 Як в картці».")
+
+
 def kilo_list_models(url, timeout=10):
     """⚡ v36: Kilo Code — публічний OpenAI-сумісний шлюз БЕЗ ключа (free-пул
     ~200 запитів/год). Список моделей через GET /models; лишаю безкоштовні
@@ -2469,31 +2554,27 @@ def freekey_list_models(url, timeout=10):
 
 
 def freekey_chat(url, model, prompt, system=None, timeout=120, history=None):
-    """🔑 v36/v39: один запит через безкоштовний ключ (🤖 Claude у Puter /
-    Groq / GitHub Models / Gemini — OpenAI-сумісні, Bearer; своя модель
-    для кожного). Нема ключа/помилка/429/402 — "" (fail-open, гроші — нуль;
-    402 у Puter = вичерпаний місячний безкоштовний ліміт — спробуй Groq/🌐)."""
-    eng = freekey_engine()
-    if not eng:
-        return ""
-    conf = FREEKEY_ENGINES[eng]
+    """🔑 v36/v39/v46: запит через безкоштовний ключ — шлюз під ОБРАНУ
+    модель (freekey_engine_for), а як шлюз лежить/ліміт — драбина решти
+    живих ключів (кожен зі своєю безкоштовною моделлю): чат не мовчить.
+    Нема жодного — "" (fail-open, гроші — нуль)."""
+    keys = load_freekeys()
+    eng = freekey_engine_for(model)
     m = (model or "").strip()
     if not m or m == "модель не обрана":
-        m = conf["model"]
-    body = {"model": m,
-            "messages": ([{"role": "system", "content": system}] if system else [])
-            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
-    try:
-        r = requests.post(conf["url"].rstrip("/") + "/chat/completions",
-                          json=body, timeout=timeout,
-                          headers={"Authorization": "Bearer " +
-                                   str(load_freekeys().get(eng) or "").strip()})
-        if r.status_code != 200:
-            return ""
-        ch = (r.json().get("choices") or [{}])[0]
-        return (((ch.get("message") or {}).get("content") or "")).strip()
-    except Exception:
-        return ""
+        m = ""
+    order = [n for n in ([eng] + [x for x in FREEKEY_ORDER if x != eng])
+             if n in FREEKEY_ENGINES
+             and len(str(keys.get(n) or "").strip()) >= 20]
+    for name in order:
+        conf = FREEKEY_ENGINES[name]
+        txt = _oai_chat(conf["url"], str(keys.get(name) or "").strip(),
+                        m if (name == eng and m) else conf["model"],
+                        prompt, system=system, timeout=timeout,
+                        history=history)
+        if txt:
+            return txt
+    return ""
 
 
 def llm7_list_models(url, timeout=10):
@@ -3096,16 +3177,66 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                                     + "/chat/completions", None, model, msgs,
                                     on_delta, stop, timeout)
         if provider == "freekey":
-            eng = freekey_engine()
-            if not eng:
-                return ""
-            conf = FREEKEY_ENGINES[eng]
+            keys = load_freekeys()
+            eng = freekey_engine_for(model)
             m = (model or "").strip()
-            if not m or m == "модель не обрана":
-                m = conf["model"]
-            return _sse_stream_chat(conf["url"].rstrip("/") + "/chat/completions",
-                                    str(load_freekeys().get(eng) or "").strip(),
-                                    m, msgs, on_delta, stop, timeout)
+            order = [n for n in ([eng] + [x for x in FREEKEY_ORDER if x != eng])
+                     if n in FREEKEY_ENGINES
+                     and len(str(keys.get(n) or "").strip()) >= 20]
+            step_t2 = min(int(timeout or 180), 90)
+            for name in order:  # 🪜 v46: обраний шлюз першим, за ним — жива драбина
+                conf = FREEKEY_ENGINES[name]
+                mm = m if (name == eng and m and m != "модель не обрана") \
+                    else conf["model"]
+                t0 = time.time()
+                txt = _sse_stream_chat(conf["url"].rstrip("/") + "/chat/completions",
+                                       str(keys.get(name) or "").strip(), mm,
+                                       msgs, on_delta, stop, step_t2)
+                llm_trace("stream", name, mm, t0, bool(txt), len(txt or ""))
+                if txt:
+                    return txt
+            return ""
+        if provider.startswith("chat:"):  # 💬 v46: джерело з меню у шапці чату
+            steps, hint = chat_pick_steps(provider[5:].strip())
+            if hint:
+                return hint
+            step_t2 = min(int(timeout or 180), 90)
+            for st in steps:
+                t0 = time.time()
+                try:
+                    if st["kind"] == "kilo":
+                        txt = _sse_stream_chat(st["url"].rstrip("/")
+                                               + "/chat/completions",
+                                               None, st["model"], msgs, on_delta,
+                                               stop, step_t2)
+                    elif st["kind"] == "llm7":
+                        txt = _sse_stream_chat(st["url"].rstrip("/")
+                                               + "/chat/completions",
+                                               "unused", st["model"], msgs,
+                                               on_delta, stop, step_t2)
+                    elif st["kind"] == "pollinations":
+                        txt = _sse_stream_chat(st["url"].rstrip("/") + "/openai",
+                                               None, st["model"], msgs, on_delta,
+                                               stop, step_t2)
+                        if not txt:
+                            txt = pollinations_chat(st["url"], st["model"],
+                                                    prompt, system=system,
+                                                    timeout=step_t2,
+                                                    history=history)
+                            if txt and on_delta:
+                                on_delta(txt)
+                    else:
+                        txt = _sse_stream_chat(st["url"].rstrip("/")
+                                               + "/chat/completions",
+                                               st["key"], st["model"], msgs,
+                                               on_delta, stop, step_t2)
+                except Exception:
+                    txt = ""
+                llm_trace("stream", st["label"], st["model"], t0,
+                          bool(txt), len(txt or ""))
+                if txt:
+                    return txt
+            return ""
         return _ollama_stream_chat(url, model, msgs, on_delta, stop, timeout)
     except Exception:
         return ""
@@ -5912,7 +6043,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v45 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v46 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7449,22 +7580,39 @@ class App:
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
+    CHAT_PRETTY_REV = {v: k for k, v in CHAT_PRETTY.items()}  # 💬 v46: назва з меню чату → шлюз
     CHAT_CHIPS = ("Налаштуй Shorts про космос, голосом Поліни, з караоке",
                   "Напиши сценарій: коротка історія штучного інтелекту",
                   "Запам'ятай: я знімаю Shorts про космос і ШІ",
                   "Що ти вмієш і які у тебе джерела думання?")
 
     def _chat_source(self):
-        """💬 v42: гарна назва обраного джерела для шапки і міток чату."""
+        """💬 v42/v46: гарна назва джерела для шапки і міток чату: меню
+        чату головніше за картку; «Ключ» — шлюз обраної моделі (не перший-попало)."""
         try:
+            pick = ""
+            if getattr(self, "chat_pick", None) is not None:
+                pick = (self.chat_pick.get() or "")
+            if pick and pick != "🔄 Як в картці":
+                return pick
             p = self._llm_provider()
             if p == "freekey":
-                eng = freekey_engine()
+                eng = freekey_engine_for(self.ollama_model.get())
                 if eng:
                     return self.CHAT_PRETTY.get(eng, "🔑 Ключ")
             return self.CHAT_PRETTY.get(p, "🧠 Ollama")
         except Exception:
             return "🧠 Ollama"
+
+    def _chat_pick_switch(self, val):
+        """💬 v46: перемкнув джерело у шапці чату — мітка і статус одразу."""
+        try:
+            self.chat_src_lbl.configure(text="Джерело думання: "
+                                       + self._chat_source())
+        except Exception:
+            pass
+        if val and val != "🔄 Як в картці":
+            self.say("💬 Чат: джерело — " + val)
 
     def _mem_load(self):
         """🧠 v42: пам'ять чату — факти про користувача з tools/memory.json
@@ -7646,6 +7794,20 @@ class App:
             head, text="Джерело думання: " + self._chat_source(),
             font=self._f(11), text_color=self.CLAUDE_MUTED)
         self.chat_src_lbl.pack(side="left", padx=(0, 8), pady=(14, 4))
+        self.chat_pick = ctk.CTkOptionMenu(  # 🎯 v46: джерело думання чату
+            head, width=200, height=28, font=self._f(11),
+            fg_color=self.CLAUDE_CARD, button_color=self.CLAUDE_LINE,
+            button_hover_color=self.CLAUDE_ACCENT_H, text_color=self.CLAUDE_TEXT,
+            dropdown_fg_color="#FFFFFF", dropdown_text_color=self.CLAUDE_TEXT,
+            dropdown_hover_color=self.CLAUDE_LINE,
+            values=["🔄 Як в картці", "🤖 Claude онлайн", "💬 ChatGPT онлайн",
+                    "🇪🇺 Mistral онлайн"]
+            + [self.CHAT_PRETTY[n] for n in FREEKEY_ORDER]
+            + ["⚡ Kilo (без ключа)", "🌐 LLM7 (без ключа)",
+               "🌐 Pollinations (без ключа)"],
+            command=self._chat_pick_switch)
+        self.chat_pick.set("🔄 Як в картці")
+        self.chat_pick.pack(side="left", pady=(8, 2))
         ctk.CTkButton(head, text="＋ Нова розмова", height=30, corner_radius=15,
                       fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
                       text_color="#FFFFFF", font=self._f(12),
@@ -7700,7 +7862,8 @@ class App:
         self.chat_send_btn.pack(side="right")
         ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
                      "📎 Файл — додати txt/srt/… у контекст • ✏️ під своїм "
-                     "повідомленням — редагувати • Ctrl+K — нова розмова",
+                     "повідомленням — редагувати • Ctrl+K — нова розмова • "
+                     "🎯 джерело думання — меню у шапці чату",
                      font=self._f(10), text_color=self.CLAUDE_MUTED,
                      anchor="w", wraplength=560).pack(fill="x", padx=16,
                                                      pady=(0, 6))
@@ -8009,6 +8172,12 @@ class App:
         кожен токен — у чергу (chat_stream), фінал — chat_done. llm_trace."""
         t0 = time.time()
         prov = self._llm_provider()
+        try:  # 🎯 v46: джерело, обране в шапці чату, головніше за картку
+            _pick = (self.chat_pick.get() or "")
+            if _pick and _pick != "🔄 Як в картці":
+                prov = "chat:" + (self.CHAT_PRETTY_REV.get(_pick) or _pick)
+        except Exception:
+            pass
         url = model = ""
         try:
             url = self.ollama_url.get().strip()
