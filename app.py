@@ -123,6 +123,14 @@ free-пул ~200 запитів/год — у рази щільніше за Pol
 Bearer) з tools/freekeys.json — файл лише на твоєму комп'ютері, як ключ Pixabay;
 гроші — нуль, картка ніде не потрібна; 🎤 авто-субтитри — Whisper на Groq:
 будь-яке відео → .srt + .txt (~8 год аудіо/день безкоштовно). Усе fail-open.
+v37: 🤝 HF Spaces — публічний Gradio-API БЕЗ ключа (huggingface.co/spaces):
+універсальний клієнт hf_space_call (queue-протокол gradio_api/call, fail-open) і
+три нові інструменти в 🧰: 🗣 клонування голосу (Chatterbox: зразок аудіо 5–20 с
+→ твій голос; текст ріжеться на шматки ≤300 символів і зшивається ffmpeg),
+🖼 AI-картинка (FLUX.1-schnell: текст → зображення 1024×1024 за 4 кроки),
+🎬 оживлення картинки (WAN 2.2: кадр → короткий mp4). Space-и публічні й
+безкоштовні, черги ZeroGPU діляться на всіх — у годину пік може бути
+«черга повна», тоді чесно пишемо в журнал і нічого не ламається (fail-open).
 """
 import array
 import asyncio
@@ -257,7 +265,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.36 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.37 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -265,6 +273,11 @@ OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: 
 POLLINATIONS_URL = "https://text.pollinations.ai"  # 🌐 v35: безкоштовний онлайн-LLM БЕЗ ключів (Pollinations)
 KILO_URL = "https://api.kilo.ai/api/gateway"  # ⚡ v36: безкоштовний шлюз Kilo Code — 200 зап/год БЕЗ ключа
 FREEKEYS_FILE = os.path.join(TOOLS_DIR, "freekeys.json")  # 🔑 v36: безкоштовні фрітір-ключі, лише локально
+HF_SPACES = {  # 🤝 v37: публічні HF Spaces — Gradio-API БЕЗ ключа (fail-open)
+    "tts": "https://resembleai-chatterbox.hf.space",   # 🗣 Chatterbox: клон голосу
+    "img": "https://evalstate-flux1-schnell.hf.space",  # 🖼 FLUX.1-schnell: текст → картинка
+    "vid": "https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space",  # 🎬 WAN 2.2: кадр → відео
+}
 # 🔑 v36: OpenAI-сумісні бази безкоштовних фрітір-ключів (усі — без картки; гроші — нуль)
 FREEKEY_ENGINES = {
     "groq": {"url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
@@ -542,7 +555,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v36"}
+            d = {"app": "Генератор відео v37"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -680,7 +693,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v36"}
+                "app": "Генератор відео v37"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2326,6 +2339,159 @@ def groq_transcribe_srt(video, say):
             os.remove(aud)
         except OSError:
             pass
+
+
+def hf_space_call(base, api, data, timeout=900):
+    """🤝 v37: публічний Gradio-API HF Space БЕЗ ключа (fail-open):
+    POST /gradio_api/call → event_id → SSE-очікування результату."""
+    r = requests.post(base.rstrip("/") + "/gradio_api/call" + api,
+                      json={"data": data}, timeout=30,
+                      headers={"User-Agent": UA_STRING})
+    r.raise_for_status()
+    ev = (r.json() or {}).get("event_id")
+    if not ev:
+        raise RuntimeError("Space не дав event_id (черга зайнята?) — спробуй ще раз")
+    s = requests.get(base.rstrip("/") + "/gradio_api/call" + api + "/" + ev,
+                     stream=True, timeout=timeout,
+                     headers={"User-Agent": UA_STRING})
+    kind, payload = None, None
+    for raw in s.iter_lines(decode_unicode=True):
+        if not raw:
+            if kind == "error":
+                raise RuntimeError("Space відповів помилкою: " + str(payload)[:200])
+            if kind == "complete" and payload is not None:
+                return json.loads(payload)
+            kind, payload = None, None
+            continue
+        if raw.startswith("event:"):
+            kind = raw.split(":", 1)[1].strip()
+        elif raw.startswith("data:"):
+            payload = raw.split(":", 1)[1].strip()
+    if kind == "complete" and payload is not None:
+        return json.loads(payload)
+    raise RuntimeError("Space не відповів у час (ZeroGPU-черга) — спробуй пізніше")
+
+
+def hf_upload(base, path):
+    """🤝 v37: завантажити локальний файл у Space → об'єкт gradio.FileData."""
+    with open(path, "rb") as f:
+        r = requests.post(base.rstrip("/") + "/gradio_api/upload",
+                          files={"files": (os.path.basename(path), f)},
+                          timeout=180, headers={"User-Agent": UA_STRING})
+    r.raise_for_status()
+    arr = r.json()
+    p = None
+    if isinstance(arr, list) and arr:
+        p = arr[0] if isinstance(arr[0], str) else (arr[0] or {}).get("path")
+    elif isinstance(arr, dict):
+        p = arr.get("path")
+    if not p:
+        raise RuntimeError("Space не прийняв файл")
+    return {"path": p, "meta": {"_type": "gradio.FileData"}}
+
+
+def hf_download(base, fileinfo, out_path):
+    """🤝 v37: забрати файл-результат зі Space (url або шлях → локальний файл)."""
+    url = None
+    if isinstance(fileinfo, dict):
+        url = fileinfo.get("url")
+        if not url and fileinfo.get("path"):
+            url = base.rstrip("/") + "/gradio_api/file=" + quote_plus(fileinfo["path"])
+    elif isinstance(fileinfo, str) and fileinfo.startswith("http"):
+        url = fileinfo
+    elif isinstance(fileinfo, str) and fileinfo.strip():
+        url = base.rstrip("/") + "/gradio_api/file=" + quote_plus(fileinfo)
+    if not url:
+        raise RuntimeError("Space не дав файл-результат")
+    with requests.get(url, stream=True, timeout=300,
+                      headers={"User-Agent": UA_STRING}) as resp:
+        resp.raise_for_status()
+        with open(out_path, "wb") as f:
+            for chunk in resp.iter_content(65536):
+                f.write(chunk)
+    return out_path
+
+
+def hf_split300(text, limit=280):
+    """🗣 v37: ріжемо текст на шматки по реченнях до ~300 символів (Chatterbox)."""
+    parts, cur = [], ""
+    for sent in re.split(r"(?<=[.!?…])\s+", (text or "").strip()):
+        while len(sent) > limit:
+            if cur:
+                parts.append(cur)
+                cur = ""
+            parts.append(sent[:limit])
+            sent = sent[limit:]
+        if cur and len(cur) + len(sent) + 1 > limit:
+            parts.append(cur)
+            cur = ""
+        cur = (cur + " " + sent).strip() if cur else sent
+    if cur:
+        parts.append(cur)
+    return [p for p in parts if p.strip()]
+
+
+def hf_tts_clone(text, ref_audio, out_path, say=None):
+    """🗣 v37: клонування голосу з зразка (Chatterbox, HF Space, БЕЗ ключа)."""
+    parts = hf_split300(text)
+    if not parts:
+        raise RuntimeError("Текст порожній")
+    base = HF_SPACES["tts"]
+    ref = None
+    if ref_audio and os.path.isfile(ref_audio):
+        ref = hf_upload(base, ref_audio)
+        if say:
+            say("🗣 Зразок голосу завантажено у Space")
+    tmpdir = out_path + ".parts"
+    os.makedirs(tmpdir, exist_ok=True)
+    try:
+        tmps = []
+        for i, piece in enumerate(parts, 1):
+            if say:
+                say("🗣 Клон: шматок {}/{} (Space чергує — до хвилини)…".format(i, len(parts)))
+            res = hf_space_call(base, "/generate_tts_audio",
+                                [piece, ref, 0.5, 0.8, 0, 0.5, False])
+            audio = res[0] if isinstance(res, list) and res else res
+            tmp = os.path.join(tmpdir, "part_{:03d}".format(i))
+            hf_download(base, audio, tmp)
+            tmps.append(tmp)
+        ff = ffmpeg_path()
+        if len(tmps) == 1:
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", tmps[0],
+                 "-c:a", "libmp3lame", "-q:a", "3", out_path])
+        else:
+            lst = os.path.join(tmpdir, "list.txt")
+            with open(lst, "w", encoding="utf-8") as f:
+                for t in tmps:
+                    f.write("file '{}'\n".format(t))
+            run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+                 "-i", lst, "-c:a", "libmp3lame", "-q:a", "3", out_path])
+        return out_path
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def hf_image(prompt, out_path, say=None):
+    """🖼 v37: зображення з тексту (FLUX.1-schnell, HF Space, БЕЗ ключа)."""
+    if not (prompt or "").strip():
+        raise RuntimeError("Опиши картинку")
+    res = hf_space_call(HF_SPACES["img"], "/infer",
+                        [prompt.strip(), 0, True, 1024, 1024, 4])
+    img = res[0] if isinstance(res, list) and res else res
+    return hf_download(HF_SPACES["img"], img, out_path)
+
+
+def hf_image_to_video(image_path, prompt, out_path, say=None):
+    """🎬 v37: оживити картинку (WAN 2.2, HF Space, БЕЗ ключа)."""
+    if not (image_path and os.path.isfile(image_path)):
+        raise RuntimeError("Спершу обери картинку")
+    base = HF_SPACES["vid"]
+    img = hf_upload(base, image_path)
+    res = hf_space_call(base, "/generate_video",
+                        [img, (prompt or "").strip(), 6, "",
+                         3.5, 1.0, 1.0, 42, True], timeout=1800)
+    vid = res[0] if isinstance(res, list) and res else res
+    return hf_download(base, vid, out_path)
 
 
 def llm_list_models(provider, url, timeout=8):
@@ -4807,6 +4973,52 @@ class App:
         ctk.CTkButton(sttrow, text="🎤 Згенерувати", width=130, height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.stt_now).pack(side="right")
+        ctk.CTkLabel(self.tools_body, text="🗣 Клон голосу (Chatterbox — HF Space, без ключа)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.clone_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано зразок голосу (mp3/wav, 5–20 с)",
+                                      font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.clone_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        clonerow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        clonerow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(clonerow, text="➕ Зразок", width=104, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_clone_ref).pack(side="left")
+        ctk.CTkButton(clonerow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_clone_ref).pack(side="left", padx=(6, 0))
+        self.clone_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
+                                      placeholder_text="Текст, який скаже клон голосу")
+        self.clone_txt.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🗣 Озвучити клоном", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.clone_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🖼 AI-картинка (FLUX — HF Space, без ключа)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.img_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
+                                    placeholder_text="Опиши картинку («киоск з кавою під дощем, кіно-стиль»)")
+        self.img_txt.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🖼 Згенерувати картинку", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.img_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🎬 Оживити картинку (WAN 2.2 — HF Space, без ключа)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.anim_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано картинку",
+                                     font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.anim_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        animrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        animrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(animrow, text="➕ Картинка", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_anim_img).pack(side="left")
+        ctk.CTkButton(animrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_anim_img).pack(side="left", padx=(6, 0))
+        self.anim_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
+                                     placeholder_text="Що відбувається у кадрі (необов'язково)")
+        self.anim_txt.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎬 Зробити відео", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.anim_now).pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
@@ -5002,7 +5214,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v36 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v37 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру (безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -5981,6 +6193,117 @@ class App:
             groq_transcribe_srt(p, self.say)
         except Exception as e:
             self.say("❌ Субтитри: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def pick_clone_ref(self):
+        """🗣 v37: обрати зразок голосу (5–20 с чистої мови без музики)."""
+        p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
+        if p:
+            self.clone_ref = p
+            self.clone_lbl.configure(text="Зразок: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🗣 Зразок голосу: " + os.path.basename(p))
+
+    def clear_clone_ref(self):
+        self.clone_ref = None
+        self.clone_lbl.configure(text="Не обрано зразок голосу (mp3/wav, 5–20 с)",
+                                 text_color=self.MUTED)
+
+    def clone_now(self):
+        """🗣 v37: клонувати голос — окремим потоком (Space, Tk не блокується)."""
+        text = self.clone_txt.get().strip()
+        if not text:
+            messagebox.showwarning("Стоп", "Напиши текст, який скаже клон голосу 🙂")
+            return
+        ref = getattr(self, "clone_ref", None)
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._clone_thread, args=(text, ref), daemon=True).start()
+
+    def _clone_thread(self, text, ref):
+        try:
+            if ref:
+                out = os.path.splitext(ref)[0] + "_clone.mp3"
+            else:
+                out = os.path.join(os.path.expanduser("~"), "voice_clone.mp3")
+            self.say("🗣 Chatterbox (HF Space, без ключа): генерую клон — перший запит може тривати до хвилини")
+            hf_tts_clone(text, ref, out, self.say)
+            self.say("🗣 Готово: " + os.path.basename(out))
+            try:
+                os.startfile(os.path.dirname(out) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🗣 Клон не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def img_now(self):
+        """🖼 v37: AI-картинка з тексту — окремим потоком (FLUX, HF Space)."""
+        prompt = self.img_txt.get().strip()
+        if not prompt:
+            messagebox.showwarning("Стоп", "Опиши картинку 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._img_thread, args=(prompt,), daemon=True).start()
+
+    def _img_thread(self, prompt):
+        try:
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            folder = os.path.join(os.path.expanduser("~"), "Pictures")
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except OSError:
+                folder = os.path.expanduser("~")
+            out = os.path.join(folder, "ai_" + stamp + ".png")
+            self.say("🖼 FLUX.1-schnell (HF Space, без ключа): малюю…")
+            hf_image(prompt, out, self.say)
+            self.say("🖼 Готово: " + os.path.basename(out))
+            try:
+                os.startfile(folder)
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🖼 Картинка не вийшла: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def pick_anim_img(self):
+        """🎬 v37: обрати картинку для оживлення (WAN 2.2)."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
+        if p:
+            self.anim_img = p
+            self.anim_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🎬 Обрано: " + os.path.basename(p))
+
+    def clear_anim_img(self):
+        self.anim_img = None
+        self.anim_lbl.configure(text="Не обрано картинку", text_color=self.MUTED)
+
+    def anim_now(self):
+        """🎬 v37: оживити картинку — окремим потоком (WAN 2.2, HF Space)."""
+        p = getattr(self, "anim_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай картинку 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._anim_thread, args=(p, self.anim_txt.get().strip()),
+                         daemon=True).start()
+
+    def _anim_thread(self, p, prompt):
+        try:
+            out = os.path.splitext(p)[0] + "_wan.mp4"
+            self.say("🎬 WAN 2.2 (HF Space, без ключа): оживляю кадр — це довго, до кількох хвилин")
+            hf_image_to_video(p, prompt, out, self.say)
+            self.say("🎬 Готово: " + os.path.basename(out) + " (поруч з картинкою)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎬 Відео не вийшло: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
         finally:
             self.q.put(None)
 
