@@ -181,6 +181,16 @@ tools/memory.json (лише локально) і підмішується у К�
 розмови; Ctrl+K — нова розмова. Стрімінг працює по всій драбині «Авто»
 (ступінь не засмітився — наступний), Pollinations при фолбеку
 віддає відповідь одним шматком.
+v43: 🖱 правий клік — всюди: «📋 Вставити» і «📄 Копіювати» (виділене,
+а нема виділення — увесь текст) у полі Асистента, URL джерела і чаті;
+відповіді чату і журнал тепер ВИДІЛЯЮТЬСЯ і копіюються (як у Claude:
+мишею, Ctrl+C, Ctrl+A — відповідь не редагується, але завжди копіюється);
+🔄 Джерело за замовчуванням — «Авто»-драбина; 🔑 нові безкоштовні шлюзи
+у freekeys.json: ⚡ Cerebras (1М токенів/день), 🇪🇺 Mistral (experiment-план),
+🧭 OpenRouter (:free-моделі), 🟩 NVIDIA NIM, 🟧 SambaNova, 🤗 HF Router
+і 🤖 Google AI Studio (Gemini) — усі OpenAI-сумісні, ключі лише локально;
+💬 чат Асистента — ТЕПЕР ВКЛАДКА «💬 Чат» у головному вікні: жодного
+спливного вікна, повний функціонал Claude зі стрімінгом і артефактами.
 """
 import array
 import asyncio
@@ -315,7 +325,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.42 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.43 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -340,8 +350,16 @@ FREEKEY_ENGINES = {
     "anthropic": {"url": "https://api.anthropic.com/v1", "model": "claude-sonnet-5-5"},  # 🤖 v40: Claude напряму — його безкоштовні $5-кредити (OpenAI-сумісний шар)
     "groq": {"url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
     "github": {"url": "https://models.github.ai/inference", "model": "openai/gpt-4o"},
-    "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
+    "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},  # 🤖 Google AI Studio
+    "cerebras": {"url": "https://api.cerebras.ai/v1", "model": "llama-3.3-70b"},  # ⚡ v43: Cerebras — фрітір 1М токенів/день, найшвидший інференс
+    "mistral": {"url": "https://api.mistral.ai/v1", "model": "mistral-small-latest"},  # 🇪🇺 v43: Mistral — experiment-план (безкоштовні запити)
+    "openrouter": {"url": "https://openrouter.ai/api/v1", "model": "google/gemini-2.0-flash-exp:free"},  # 🧭 v43: OpenRouter — каталоґ :free-моделей
+    "nvidia": {"url": "https://integrate.api.nvidia.com/v1", "model": "meta/llama-3.3-70b-instruct"},  # 🟩 v43: NVIDIA NIM — стартові кредити
+    "sambanova": {"url": "https://api.sambanova.ai/v1", "model": "Meta-Llama-3.3-70B-Instruct"},  # 🟧 v43: SambaNova — безкоштовний фрітір
+    "huggingface": {"url": "https://router.huggingface.co/v1", "model": "meta-llama/Llama-3.3-70B-Instruct"},  # 🤗 v43: HF Inference Router — пробний токен
 }
+FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
+                 "gemini", "openrouter", "nvidia", "sambanova", "huggingface")  # 🪜 v43: порядок драбини «Авто»
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 CHAT_FILE = os.path.join(TOOLS_DIR, "chat.json")  # 💬 v41: історія чату Асистента, лише локально
 MEMORY_FILE = os.path.join(TOOLS_DIR, "memory.json")  # 🧠 v42: пам'ять чату (факти про користувача), лише локально
@@ -615,7 +633,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v42"}
+            d = {"app": "Генератор відео v43"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -753,7 +771,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v42"}
+                "app": "Генератор відео v43"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2261,12 +2279,14 @@ def load_freekeys():
 
 
 def freekey_engine():
-    """🔑 v36/v39/v40: який безкоштовний ключ є у freekeys.json (пріоритет
-    Puter → Anthropic → Groq → GitHub → Gemini: 🤖 Claude як мозок
-    Асистента; Groq окремо лишається для Whisper-субтитрів).
+    """🔑 v36/v39/v40/v43: який безкоштовний ключ є у freekeys.json
+    (пріоритет — драбина FREEKEY_ORDER: 🤖 Claude (Puter/Anthropic) →
+    Cerebras → Groq → Mistral → GitHub → Google AI Studio → OpenRouter →
+    NVIDIA → SambaNova → HF; Claude як мозок Асистента, Groq окремо
+    лишається для Whisper-субтитрів).
     Нема жодного — None (fail-open)."""
     keys = load_freekeys()
-    for name in ("puter", "anthropic", "groq", "github", "gemini"):
+    for name in FREEKEY_ORDER:
         if len(str(keys.get(name) or "").strip()) >= 20:
             return name
     return None
@@ -2426,12 +2446,13 @@ def _oai_chat(url, key, model, prompt, system=None, timeout=120, history=None):
 
 
 def auto_chain_steps():
-    """🔄 v40: драбина джерел «Авто»: Claude (Puter) → Claude (Anthropic) →
-    Groq → GitHub → Gemini → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. Лише
+    """🔄 v40/v43: драбина джерел «Авто»: Claude (Puter) → Claude (Anthropic) →
+    Cerebras → Groq → Mistral → GitHub → Google AI Studio → OpenRouter →
+    NVIDIA → SambaNova → HF → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. Лише
     наявні (ключі з freekeys.json) + три безключові; кожен ступінь fail-open."""
     keys = load_freekeys()
     steps = []
-    for name in ("puter", "anthropic", "groq", "github", "gemini"):
+    for name in FREEKEY_ORDER:
         k = str(keys.get(name) or "").strip()
         if len(k) >= 20 and name in FREEKEY_ENGINES:
             conf = FREEKEY_ENGINES[name]
@@ -4851,7 +4872,7 @@ class App:
         ctk.CTkLabel(head, text="v14", font=self._f(11, "bold"),
                      text_color=self.ACCENT_H).pack(side="left", padx=(8, 0))
         self.tabs = ctk.CTkSegmentedButton(
-            head, values=["🎬 Генерація", "🗂 Історія", "⚙️ Налаштування"],
+            head, values=["🎬 Генерація", "💬 Чат", "🗂 Історія", "⚙️ Налаштування"],
             font=self._f(12), fg_color=self.INSET, unselected_color=self.INSET,
             unselected_hover_color=self.HOVER, selected_color=self.ACCENT,
             selected_hover_color=self.ACCENT_H, command=self._show_tab)
@@ -4863,22 +4884,27 @@ class App:
         self.clock = ctk.CTkLabel(head, text="", font=self._f(12, "bold"), text_color="#FFFFFF")
         self.clock.pack(side="right", padx=(0, 14))
 
-        # === ТРИ ТАБИ ===
+        # === ЧОТИРИ ТАБИ (v43: чат — вкладка, без спливного вікна) ===
         self.tab_gen = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.tab_chat = ctk.CTkFrame(self.root, fg_color="transparent")
         self.tab_hist = ctk.CTkFrame(self.root, fg_color="transparent")
         self.tab_set = ctk.CTkFrame(self.root, fg_color="transparent")
         self._build_gen_tab()
         self._build_hist_tab()
         self._build_set_tab()
         self._show_tab("🎬 Генерація")
-        # v13: меню правого кліку («📋 Вставити») для всіх текстових полів
-        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.pins_entry, self.tr_entry, self.px_key, self.px_query, self.suno_cookie, self.suno_desc, self.suno_tags):
+        # v13: меню правого кліку («📋 Вставити / 📄 Копіювати») для всіх текстових полів
+        # v43: + поле Асистента і URL джерела; журнал — лише «📄 Копіювати»
+        for w in (self.query, self.script, self.yt_many, self.yt_search_entry, self.pins_entry, self.tr_entry, self.px_key, self.px_query, self.suno_cookie, self.suno_desc, self.suno_tags, self.agent_entry, self.ollama_url):
             self.attach_paste_menu(w)
+        self.attach_paste_menu(self.log, can_paste=False, can_clear=False)
 
     def _show_tab(self, val):
-        for t in (self.tab_gen, self.tab_hist, self.tab_set):
+        for t in (self.tab_gen, self.tab_chat, self.tab_hist, self.tab_set):
             t.pack_forget()
-        if "Історія" in val:
+        if "Чат" in val:
+            self.tab_chat.pack(side="top", fill="both", expand=True)
+        elif "Історія" in val:
             self.tab_hist.pack(side="top", fill="both", expand=True)
             self._refresh_history()
         elif "Налаштування" in val:
@@ -4982,7 +5008,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; файл freekeys.json, тільки локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів; 🔑 ключі Groq / GitHub / Gemini; 🔄 Авто — драбина всіх джерел (Claude → ключі → Kilo → LLM7 → Pollinations): вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; файл freekeys.json, тільки локально); 🌐 Pollinations / ⚡ Kilo / 🌐 LLM7 — безкоштовно, БЕЗ ключів; 🔑 ключі: Groq / GitHub / 🤖 Google AI Studio / ⚡ Cerebras / 🇪🇺 Mistral / 🧭 OpenRouter / 🟩 NVIDIA / 🟧 SambaNova / 🤗 HF — усе безкоштовні фрітіри, без картки; 🔄 Авто (за замовчуванням) — драбина всіх джерел: вичерпався — сам перескакує; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -4996,13 +5022,13 @@ class App:
             fg_color=self.INSET, selected_color=self.ACCENT,
             selected_hover_color=self.ACCENT_H, unselected_color=self.HOVER,
             command=self._switch_llm_provider)
-        _prov0 = (_oc.get("provider") or "ollama")
+        _prov0 = (_oc.get("provider") or "auto")  # 🔄 v43: дефолт — Авто-драбина
         self.llm_provider.set("🌐 Онлайн" if _prov0 == "pollinations"
                               else ("9Router" if _prov0 == "9router"
                                     else ("⚡ Kilo" if _prov0 == "kilo"
                                           else ("🔑 Ключ" if _prov0 == "freekey"
-                                                else ("🔄 Авто" if _prov0 == "auto"
-                                                      else "Ollama")))))
+                                                else ("Ollama" if _prov0 == "ollama"
+                                                      else "🔄 Авто")))))
         self.llm_provider.pack(side="left")
         self.ollama_url = ctk.CTkEntry(ac, placeholder_text="http://localhost:11434",
                                        height=32, corner_radius=10, fg_color=self.INSET,
@@ -5775,7 +5801,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v42 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен; 🔄 Авто — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v43 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF) і 🤖 Claude через Puter-токен; 🔄 Авто (за замовчуванням) — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — тепер ВКЛАДКА у головному вікні (без спливного вікна): стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6018,14 +6044,46 @@ class App:
             widget.insert(0, clip)
         self.say("📋 Вставлено: " + clip[:80])
 
-    def attach_paste_menu(self, widget):
-        """🖱 ПКМ у полі — меню «📋 Вставити» / «🧹 Очистити» (текст з буфера обміну)."""
+    def attach_paste_menu(self, widget, can_paste=True, can_clear=True):
+        """🖱 ПКМ у полі — меню «📋 Вставити» / «📄 Копіювати» / «🧹 Очистити».
+        v43: «📄 Копіювати» — виділене (нема виділення — уесь текст) → буфер
+        обміну. Read-only поля (відповіді чату, журнал) — лише копіювання."""
         menu = tkinter.Menu(widget, tearoff=0, bg="#1C1C1E", fg="#F5F5F7",
                             activebackground="#3A3A3C", activeforeground="#FFFFFF",
                             font=("Segoe UI", 11))
-        menu.add_command(label="📋 Вставити", command=lambda: self.paste_into(widget))
-        menu.add_command(label="🧹 Очистити", command=lambda: self.clear_field(widget))
+        if can_paste:
+            menu.add_command(label="📋 Вставити", command=lambda: self.paste_into(widget))
+        menu.add_command(label="📄 Копіювати", command=lambda: self.copy_from(widget))
+        if can_clear:
+            menu.add_command(label="🧹 Очистити", command=lambda: self.clear_field(widget))
         widget._paste_menu = menu
+
+    def copy_from(self, widget):
+        """📄 v43: копіювати з поля у буфер обміну — виділене, а нема
+        виділення — увесь текст (ПКМ «Копіювати» працює і в журналі,
+        і в відповідях чату)."""
+        txt = ""
+        try:
+            if isinstance(widget, ctk.CTkTextbox):
+                try:
+                    txt = widget.get("sel.first", "sel.last")
+                except Exception:
+                    txt = ""
+                if not txt.strip():
+                    txt = widget.get("1.0", "end").rstrip("\n")
+            else:
+                try:
+                    txt = widget.selection_get()
+                except Exception:
+                    txt = widget.get()
+        except Exception:
+            txt = ""
+        if not txt.strip():
+            self.say("⚠️ Нема чого копіювати — порожньо")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(txt)
+        self.say("📄 Скопійовано: " + txt[:80].replace("\n", " "))
 
         def _popup(event):
             try:
@@ -7271,7 +7329,10 @@ class App:
     # все лише локально (як ключ Pixabay), fail-open, гроші — нуль.
 
     CHAT_PRETTY = {"puter": "🤖 Claude (Puter)", "anthropic": "🤖 Claude (Anthropic)",
-                   "groq": "🔑 Groq", "github": "🔑 GitHub", "gemini": "🔑 Gemini",
+                   "groq": "🔑 Groq", "github": "🔑 GitHub", "gemini": "🤖 Google AI Studio",
+                   "cerebras": "⚡ Cerebras", "mistral": "🇪🇺 Mistral",
+                   "openrouter": "🧭 OpenRouter", "nvidia": "🟩 NVIDIA NIM",
+                   "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
@@ -7441,32 +7502,26 @@ class App:
             pass
 
     def open_chat_window(self):
-        """💬 v42: вікно чату — повний функціонал Claude: стрімінг, Markdown,
+        """💬 v43: чат Асистента — вкладка «💬 Чат» у ГОЛОВНОМУ вікні
+        (без спливного вікна); повний функціонал Claude: стрімінг, Markdown,
         артефакти, пам'ять, вкладення, редагування повідомлень."""
-        if getattr(self, "chat_win", None) is not None:
-            try:
-                if self.chat_win.winfo_exists():
-                    self.chat_win.focus_set()
-                    return
-            except Exception:
-                pass
+        if getattr(self, "chat_win", None) is None:
+            self._chat_build()
+        self.tabs.set("💬 Чат")
+        self._show_tab("💬 Чат")
+
+    def _chat_build(self):
+        """💬 v43: збудувати вкладку чату — один раз, при першому відкритті
+        (ліниво: головне вікно стартує швидко)."""
         self._chat_busy = False
         self._chat_cancel = False
         self._chat_stream_box = None
         self._chat_stream_frame = None
         self.chat_messages = self._chat_load()
-        win = ctk.CTkToplevel(self.root)
-        win.title("✳ Асистент — чат")
-        win.geometry("780x840")
-        win.attributes("-topmost", True)
-        win.after(400, lambda: win.attributes("-topmost", False))
-        try:
-            win.grab_set()
-        except Exception:
-            pass
+        win = self.tab_chat  # 🪟 v43: чат живе у вкладці — жодного спливного вікна
         win.configure(fg_color=self.CLAUDE_BG)
         self.chat_win = win
-        self._bind_safe(win, "<Control-k>", lambda e: self._chat_new())  # Ctrl+K — як у Claude
+        self._bind_safe(self.root, "<Control-k>", lambda e: self._chat_new())  # Ctrl+K — як у Claude
 
         # шапка: ✳ мітка, джерело, 🧠 пам'ять, ＋ нова розмова
         head = ctk.CTkFrame(win, fg_color=self.CLAUDE_CARD, corner_radius=0)
@@ -7501,6 +7556,7 @@ class App:
                                          wrap="word", fg_color="transparent",
                                          text_color=self.CLAUDE_TEXT)
         self.chat_input.pack(fill="x", padx=10, pady=(10, 2))
+        self.attach_paste_menu(self.chat_input)  # 🖱 v43: ПКМ у полі чату
 
         def _chat_enter(e):
             if e.state & 0x0001:  # Shift+Enter — новий рядок, як у Claude
@@ -7719,7 +7775,7 @@ class App:
             t.pack(fill="x", anchor="w", pady=(2, 2))
             self._md_configure(t)
             self._md_text_into(t, chunk.rstrip("\n"))
-            t.configure(state="disabled")
+            self._ro_selectable(t)  # 🖱 v43: виділяй і копіюй відповідь — як у Claude
             box = box or t
         if buttons:
             acts = ctk.CTkFrame(a, fg_color="transparent")
@@ -7736,6 +7792,34 @@ class App:
                                                          padx=(6, 0))
         self.chat_scroll.after(30, lambda: self.chat_scroll._parent_canvas.yview_moveto(1.0))
         return a, box
+
+    def _ro_selectable(self, w):
+        """🖱 v43: read-only текст з ЖИВИМ виділенням і копіюванням (як у
+        Claude): друкувати в відповідь не даю, але виділяй мишею скрізь,
+        копіюй ПКМ «📄 Копіювати» / Ctrl+C, «виділиш усе» — Ctrl+A."""
+        def _key(e):
+            if e.state & 0x0004:  # Ctrl-комбінації — стандартна поведінка Tk
+                return None
+            return "break"  # звичайні клавіші не друкують у відповідь
+        self._bind_safe(w, "<Key>", _key)
+
+        def _cc(e):
+            try:
+                txt = w.get("sel.first", "sel.last")
+                if txt.strip():
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(txt)
+                    self.say("📄 Скопійовано виділене з відповіді")
+            except Exception:
+                pass
+            return "break"
+        self._bind_safe(w, "<Control-c>", _cc)
+
+        def _ca(e):
+            w.tag_add("sel", "1.0", "end")
+            return "break"
+        self._bind_safe(w, "<Control-a>", _ca)
+        self.attach_paste_menu(w, can_paste=False, can_clear=False)
 
     def _chat_rerender(self):
         """💬 v42: перемалювати розмову з історії (великі відповіді — з
@@ -7840,12 +7924,10 @@ class App:
                     self._chat_render_assistant("", self._chat_source(),
                                                 buttons=False)
             box = self._chat_stream_box
-            box.configure(state="normal")
-            box.insert("end", piece)
+            box.insert("end", piece)  # v43: бокс read-only через _ro_selectable — нормальний стан не шкодить
             lines = int(box.index("end-1c").split(".")[0])
             box.configure(height=min(500, max(30, lines * 20 + 10)))
             box.see("end")
-            box.configure(state="disabled")
             self.chat_scroll._parent_canvas.yview_moveto(1.0)
         except Exception:
             pass  # вікно закрили — тихо (fail-open)
@@ -8012,8 +8094,9 @@ class App:
             self.ollama_url.insert(0, defs.get(val, "http://localhost:11434"))
         if val == "🔄 Авто":
             self.ollama_status.configure(
-                text="🔄 Авто — драбина: 🤖 Claude (Puter) → Claude (Anthropic) → Groq → "
-                     "GitHub → Gemini → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
+                text="🔄 Авто — драбина: 🤖 Claude (Puter) → Claude (Anthropic) → ⚡ Cerebras → "
+                     "Groq → 🇪🇺 Mistral → GitHub → 🤖 Google AI Studio → 🧭 OpenRouter → 🟩 NVIDIA → "
+                     "🟧 SambaNova → 🤗 HF → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. "
                      "Вичерпався — сам перескакує: Асистент не впирається в ліміти.")
         else:
             self.ollama_status.configure(
@@ -8025,9 +8108,7 @@ class App:
         prov = self._llm_provider()
         if prov == "auto":
             keys = load_freekeys()
-            pretty = {"puter": "🤖 Claude (Puter)", "anthropic": "🤖 Claude (Anthropic)",
-                      "groq": "Groq", "github": "GitHub", "gemini": "Gemini"}
-            have = [pretty[n] for n in ("puter", "anthropic", "groq", "github", "gemini")
+            have = [self.CHAT_PRETTY.get(n, n) for n in FREEKEY_ORDER
                     if len(str(keys.get(n) or "").strip()) >= 20]
             chain = have + ["⚡ Kilo", "🌐 LLM7", "🌐 Pollinations"]
             self.ollama_status.configure(
