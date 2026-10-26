@@ -131,6 +131,15 @@ v37: 🤝 HF Spaces — публічний Gradio-API БЕЗ ключа (hugging
 🎬 оживлення картинки (WAN 2.2: кадр → короткий mp4). Space-и публічні й
 безкоштовні, черги ZeroGPU діляться на всіх — у годину пік може бути
 «черга повна», тоді чесно пишемо в журнал і нічого не ламається (fail-open).
+v38: 🧠 нейро-ядро — сімка нейромереж на HF Spaces, усі БЕЗ ключа:
+🖌 редагування картинки промптом (FLUX.1 Kontext: «вечір, додай дощ» → нова
+картинка), ✂️ видалення фону (прозорий png), 🔍 OCR (DeepSeek: текст зі
+скріншота чи сторінки), 🎬 перехід двох кадрів (WAN 2.2: перший кадр →
+останній — цемент між сценами); стан усього ядра — одна кнопка 🔄 Перевірити.
+🗣 озвучка клоном у пайплайні: перемикач у 🧰 — і голосом відео вже не edge-tts,
+а ТВІЙ голос (зразок зберігається в tools/clone.json лише локально, як ключ
+Pixabay; клон не віддає міток слів — караоке-субтитри чесно відступають до
+звичайних; не вийшло — озвучка як раніше, усе fail-open, нуль грошей).
 """
 import array
 import asyncio
@@ -265,7 +274,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.37 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.38 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -277,7 +286,12 @@ HF_SPACES = {  # 🤝 v37: публічні HF Spaces — Gradio-API БЕЗ кл
     "tts": "https://resembleai-chatterbox.hf.space",   # 🗣 Chatterbox: клон голосу
     "img": "https://evalstate-flux1-schnell.hf.space",  # 🖼 FLUX.1-schnell: текст → картинка
     "vid": "https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space",  # 🎬 WAN 2.2: кадр → відео
+    "edit": "https://black-forest-labs-flux-1-kontext-dev.hf.space",  # 🖌 v38: FLUX.1 Kontext: редагування промптом
+    "nobg": "https://not-lain-background-removal.hf.space",  # ✂️ v38: видалення фону
+    "ocr": "https://merterbak-deepseek-ocr-demo.hf.space",  # 🔍 v38: DeepSeek-OCR: текст з картинки
+    "fl": "https://multimodalart-wan-2-2-first-last-frame.hf.space",  # 🎬 v38: перший→останній кадр
 }
+CLONE_FILE = os.path.join(TOOLS_DIR, "clone.json")  # 🗣 v38: зразок голосу і перемикач клону, лише локально
 # 🔑 v36: OpenAI-сумісні бази безкоштовних фрітір-ключів (усі — без картки; гроші — нуль)
 FREEKEY_ENGINES = {
     "groq": {"url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
@@ -555,7 +569,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v37"}
+            d = {"app": "Генератор відео v38"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -693,7 +707,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v37"}
+                "app": "Генератор відео v38"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1776,6 +1790,19 @@ def tts_save(text, voice, out_mp3, say, rate_pct=0):
     тексти обривала на середині — тепер ріжуться на шматки і зшиваються;
     додаток усе одно генерує відео, а не падає.
     """
+    # 🗣 v38: План 0 — клон голосу (Chatterbox, HF Space, БЕЗ ключа): перемикач у 🧰
+    try:
+        cfg = clone_cfg_load()
+        if cfg.get("enabled") and (cfg.get("sample") or "").strip() and os.path.isfile(cfg["sample"]):
+            say("🗣 Озвучка клоном твого голосу (Chatterbox, HF Space, без ключа)…")
+            hf_tts_clone(text, cfg["sample"], out_mp3, say)
+            say("🗣 Озвучено клоном твого голосу (Chatterbox, без ключа)")
+            return
+        if cfg.get("enabled"):
+            say("ℹ️ Зразок голосу не знайдено (tools/clone.json) — озвучую edge-tts")
+    except Exception as e:
+        say("ℹ️ Клон голосу не вийшов ({}): озвучую як раніше".format(str(e)[:120]))
+
     ff = ffmpeg_path()
     chunks = _tts_chunks(text)
 
@@ -1858,6 +1885,13 @@ def tts_save_karaoke(text, voice, out_mp3, say, rate_pct=0):
     Повертає список (слово, старт_с, кінець_с) або None, якщо хмара не дала
     метрик — тоді озвучку робить звичайний tts_save. Fail-open:
     караоке — надбудова, а не залежність; без нього все працює як раніше."""
+    # 🗣 v38: клон не віддає міток слів — караоке неможливий, відступаємо до звичайних
+    try:
+        if clone_cfg_load().get("enabled"):
+            say("ℹ️ Клон голосу без караоке-міток — субтитри будуть звичайні")
+            return None
+    except Exception:
+        pass
     ff = ffmpeg_path()
     chunks = _tts_chunks(text)
     if not chunks:
@@ -2492,6 +2526,88 @@ def hf_image_to_video(image_path, prompt, out_path, say=None):
                          3.5, 1.0, 1.0, 42, True], timeout=1800)
     vid = res[0] if isinstance(res, list) and res else res
     return hf_download(base, vid, out_path)
+
+
+def hf_edit_image(image_path, prompt, out_path, say=None):
+    """🖌 v38: редагування картинки промптом (FLUX.1 Kontext, HF Space, БЕЗ ключа)."""
+    if not (prompt or "").strip():
+        raise RuntimeError("Напиши, що змінити у картинці")
+    if not (image_path and os.path.isfile(image_path)):
+        raise RuntimeError("Спершу обери картинку")
+    base = HF_SPACES["edit"]
+    img = hf_upload(base, image_path)
+    res = hf_space_call(base, "/infer",
+                        [img, prompt.strip(), 0, True, 2.5, 28], timeout=1200)
+    out = res[0] if isinstance(res, list) and res else res
+    return hf_download(base, out, out_path)
+
+
+def hf_remove_bg(image_path, out_path, say=None):
+    """✂️ v38: видалення фону (not-lain/background-removal, HF Space, БЕЗ ключа)."""
+    if not (image_path and os.path.isfile(image_path)):
+        raise RuntimeError("Спершу обери картинку")
+    base = HF_SPACES["nobg"]
+    img = hf_upload(base, image_path)
+    res = hf_space_call(base, "/image", [img], timeout=600)
+    out = res[-1] if isinstance(res, list) and res else res  # ImageSlider: [до, після]
+    return hf_download(base, out, out_path)
+
+
+def hf_ocr(image_path, out_txt, say=None):
+    """🔍 v38: текст з картинки (DeepSeek-OCR, HF Space, БЕЗ ключа) → .txt (Markdown)."""
+    if not (image_path and os.path.isfile(image_path)):
+        raise RuntimeError("Спершу обери картинку або скріншот")
+    base = HF_SPACES["ocr"]
+    img = hf_upload(base, image_path)
+    res = hf_space_call(base, "/run",
+                        [img, None, "📋 Markdown", None, 1], timeout=900)
+    text = None
+    cand = res if isinstance(res, list) else [res]
+    for c in cand:
+        if isinstance(c, str) and c.strip():
+            text = c
+            break
+    if not (text or "").strip():
+        raise RuntimeError("OCR не знайшов тексту (маленький шрифт?)")
+    with open(out_txt, "w", encoding="utf-8") as f:
+        f.write(text.strip() + "\n")
+    return out_txt
+
+
+def hf_frames_to_video(img1, img2, prompt, out_path, say=None):
+    """🎬 v38: перший кадр → останній кадр (WAN 2.2, HF Space, БЕЗ ключа):
+    два пости/кадри → плавний перехід-відео між ними."""
+    if not (img1 and os.path.isfile(img1)) or not (img2 and os.path.isfile(img2)):
+        raise RuntimeError("Спершу обери ДВІ картинки (перший і останній кадр)")
+    base = HF_SPACES["fl"]
+    a = hf_upload(base, img1)
+    b = hf_upload(base, img2)
+    res = hf_space_call(base, "/generate_video",
+                        [a, b, (prompt or "").strip(), "", 2.1, 8, 1.0, 1.0, 42, True],
+                        timeout=1800)
+    out = res[0] if isinstance(res, list) and res else res
+    return hf_download(base, out, out_path)
+
+
+def clone_cfg_load():
+    """🗣 v38: tools/clone.json — зразок голосу і стан перемикача клону
+    (лише локально, як ключ Pixabay; fail-open: нема файла — порожній словник)."""
+    try:
+        with open(CLONE_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except Exception:
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def clone_cfg_save(d):
+    """🗣 v38: зберегти налаштування клону локально (нічого не летить у репо)."""
+    try:
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        with open(CLONE_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
 
 
 def llm_list_models(provider, url, timeout=8):
@@ -4992,6 +5108,15 @@ class App:
         ctk.CTkButton(self.tools_body, text="🗣 Озвучити клоном", height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.clone_now).pack(fill="x", padx=14, pady=(0, 4))
+        self.clone_voice_on = ctk.BooleanVar(value=bool(clone_cfg_load().get("enabled")))
+        ctk.CTkSwitch(self.tools_body, text="🗣 Озвучувати ВІДЕО клоном (замість edge-tts)",
+                      variable=self.clone_voice_on, progress_color=self.ACCENT,
+                      font=self._f(11), command=self.clone_voice_toggle).pack(fill="x", padx=14, pady=(0, 4))
+        saved_ref = (clone_cfg_load().get("sample") or "").strip()
+        if saved_ref and os.path.isfile(saved_ref):
+            self.clone_ref = saved_ref
+            self.clone_lbl.configure(text="Зразок: " + os.path.basename(saved_ref) + " (збережений)",
+                                     text_color="#FFFFFF")
         ctk.CTkLabel(self.tools_body, text="🖼 AI-картинка (FLUX — HF Space, без ключа)",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.img_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
@@ -5019,6 +5144,84 @@ class App:
         ctk.CTkButton(self.tools_body, text="🎬 Зробити відео", height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.anim_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🖌 Редагування картинки промптом (FLUX.1 Kontext — HF Space)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.edit_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано картинку",
+                                     font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.edit_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        editrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        editrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(editrow, text="➕ Картинка", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_edit_img).pack(side="left")
+        ctk.CTkButton(editrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_edit_img).pack(side="left", padx=(6, 0))
+        self.edit_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
+                                     placeholder_text="Що змінити («зробити вечір, додати дощ»)")
+        self.edit_txt.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🖌 Змінити картинку", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.edit_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="✂️ Видалення фону (HF Space — прозорий png, без ключа)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.nobg_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано картинку",
+                                     font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.nobg_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        nobgrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        nobgrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(nobgrow, text="➕ Картинка", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_nobg_img).pack(side="left")
+        ctk.CTkButton(nobgrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_nobg_img).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(self.tools_body, text="✂️ Прибрати фон", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.nobg_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🔍 OCR — текст з картинки (DeepSeek-OCR — HF Space)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.ocr_lbl = ctk.CTkLabel(self.tools_body, text="Не обрано картинку чи скріншот",
+                                    font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.ocr_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        ocrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        ocrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(ocrow, text="➕ Картинка", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_ocr_img).pack(side="left")
+        ctk.CTkButton(self.tools_body, text="🔍 Витягти текст (.txt, Markdown)", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.ocr_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🎬 Перший кадр → останній (WAN 2.2 — HF Space)",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        self.fl_lbl = ctk.CTkLabel(self.tools_body, text="Обери ДВІ картинки: початок і кінець",
+                                   font=self._f(11), text_color=self.MUTED, anchor="w")
+        self.fl_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        flrow = ctk.CTkFrame(self.tools_body, fg_color="transparent")
+        flrow.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(flrow, text="1️⃣ Перший", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_fl_first).pack(side="left")
+        ctk.CTkButton(flrow, text="2️⃣ Останній", width=110, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.pick_fl_second).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(flrow, text="✖️", width=44, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.clear_fl_imgs).pack(side="left", padx=(6, 0))
+        self.fl_txt = ctk.CTkEntry(self.tools_body, height=32, font=self._f(12),
+                                   placeholder_text="Що відбувається між кадрами (необов'язково)")
+        self.fl_txt.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎬 Зшити кадри у відео", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.fl_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🧠 Нейро-ядро — 7 нейромереж на HF Spaces, усі без ключа",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        ctk.CTkLabel(self.tools_body,
+                     text="🗣 клон • 🖼 картинка • 🎬 оживлення • 🖌 редагування • ✂️ фон • 🔍 OCR • 🎬 2 кадри",
+                     font=self._f(11), text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🔄 Перевірити всі нейромережі", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.core_check).pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
@@ -5214,7 +5417,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v37 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру (безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v38 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6201,8 +6404,11 @@ class App:
         p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
         if p:
             self.clone_ref = p
+            d = clone_cfg_load()
+            d["sample"] = p
+            clone_cfg_save(d)
             self.clone_lbl.configure(text="Зразок: " + os.path.basename(p), text_color="#FFFFFF")
-            self.say("🗣 Зразок голосу: " + os.path.basename(p))
+            self.say("🗣 Зразок голосу: " + os.path.basename(p) + " (збережено для озвучки відео)")
 
     def clear_clone_ref(self):
         self.clone_ref = None
@@ -6306,6 +6512,217 @@ class App:
             self.say("🎬 Відео не вийшло: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
         finally:
             self.q.put(None)
+
+    def pick_edit_img(self):
+        """🖌 v38: обрати картинку для редагування промптом (FLUX.1 Kontext)."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
+        if p:
+            self.edit_img = p
+            self.edit_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🖌 Обрано: " + os.path.basename(p))
+
+    def clear_edit_img(self):
+        self.edit_img = None
+        self.edit_lbl.configure(text="Не обрано картинку", text_color=self.MUTED)
+
+    def edit_now(self):
+        """🖌 v38: редагувати картинку промптом — окремим потоком (Kontext)."""
+        p = getattr(self, "edit_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай картинку 🙂")
+            return
+        if not self.edit_txt.get().strip():
+            messagebox.showwarning("Стоп", "Напиши, що змінити («вечір, додай дощ») 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._edit_thread, args=(p, self.edit_txt.get().strip()),
+                         daemon=True).start()
+
+    def _edit_thread(self, p, prompt):
+        try:
+            out = os.path.splitext(p)[0] + "_edit.png"
+            self.say("🖌 FLUX.1 Kontext (HF Space, без ключа): редагую — до пари хвилин")
+            hf_edit_image(p, prompt, out, self.say)
+            self.say("🖌 Готово: " + os.path.basename(out) + " (поруч з картинкою)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🖌 Редагування не вийшло: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def pick_nobg_img(self):
+        """✂️ v38: обрати картинку для видалення фону."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
+        if p:
+            self.nobg_img = p
+            self.nobg_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("✂️ Обрано: " + os.path.basename(p))
+
+    def clear_nobg_img(self):
+        self.nobg_img = None
+        self.nobg_lbl.configure(text="Не обрано картинку", text_color=self.MUTED)
+
+    def nobg_now(self):
+        """✂️ v38: видалити фон — окремим потоком (HF Space)."""
+        p = getattr(self, "nobg_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай картинку 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._nobg_thread, args=(p,), daemon=True).start()
+
+    def _nobg_thread(self, p):
+        try:
+            out = os.path.splitext(p)[0] + "_nobg.png"
+            self.say("✂️ Видаляю фон (HF Space, без ключа)…")
+            hf_remove_bg(p, out, self.say)
+            self.say("✂️ Готово: " + os.path.basename(out) + " (прозорий png)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("✂️ Не вийшло: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def pick_ocr_img(self):
+        """🔍 v38: обрати картинку або скріншот для OCR (DeepSeek-OCR)."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp *.bmp")])
+        if p:
+            self.ocr_img = p
+            self.ocr_lbl.configure(text="Обрано: " + os.path.basename(p), text_color="#FFFFFF")
+            self.say("🔍 Обрано: " + os.path.basename(p))
+
+    def ocr_now(self):
+        """🔍 v38: витягти текст з картинки — окремим потоком (DeepSeek-OCR)."""
+        p = getattr(self, "ocr_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай картинку або скріншот 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._ocr_thread, args=(p,), daemon=True).start()
+
+    def _ocr_thread(self, p):
+        try:
+            out = os.path.splitext(p)[0] + "_текст.txt"
+            self.say("🔍 DeepSeek-OCR (HF Space, без ключа): читаю текст…")
+            hf_ocr(p, out, self.say)
+            self.say("🔍 Готово: " + os.path.basename(out) + " (поруч з картинкою)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🔍 OCR не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def pick_fl_first(self):
+        """🎬 v38: перший кадр переходу (WAN 2.2)."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
+        if p:
+            self.fl_first = p
+            self._fl_refresh()
+
+    def pick_fl_second(self):
+        """🎬 v38: останній кадр переходу (WAN 2.2)."""
+        p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
+        if p:
+            self.fl_second = p
+            self._fl_refresh()
+
+    def clear_fl_imgs(self):
+        self.fl_first = None
+        self.fl_second = None
+        self.fl_lbl.configure(text="Обери ДВІ картинки: початок і кінець", text_color=self.MUTED)
+
+    def _fl_refresh(self):
+        a, b = getattr(self, "fl_first", None), getattr(self, "fl_second", None)
+        if a and b:
+            self.fl_lbl.configure(text="1️⃣ {}  →  2️⃣ {}".format(os.path.basename(a), os.path.basename(b)),
+                                  text_color="#FFFFFF")
+        elif a or b:
+            self.fl_lbl.configure(text="Обрано один кадр — додай другий", text_color="#FFFFFF")
+        else:
+            self.fl_lbl.configure(text="Обери ДВІ картинки: початок і кінець", text_color=self.MUTED)
+
+    def fl_now(self):
+        """🎬 v38: перший кадр → останній — окремим потоком (WAN 2.2 Space)."""
+        a, b = getattr(self, "fl_first", None), getattr(self, "fl_second", None)
+        if not (a and os.path.isfile(a)) or not (b and os.path.isfile(b)):
+            messagebox.showwarning("Стоп", "Спершу додай ДВІ картинки: перший і останній кадр 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._fl_thread, args=(a, b, self.fl_txt.get().strip()),
+                         daemon=True).start()
+
+    def _fl_thread(self, a, b, prompt):
+        try:
+            out = os.path.splitext(a)[0] + "_perexid.mp4"
+            self.say("🎬 WAN 2.2 (HF Space, без ключа): зшиваю кадри — це довго, до кількох хвилин")
+            hf_frames_to_video(a, b, prompt, out, self.say)
+            self.say("🎬 Готово: " + os.path.basename(out) + " (поруч з першою картинкою)")
+            try:
+                os.startfile(os.path.dirname(a) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎬 Перехід не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def core_check(self):
+        """🧠 v38: перевірити живість усіх 7 нейромереж — окремим потоком."""
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._core_thread, daemon=True).start()
+
+    def _core_thread(self):
+        names = {"tts": "🗣 клон голосу", "img": "🖼 AI-картинка", "vid": "🎬 оживлення кадру",
+                 "edit": "🖌 редагування промптом", "nobg": "✂️ видалення фону",
+                 "ocr": "🔍 OCR", "fl": "🎬 перший→останній кадр"}
+        self.say("🧠 Перевіряю {} нейромереж на HF Spaces (до півхвилини)…".format(len(names)))
+        ok = 0
+        try:
+            for key in sorted(names):
+                base = HF_SPACES.get(key, "")
+                try:
+                    r = requests.get(base.rstrip("/") + "/gradio_api/info", timeout=12,
+                                     headers={"User-Agent": UA_STRING})
+                    if r.status_code == 200:
+                        ok += 1
+                        self.say("🟢 " + names[key] + " — живий")
+                    else:
+                        self.say("🔴 " + names[key] + " — код " + str(r.status_code))
+                except Exception as e:
+                    self.say("🔴 " + names[key] + " — не відповідає: " + str(e)[:80])
+            self.say("🧠 Нейро-ядро: {}/{} нейромереж живі".format(ok, len(names)))
+        finally:
+            self.q.put(None)
+
+    def clone_voice_toggle(self):
+        """🗣 v38: перемикач «озвучувати відео клоном» — стан у tools/clone.json
+        (лише локально). Клон повільніший за edge-tts — Space чергує кожен шматок."""
+        on = bool(self.clone_voice_on.get())
+        cfg = clone_cfg_load()
+        if on and not ((cfg.get("sample") or "").strip() and os.path.isfile(cfg["sample"])):
+            messagebox.showwarning("Стоп", "Спершу обери зразок голосу (5–20 с) у картці 🗣 🙂")
+            self.clone_voice_on.set(False)
+            return
+        cfg["enabled"] = on
+        clone_cfg_save(cfg)
+        if on:
+            self.say("🗣 Відео озвучуватиметься клоном твого голосу (Chatterbox; повільніше за edge-tts, караоке вимкнено)")
+        else:
+            self.say("🗣 Озвучка відео — edge-tts, як раніше")
 
     def open_folder(self):
         if self.workdir and os.path.isdir(self.workdir):
