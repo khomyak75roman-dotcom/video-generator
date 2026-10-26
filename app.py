@@ -236,6 +236,18 @@ v48: 📊 ВСІ напрацювання знань у чаті: ТАБЛИЦІ
 миттєве і безкоштовне; 🌙 темна тема чату — кнопка у шапці;
 📡 мітка відповіді показує, ЯКИЙ шлюз ФАКТИЧНО відповів
 (навіть коли джерело — «Авто»/драбина). Усе fail-open.
+v49: 🤖 ГПТ і ГУГЛ у чаті + видно, ЧОГО мовчить: «🤖 Gemini онлайн»
+у меню джерел (ключ Google AI Studio + безключовий запас), ChatGPT
+онлайн тепер з останнім безключовим ступенем — чат не мовчить ніколи;
+🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ у шапці чату (Claude-трійка, gpt-oss, Gemini,
+GLM, Qwen, Mistral — список моделей обраного джерела); ⏳ драбина
+чесно показує нотами «⏳ шлюз мовчить — пробую далі…» — видно, ЧОГО
+нема відповіді; 🔐 Google — кнопка у шапці чату і вікні ключів:
+ОДРАЗУ віко входу Google → Create API key; 🤖 tool-use чесний:
+мережа мовчить — пояснення, а не сирий «🔍ПОШУК:»; 🌍 ПЕРЕКЛАД
+КАРТИНКИ на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → переклад драбиною → 4 txt) і 📷
+ОБКЛАДИНКА ІНШОЮ МОВОЮ — та сама картинка, перекладений заголовок,
+4 нові обкладинки. Усе fail-open, гроші — нуль.
 """
 import array
 import asyncio
@@ -371,7 +383,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.48 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.49 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -746,7 +758,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v48"}
+            d = {"app": "Генератор відео v49"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -884,7 +896,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v48"}
+                "app": "Генератор відео v49"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2475,6 +2487,19 @@ def chat_pick_steps(name):
                    "model": "kilo-auto/free", "key": None})
         st.append({"label": "llm7", "kind": "llm7", "url": LLM7_URL,
                    "model": "gpt-5.5", "key": None})
+        st.append({"label": "pollinations", "kind": "pollinations",
+                   "url": POLLINATIONS_URL, "model": "gpt-oss-20b",
+                   "key": None})  # 🆕 v49: останній безключовий запас — чат не мовчить
+        return st, ""
+    if "Gemini онлайн" in name:  # 🤖 v49: ГУГЛ у чаті — Gemini (Google AI Studio)
+        st = ([eng("gemini")] if have("gemini") else []) \
+            + ([eng("openrouter")] if have("openrouter") else [])
+        if not have("gemini"):
+            st.append({"label": "kilo", "kind": "kilo", "url": KILO_URL,
+                       "model": "kilo-auto/free", "key": None})
+        st.append({"label": "pollinations", "kind": "pollinations",
+                   "url": POLLINATIONS_URL, "model": "gpt-oss-20b",
+                   "key": None})  # безключовий запас — чат не мовчить ніколи
         return st, ""
     if "Mistral онлайн" in name:
         if have("mistral"):
@@ -3281,12 +3306,25 @@ def _ollama_stream_chat(url, model, messages, on_delta, stop=None, timeout=180):
     return "".join(got).strip()
 
 
+GATEWAY_PRETTY = {  # 📡 v49: гарні імена шлюзів для нот драбини (модульний рівень)
+    "puter": "🤖 Claude (Puter)", "anthropic": "🤖 Claude (Anthropic)",
+    "groq": "🔑 Groq", "github": "🔑 GitHub", "gemini": "🤖 Google AI Studio",
+    "cerebras": "⚡ Cerebras", "mistral": "🇪🇺 Mistral",
+    "openrouter": "🧭 OpenRouter", "nvidia": "🟩 NVIDIA NIM",
+    "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
+    "zhipu": "🟣 GLM (Zhipu)", "zai": "🟣 GLM (Z.AI)",
+    "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
+    "kilo": "⚡ Kilo", "llm7": "🌐 LLM7", "pollinations": "🌐 Pollinations"}
+
+
 def llm_stream(provider, url, model, prompt, system=None, history=None,
-               on_delta=None, stop=None, timeout=180):
+               on_delta=None, stop=None, timeout=180, on_note=None):
     """⚡ v42: один запит зі СТРІМІНГОМ за провайдером — так Claude віддає
     відповідь по шматках: on_delta(шматок) малює одразу, повертаю весь текст.
     «Авто» — драбина: ступінь стрімить, вперто мовчить — наступний; Pollinations
-    не засмітився — звичайний запит і «зліт» одним шматком. Fail-open всюди."""
+    не засмітився — звичайний запит і «зліт» одним шматком. ⏳ v49 on_note —
+    драбина чесно повідомляє, ЯКИЙ шлюз мовчить: видно, ЧОГО нема відповіді.
+    Fail-open всюди."""
     msgs = ([{"role": "system", "content": system}] if system else []) \
         + (history or []) + [{"role": "user", "content": prompt}]
     step_t = min(int(timeout or 180), 90)
@@ -3322,6 +3360,12 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                       len(txt or ""))
             if txt:
                 return txt
+            try:  # ⏳ v49: драбина не мовчить — показую, хто не відповів
+                if on_note and callable(on_note):
+                    on_note("⏳ " + GATEWAY_PRETTY.get(st["label"], st["label"])
+                            + " мовчить — пробую далі…")
+            except Exception:
+                pass
         return ""
     try:
         if provider == "9router":
@@ -3361,6 +3405,12 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                 llm_trace("stream", name, mm, t0, bool(txt), len(txt or ""))
                 if txt:
                     return txt
+                try:  # ⏳ v49: який шлюз мовчить — видно у чаті
+                    if on_note and callable(on_note):
+                        on_note("⏳ " + GATEWAY_PRETTY.get(name, name)
+                                + " мовчить — пробую далі…")
+                except Exception:
+                    pass
             return ""
         if provider.startswith("chat:"):  # 💬 v46: джерело з меню у шапці чату
             steps, hint = chat_pick_steps(provider[5:].strip())
@@ -3369,23 +3419,29 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
             step_t2 = min(int(timeout or 180), 90)
             for st in steps:
                 t0 = time.time()
+                mm = st["model"]  # 🧠 v49: модель з перемикача чату — якщо вона з цього шлюзу
+                try:
+                    if model and model in (FREEKEY_MODELS.get(st["label"]) or []):
+                        mm = model
+                except Exception:
+                    mm = st["model"]
                 try:
                     if st["kind"] == "kilo":
                         txt = _sse_stream_chat(st["url"].rstrip("/")
                                                + "/chat/completions",
-                                               None, st["model"], msgs, on_delta,
+                                               None, mm, msgs, on_delta,
                                                stop, step_t2)
                     elif st["kind"] == "llm7":
                         txt = _sse_stream_chat(st["url"].rstrip("/")
                                                + "/chat/completions",
-                                               "unused", st["model"], msgs,
+                                               "unused", mm, msgs,
                                                on_delta, stop, step_t2)
                     elif st["kind"] == "pollinations":
                         txt = _sse_stream_chat(st["url"].rstrip("/") + "/openai",
-                                               None, st["model"], msgs, on_delta,
+                                               None, mm, msgs, on_delta,
                                                stop, step_t2)
                         if not txt:
-                            txt = pollinations_chat(st["url"], st["model"],
+                            txt = pollinations_chat(st["url"], mm,
                                                     prompt, system=system,
                                                     timeout=step_t2,
                                                     history=history)
@@ -3394,14 +3450,20 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                     else:
                         txt = _sse_stream_chat(st["url"].rstrip("/")
                                                + "/chat/completions",
-                                               st["key"], st["model"], msgs,
+                                               st["key"], mm, msgs,
                                                on_delta, stop, step_t2)
                 except Exception:
                     txt = ""
-                llm_trace("stream", st["label"], st["model"], t0,
+                llm_trace("stream", st["label"], mm, t0,
                           bool(txt), len(txt or ""))
                 if txt:
                     return txt
+                try:  # ⏳ v49: який шлюз мовчить — видно у чаті
+                    if on_note and callable(on_note):
+                        on_note("⏳ " + GATEWAY_PRETTY.get(st["label"],
+                                st["label"]) + " мовчить — пробую далі…")
+                except Exception:
+                    pass
             return ""
         return _ollama_stream_chat(url, model, msgs, on_delta, stop, timeout)
     except Exception:
@@ -3529,6 +3591,70 @@ def make_cover(workdir, title, say):
         os.remove(tmp)
     except OSError:
         pass
+
+
+IMG_TRANSLATE_LANGS = (("ru", "російську"), ("es", "іспанську"),
+                        ("it", "італійську"), ("en", "англійську"))  # 🌍 v49
+
+
+def make_cover_from_image(src_img, title, out_path, say=None):
+    """🌍 v49: обкладинка ІНШОЮ МОВОЮ — фон = завантажена картинка (без
+    відео), назва = перекладений заголовок: той самий стиль, що й
+    make_cover (градієнт знизу + білий текст по центру, до 3 рядків).
+    Pillow нема/не зловився — просто копія картинки (fail-open)."""
+    try:
+        if PILImage is None:
+            raise RuntimeError("Pillow не знайшовся")
+        from PIL import ImageDraw, ImageFont
+        img = PILImage.open(src_img).convert("RGB")
+        W, H = img.size
+        d = ImageDraw.Draw(img, "RGBA")
+        gh = int(H * 0.45)  # градієнтна підкладка знизу — текст читається завжди
+        for k in range(gh):
+            d.line([(0, H - gh + k), (W, H - gh + k)],
+                   fill=(10, 10, 18, int(210 * (k + 1) / gh)))
+        font = None
+        fs = max(24, int(W / 14))
+        for fp in ("C:\\Windows\\Fonts\\segoeuib.ttf",
+                   "C:\\Windows\\Fonts\\arialbd.ttf",
+                   "C:\\Windows\\Fonts\\segoeui.ttf"):
+            try:
+                font = ImageFont.truetype(fp, fs)
+                break
+            except Exception:
+                font = None
+        if font is None:
+            raise RuntimeError("системний шрифт не знайшовся")
+        clean = "".join(ch for ch in (title or "Cover") if ord(ch) <= 65535)
+        words = " ".join(clean.split()).split(" ")
+        lines, cur = [], ""
+        for wd in words:
+            cand = (cur + " " + wd).strip()
+            if cur and d.textlength(cand, font=font) > W * 0.84:
+                lines.append(cur)
+                cur = wd
+            else:
+                cur = cand
+        if cur:
+            lines.append(cur)
+        lines = lines[:3]
+        lh = int(fs * 1.3)
+        y = H - int(H * 0.06) - lh * len(lines)
+        for ln in lines:
+            tw = d.textlength(ln, font=font)
+            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
+            y += lh
+        img.save(out_path, quality=90)
+        if say:
+            say("📷 Обкладинка: " + os.path.basename(out_path))
+    except Exception as e:
+        try:  # малювати не вийшло — хоча б копія оригіналу (fail-open)
+            shutil.copyfile(src_img, out_path)
+        except Exception:
+            pass
+        if say:
+            say("⚠️ Обкладинка без тексту (копія) — " + str(e)[:80])
+    return out_path
 
 
 def parse_vtt_text(vtt_path):
@@ -6001,6 +6127,16 @@ class App:
         ctk.CTkButton(self.tools_body, text="🔍 Витягти текст (.txt, Markdown)", height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.ocr_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🌍 Перекласти текст на картинці (🇷🇺 🇪🇸 🇮🇹 🇬🇧)",  # 🌍 v49
+                      height=32, corner_radius=16, fg_color=self.INSET,
+                      hover_color=self.HOVER, font=self._f(12),
+                      command=self.img_translate_now).pack(fill="x", padx=14,
+                                                         pady=(0, 2))
+        ctk.CTkButton(self.tools_body, text="📷 Обкладинка іншою мовою (та сама картинка ×4)",  # 🌍 v49
+                      height=32, corner_radius=16, fg_color=self.INSET,
+                      hover_color=self.HOVER, font=self._f(12),
+                      command=self.cover_lang_now).pack(fill="x", padx=14,
+                                                       pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="🎬 Перший кадр → останній (WAN 2.2 — HF Space)",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.fl_lbl = ctk.CTkLabel(self.tools_body, text="Обери ДВІ картинки: початок і кінець",
@@ -6226,7 +6362,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v48 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v49 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 🔐 Google — кнопка у шапці чату: одразу віко входу Google → ключ Gemini; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7518,6 +7654,113 @@ class App:
         finally:
             self.q.put(None)
 
+    def img_translate_now(self):
+        """🌍 v49: текст з картинки → 4 мови (🇷🇺 російська, 🇪🇸 іспанська,
+        🇮🇹 італійська, 🇬🇧 англійська): OCR (DeepSeek, без ключа) → переклад
+        драбиною «Авто» → 4 txt-файли поруч з картинкою. Одна кнопка."""
+        p = getattr(self, "ocr_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай картинку через «➕ Картинка» 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._img_translate_thread, args=(p,),
+                         daemon=True).start()
+
+    def _img_translate_thread(self, p):
+        try:
+            tmp = os.path.splitext(p)[0] + "_ocr_tmp.txt"
+            self.say("🌍 Читаю текст з картинки (DeepSeek-OCR)…")
+            hf_ocr(p, tmp, self.say)
+            with open(tmp, encoding="utf-8") as f:
+                text = (f.read() or "").strip()
+            if not text:
+                raise RuntimeError("OCR не знайшов тексту на картинці")
+            base = os.path.splitext(p)[0]
+            made = []
+            for code, lang in IMG_TRANSLATE_LANGS:
+                self.say("🌍 Перекладаю на " + lang + "…")
+                sys_p = ("Ти — точний перекладач. Переклади ВСЕ надане "
+                         "повідомлення на " + lang + ". Поверни ЛИШЕ "
+                         "перекладений текст, без пояснень.")
+                tr = (llm_chat("auto", "", "", text[:6000],
+                               system=sys_p, timeout=90) or "").strip()
+                if tr:
+                    out = base + "_переклад_" + code + ".txt"
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write(tr + "\n")
+                    made.append(code)
+                else:
+                    self.say("🌍 " + lang + ": усі джерела мовчать — спробуй ще раз")
+            if made:
+                self.say("🌍 Готово: " + str(len(made)) + " переклади ("
+                         + ", ".join(made) + ") — поруч з картинкою")
+                try:
+                    os.startfile(os.path.dirname(p) or ".")
+                except Exception:
+                    pass
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        except Exception as e:
+            self.say("🌍 Переклад не вийшов: " + str(e)[:200])
+        finally:
+            self.q.put(None)
+
+    def cover_lang_now(self):
+        """📷 v49: обкладинка ІНШОЮ МОВОЮ — завантажена обкладинка: читаю
+        заголовок (OCR) → перекладаю на 4 мови → генерую 4 нові обкладинки
+        з ПЕРЕКЛАДЕНИМ заголовком на тій самій картинці (стиль як make_cover)."""
+        p = getattr(self, "ocr_img", None)
+        if not p or not os.path.isfile(p):
+            messagebox.showwarning("Стоп", "Спершу додай обкладинку через «➕ Картинка» 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._cover_lang_thread, args=(p,),
+                         daemon=True).start()
+
+    def _cover_lang_thread(self, p):
+        try:
+            tmp = os.path.splitext(p)[0] + "_ocr_tmp.txt"
+            self.say("📷 Обкладинка: читаю заголовок (OCR)…")
+            hf_ocr(p, tmp, self.say)
+            with open(tmp, encoding="utf-8") as f:
+                text = (f.read() or "").strip()[:600]
+            if not text:
+                raise RuntimeError("OCR не знайшов тексту на обкладинці")
+            base = os.path.splitext(p)[0]
+            made = []
+            for code, lang in IMG_TRANSLATE_LANGS:
+                self.say("📷 Обкладинка: заголовок на " + lang + "…")
+                sys_p = ("Ти — перекладач обкладинок YouTube. Дай ЛИШЕ "
+                         "перекладений ЗАГОЛОВОК цієї обкладинки на " + lang
+                         + " — коротко, як назва відео, без пояснень.")
+                tr = (llm_chat("auto", "", "", text, system=sys_p,
+                               timeout=90) or "").strip()
+                if tr:
+                    out = base + "_cover_" + code + ".jpg"
+                    make_cover_from_image(p, tr[:120], out, self.say)
+                    made.append(code)
+                else:
+                    self.say("📷 " + lang + ": джерела мовчать — спробуй ще раз")
+            if made:
+                self.say("📷 Готово: " + str(len(made)) + " обкладинки ("
+                         + ", ".join(made) + ") — поруч з оригіналом")
+                try:
+                    os.startfile(os.path.dirname(p) or ".")
+                except Exception:
+                    pass
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        except Exception as e:
+            self.say("📷 Обкладинки не вийшло: " + str(e)[:200])
+        finally:
+            self.q.put(None)
+
     def pick_fl_first(self):
         """🎬 v38: перший кадр переходу (WAN 2.2)."""
         p = filedialog.askopenfilename(filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp")])
@@ -7844,14 +8087,54 @@ class App:
             return "🧠 Ollama"
 
     def _chat_pick_switch(self, val):
-        """💬 v46: перемкнув джерело у шапці чату — мітка і статус одразу."""
+        """💬 v46/v49: перемкнув джерело у шапці чату — мітка, статус і
+        СПИСОК МОДЕЛЕЙ цього джерела одразу (перемикач 🧠 Модель)."""
         try:
             self.chat_src_lbl.configure(text="Джерело думання: "
                                        + self._chat_source())
         except Exception:
             pass
+        self._chat_models_refresh(val)  # 🧠 v49: моделі обраного джерела
         if val and val != "🔄 Як в картці":
             self.say("💬 Чат: джерело — " + val)
+
+    def _chat_models_refresh(self, val):
+        """🧠 v49: перемикач моделей у чаті — список моделей обраного
+        джерела (Claude-трійка, gpt-oss/GPT, Gemini, GLM, Qwen, Mistral).
+        «🤖 Як у картці» — модель бере з меню картки Асистента.
+        Список не зібрався — лишається як було (fail-open)."""
+        try:
+            rev = self.CHAT_PRETTY_REV
+            v = val or ""
+            vals = ["🤖 Як у картці"]
+            if "Claude онлайн" in v:
+                vals += FREEKEY_MODELS.get("puter", []) \
+                    + FREEKEY_MODELS.get("anthropic", [])
+            elif "ChatGPT онлайн" in v:
+                vals += FREEKEY_MODELS.get("groq", []) \
+                    + ["kilo-auto/free", "gpt-5.5", "gpt-oss-20b"]
+            elif "Gemini онлайн" in v:
+                vals += FREEKEY_MODELS.get("gemini", []) \
+                    + ["google/gemini-2.0-flash-exp:free"]
+            elif "Mistral онлайн" in v:
+                vals += FREEKEY_MODELS.get("mistral", [])
+            elif v in rev and rev[v] in FREEKEY_MODELS:
+                vals += FREEKEY_MODELS[rev[v]]
+            elif "Kilo" in v:
+                vals += ["kilo-auto/free"]
+            elif "LLM7" in v:
+                vals += ["gpt-5.5"]
+            elif "Pollinations" in v:
+                vals += ["gpt-oss-20b"]
+            seen, out = set(), []
+            for x in vals:  # дублікатів моделей не показую
+                if x not in seen:
+                    seen.add(x)
+                    out.append(x)
+            self.chat_model_pick.configure(values=out)
+            self.chat_model_pick.set(out[0])
+        except Exception:
+            pass
 
     def _chat_theme_toggle(self):
         """🌙 v48: темна тема чату одним кліком: палітра — на інстанс
@@ -8291,13 +8574,22 @@ class App:
             dropdown_fg_color=self.CLAUDE_BAR, dropdown_text_color=self.CLAUDE_TEXT,
             dropdown_hover_color=self.CLAUDE_LINE,
             values=["🔄 Як в картці", "🤖 Claude онлайн", "💬 ChatGPT онлайн",
-                    "🇪🇺 Mistral онлайн"]
+                    "🤖 Gemini онлайн", "🇪🇺 Mistral онлайн"]
             + [self.CHAT_PRETTY[n] for n in FREEKEY_ORDER]
             + ["⚡ Kilo (без ключа)", "🌐 LLM7 (без ключа)",
                "🌐 Pollinations (без ключа)"],
             command=self._chat_pick_switch)
         self.chat_pick.set("🔄 Як в картці")
         self.chat_pick.pack(side="left", pady=(8, 2))
+        self.chat_model_pick = ctk.CTkOptionMenu(  # 🧠 v49: перемикач МОДЕЛЕЙ у чаті
+            head, width=230, height=28, font=self._f(11),
+            fg_color=self.CLAUDE_CARD, button_color=self.CLAUDE_LINE,
+            button_hover_color=self.CLAUDE_ACCENT_H, text_color=self.CLAUDE_TEXT,
+            dropdown_fg_color=self.CLAUDE_BAR, dropdown_text_color=self.CLAUDE_TEXT,
+            dropdown_hover_color=self.CLAUDE_LINE,
+            values=["🤖 Як у картці"])
+        self.chat_model_pick.set("🤖 Як у картці")
+        self.chat_model_pick.pack(side="left", padx=(8, 0), pady=(8, 2))
         ctk.CTkButton(head, text="＋ Нова розмова", height=30, corner_radius=15,
                       fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
                       text_color="#FFFFFF", font=self._f(12),
@@ -8317,6 +8609,11 @@ class App:
                       command=self._chat_theme_toggle).pack(side="right",
                                                             padx=(0, 8),
                                                             pady=(10, 4))
+        ctk.CTkButton(head, text="🔐 Google", height=30, corner_radius=15,  # 🔐 v49: авторизація Google — віко одразу
+                      fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._key_google).pack(side="right",
+                                                     padx=(0, 8), pady=(10, 4))
         ctk.CTkButton(head, text="🧠 Пам'ять", height=30, corner_radius=15,
                       fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
@@ -8373,8 +8670,10 @@ class App:
                      "знайде свіже в мережі • 🔗 кинь URL у повідомлення — агент "
                      "прочитає сторінку • ✏️ під своїм повідомленням — "
                      "редагувати • Ctrl+K — нова розмова • 🖱 ПКМ — як у всіх "
-                     "програмах • 🎯 джерело думання — меню у шапці • 🌙 — тема "
-                     "• ⚡ у мітці під час стріму — швидкість, симв/с",
+                     "програмах • 🎯 джерело думання — меню у шапці • 🧠 Модель "
+                     "поруч — перемикач моделей джерела • 🔐 Google — одразу "
+                     "віко входу і ключ Gemini • 🌙 — тема • ⏳ нотами видно, "
+                     "який шлюз мовчить • ⚡ у мітці під час стріму — швидкість, симв/с",
                      font=self._f(10), text_color=self.CLAUDE_MUTED,
                      anchor="w", wraplength=560).pack(fill="x", padx=16,
                                                      pady=(0, 6))
@@ -8753,6 +9052,17 @@ class App:
             model = (self.ollama_model.get() or "").strip()
         except Exception:
             pass
+        try:  # 🧠 v49: модель з перемикача у шапці чату (тільки для LLM-шляхів)
+            _mp = (self.chat_model_pick.get() or "")
+            if _mp and _mp != "🤖 Як у картці" \
+                    and (prov == "auto" or prov == "freekey"
+                         or str(prov).startswith("chat:")):
+                model = _mp
+        except Exception:
+            pass  # перемикача нема/джерело карткове — модель з картки (fail-open)
+
+        def _note(s):  # ⏳ v49: драбина показує, ЯКИЙ шлюз мовчить
+            self.q.put(("chat_stream", s + "\n"))
         system = self._chat_system()
         history = self._chat_history_for_llm()
         try:  # 🔗 v48: URL у повідомленні — агент читає сторінки у фоні
@@ -8796,24 +9106,42 @@ class App:
                           history=history,
                           on_delta=lambda d: self.q.put(("chat_stream", d)),
                           stop=lambda: getattr(self, "_chat_cancel", False),
-                          timeout=180)
-        try:  # 🤖 v48: справжній tool-use — модель просять мережу, агент дає дані (1 раунд)
+                          timeout=180, on_note=_note)
+        try:  # 🤖 v48/v49: справжній tool-use — модель просять мережу, агент дає дані (1 раунд)
             m = re.match(r"^\s*🔍ПОШУК:\s*(.+?)\s*$", (full or "").strip(), re.S)
             if m and not getattr(self, "_chat_cancel", False):
                 query = m.group(1).strip()[:300]
-                ctx, note = agent_web_context(query, timeout=15)
+                self.q.put(("chat_stream",
+                            "🔎 Агент шукає: " + query + "…\n\n"))
+                try:
+                    ctx, note = agent_web_context(query, timeout=15)
+                except Exception:
+                    ctx, note = "", ""
                 if ctx:
-                    self.q.put(("chat_stream",
-                                "🔎 Агент шукає: " + query + " — " + note
-                                + "…\n\n"))
-                    full = llm_stream(prov, url, model, text,
-                                      system=(system or "") + "\n\n" + ctx,
-                                      history=history,
-                                      on_delta=lambda d: self.q.put(
-                                          ("chat_stream", d)),
-                                      stop=lambda: getattr(self,
-                                                           "_chat_cancel", False),
-                                      timeout=180) or full
+                    self.q.put(("chat_stream", "🔎 " + note
+                                + " — відповідаю з ними…\n\n"))
+                    second = ""
+                    try:
+                        second = llm_stream(prov, url, model, text,
+                                           system=(system or "") + "\n\n" + ctx,
+                                           history=history,
+                                           on_delta=lambda d: self.q.put(
+                                               ("chat_stream", d)),
+                                           stop=lambda: getattr(self,
+                                                                "_chat_cancel",
+                                                                False),
+                                           timeout=180, on_note=_note) or ""
+                    except Exception:
+                        second = ""
+                    if second:
+                        full = second
+                if (full or "").strip().startswith("🔍ПОШУК:"):
+                    # 🆕 v49: модель просила мережу, мережа мовчить — чесно
+                    # пояснюю, а не показую сирий «🔍ПОШУК: …» як відповідь
+                    full = ("🔎 Агент не зміг дістати свіжі дані з мережі "
+                            "(мережа мовчить або DuckDuckGo лімітує) — "
+                            "спробуй «🌐 Пошук» ще раз, перемкни джерело у "
+                            "шапці або питай без свіжих даних.")
         except Exception:
             pass  # раунд агента впав — лишається перша відповідь (fail-open)
         try:  # 💾 v48: зберегти у кеш — наступне таке саме питання миттєве
@@ -9175,17 +9503,24 @@ class App:
         self.say("🌐 Відкрив Chrome: отримай ключ " + name + " і встав у вікно")
 
     def _key_google(self):
-        """🔑 v44: авторизація через Google — сторінка Google AI Studio
-        (Gemini) у Chrome: увійди своїм Google-акаунтом → Create API key →
-        встав ключ у вікно → «Запам'ятати назавжди» — авторизація
-        запам'ятається у папці програми назавжди."""
+        """🔑 v44/v49: авторизація через Google — ОДРАЗУ віко входу Google
+        (Chrome), після входу — сторінка ключа Gemini: Create API key →
+        встав ключ у вікно → «Запам'ятати назавжди» — і «🤖 Gemini онлайн»
+        у чаті заговорить. (Вхід Google вимагає справжнього браузера —
+        reader-режим свого браузера не проводить логін.)"""
         try:
             self._key_eng.set(self.CHAT_PRETTY.get("gemini", "🤖 Google AI Studio"))
         except Exception:
             pass
-        self._key_pick()
-        open_in_chrome(KEY_SIGNUP.get("gemini"))
-        self.say("🔑 Google AI Studio: увійди акаунтом Google → Create API key → встав тут")
+        try:
+            if getattr(self, "_key_win", None) is not None \
+                    and self._key_win.winfo_exists():
+                self._key_win.lift()
+        except Exception:
+            pass
+        open_in_chrome("https://accounts.google.com/ServiceLogin?continue="
+                       "https%3A%2F%2Faistudio.google.com%2Fapikey")
+        self.say("🔑 Google: увійди → Create API key → встав у вікно ключів → 💾 Запам'ятати")
 
     def _key_save(self):
         """💾 v44: записати ключ у tools/freekeys.json — папка програми,
