@@ -140,6 +140,15 @@ v38: 🧠 нейро-ядро — сімка нейромереж на HF Spaces
 а ТВІЙ голос (зразок зберігається в tools/clone.json лише локально, як ключ
 Pixabay; клон не віддає міток слів — караоке-субтитри чесно відступають до
 звичайних; не вийшло — озвучка як раніше, усе fail-open, нуль грошей).
+v39: 🤖 Claude як мозок Асистента — чесний безкоштовний шлях: Puter
+(User-Pays): безкоштовний акаунт puter.com → dashboard#account →
+Create token → токен живе у tools/freekeys.json ЛИШЕ локально (як ключ
+Pixabay; у коді і репо — нуль ключів). На «🔑 Ключ» Асистент думає
+Claude Sonnet 5.5 (OpenAI-сумісний ендпоінт Puter; Haiku/Opus — у списку
+моделей). Вичерпав місячний безкоштовний ліміт Puter (402) або токен
+протух — чесно пишемо в журнал і падаємо на попередні плани (Groq /
+Kilo / Pollinations — fail-open). Пріоритет ключів: Puter → Groq →
+GitHub → Gemini; Whisper-субтитри Groq працюють окремо від вибору.
 """
 import array
 import asyncio
@@ -274,7 +283,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.38 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.39 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -294,6 +303,7 @@ HF_SPACES = {  # 🤝 v37: публічні HF Spaces — Gradio-API БЕЗ кл
 CLONE_FILE = os.path.join(TOOLS_DIR, "clone.json")  # 🗣 v38: зразок голосу і перемикач клону, лише локально
 # 🔑 v36: OpenAI-сумісні бази безкоштовних фрітір-ключів (усі — без картки; гроші — нуль)
 FREEKEY_ENGINES = {
+    "puter": {"url": "https://api.puter.com/puterai/openai/v1", "model": "anthropic/claude-sonnet-5-5"},  # 🤖 v39: Claude через безкоштовний Puter-токен
     "groq": {"url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
     "github": {"url": "https://models.github.ai/inference", "model": "openai/gpt-4o"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
@@ -569,7 +579,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v38"}
+            d = {"app": "Генератор відео v39"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -707,7 +717,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v38"}
+                "app": "Генератор відео v39"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2202,7 +2212,7 @@ def pollinations_chat(url, model, prompt, system=None, timeout=120):
 
 
 def load_freekeys():
-    """🔑 v36: безкоштовні фрітір-ключі (groq/github/gemini) з tools/freekeys.json —
+    """🔑 v36/v39: безкоштовні ключі (puter/groq/github/gemini) з tools/freekeys.json —
     файл лише на комп'ютері користувача, у код і GitHub не потрапляє (патерн Pixabay).
     Кривий або нема — порожній словник (fail-open, гроші — нуль)."""
     try:
@@ -2214,10 +2224,12 @@ def load_freekeys():
 
 
 def freekey_engine():
-    """🔑 v36: який безкоштовний ключ є у freekeys.json (пріоритет Groq → GitHub →
-    Gemini: у Groq ще й Whisper-субтитри). Нема жодного — None (fail-open)."""
+    """🔑 v36/v39: який безкоштовний ключ є у freekeys.json (пріоритет
+    Puter → Groq → GitHub → Gemini: 🤖 Puter-токен = Claude як мозок
+    Асистента; Groq окремо лишається для Whisper-субтитрів).
+    Нема жодного — None (fail-open)."""
     keys = load_freekeys()
-    for name in ("groq", "github", "gemini"):
+    for name in ("puter", "groq", "github", "gemini"):
         if len(str(keys.get(name) or "").strip()) >= 20:
             return name
     return None
@@ -2261,28 +2273,36 @@ def kilo_chat(url, model, prompt, system=None, timeout=120):
 
 
 def freekey_list_models(url, timeout=10):
-    """🔑 v36: список моделей безкоштовного ключа (OpenAI-сумісний GET /models,
-    Bearer). Нема ключа/помилка — порожній список (fail-open)."""
+    """🔑 v36/v39: список моделей безкоштовного ключа (OpenAI-сумісний GET /models,
+    Bearer). Нема ключа/помилка — порожній список (fail-open).
+    🤖 v39: Puter-токен → лишаю родину Claude (anthropic/*); ендпоінт не дав
+    списку — чесна трійка поточних Claude-моделей."""
     eng = freekey_engine()
     if not eng:
         return []
     conf = FREEKEY_ENGINES[eng]
+    claude3 = ["anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5",
+               "anthropic/claude-opus-5-5"]
     try:
         r = requests.get(conf["url"].rstrip("/") + "/models", timeout=timeout,
                          headers={"Authorization": "Bearer " +
                                   str(load_freekeys().get(eng) or "").strip()})
         if r.status_code != 200:
-            return []
+            return claude3 if eng == "puter" else []
         data = r.json().get("data") or []
-        return [str(m.get("id")) for m in data if m.get("id")][:30]
+        ids = [str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id")]
+        if eng == "puter":
+            ids = [i for i in ids if "anthropic/" in i] or claude3
+        return ids[:30]
     except Exception:
-        return []
+        return claude3 if eng == "puter" else []
 
 
-def freekey_chat(url, model, prompt, system=None, timeout=90):
-    """🔑 v36: один запит через безкоштовний фрітір-ключ (Groq / GitHub Models /
-    Gemini — OpenAI-сумісні, Bearer; модель підставляється своя для кожного).
-    Нема ключа/помилка/429 — "" (fail-open, гроші — нуль)."""
+def freekey_chat(url, model, prompt, system=None, timeout=120):
+    """🔑 v36/v39: один запит через безкоштовний ключ (🤖 Claude у Puter /
+    Groq / GitHub Models / Gemini — OpenAI-сумісні, Bearer; своя модель
+    для кожного). Нема ключа/помилка/429/402 — "" (fail-open, гроші — нуль;
+    402 у Puter = вичерпаний місячний безкоштовний ліміт — спробуй Groq/🌐)."""
     eng = freekey_engine()
     if not eng:
         return ""
@@ -4626,7 +4646,7 @@ class App:
                           side="left", fill="x", expand=True, padx=(4, 0))
 
         # 🧠 v29: Tier 2 — опційний локальний Ollama: сильніший розбір фраз і сценарії
-        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🌐 Онлайн (Pollinations) або ⚡ Kilo Code — безкоштовно, БЕЗ ключів (Kilo — ~200 зап/год, щільніше); 🔑 Ключ — безкоштовні Groq / GitHub Models / Gemini (файл freekeys.json, тільки локально, без картки); або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
+        ctk.CTkLabel(ac, text="🧠 AI-мозок Асистента: 🤖 Claude — безкоштовний Puter-токен (puter.com, без картки; файл freekeys.json, тільки локально); або 🌐 Онлайн (Pollinations) / ⚡ Kilo Code — безкоштовно, БЕЗ ключів; 🔑 або ключі Groq / GitHub Models / Gemini; або локальні Ollama / 9Router (api-free) — краще розбирає фрази, вміє писати сценарій",
                      font=self._f(11), text_color=self.MUTED, anchor="w",
                      wraplength=560).pack(fill="x", padx=16, pady=(8, 2))
         _oc = load_ollama_conf()
@@ -5417,7 +5437,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v38 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v39 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations і ⚡ Kilo Code — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6934,9 +6954,11 @@ class App:
         prov = self._llm_provider()
         if prov == "freekey" and not freekey_engine():
             self.ollama_status.configure(
-                text="🔑 Немає безкоштовного ключа — додай у freekeys.json (папка "
-                     "AppData/Local/VideoGenerator): {\"groq\": \"gsk_…\"} — console.groq.com, "
-                     "2 хвилини, без картки. Без ключа — «🌐 Онлайн».")
+                text="🔑 Немає ключа — додай у freekeys.json (папка "
+                     "AppData/Local/VideoGenerator). 🤖 Claude: безкоштовний акаунт "
+                     "puter.com → dashboard#account → Create token → {\"puter\": \"токен\"} "
+                     "(без картки); або Groq: {\"groq\": \"gsk_…\"} — console.groq.com, "
+                     "2 хвилини. Без ключа — «🌐 Онлайн».")
             return
         if not prov:
             prov = "ollama"
