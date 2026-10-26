@@ -157,6 +157,16 @@ v40: 🔄 «Авто» — драбина джерел, щоб Асистент 
 шлюз (api.llm7.io, Bearer "unused", ~20–30 зап/хв, без реєстрації;
 третя особа — без чутливих даних, моделі не офіційні). Гроші — нуль,
 ключі — лише локально, усе fail-open.
+v41: 💬 чат Асистента — дизайн і функціонал у стилі Claude: окреме вікно
+з кремовою палітрою claude (ivory #FAF9F5, теракота #D97757), бульбашка
+юзера праворуч, текст асистента зліва з кнопками 📋 Копіювати / 🔁 Ще
+раз; багатохідна розмова з пам'яттю (history у всіх джерелах, включно
+з драбиною «Авто»), ефект друку відповіді, ⏹ Стоп, чіпси-підказки на
+старті, історія в tools/chat.json ЛИШЕ локально (як ключ Pixabay);
+⚙️ «у поля генератора» — місток з розмови в налаштування відео.
+Джерело думання чату — що обрано в картці Асистента (Claude/Kilo/
+LLM7/драбина — без ключів). Кожен запит — у llm_trace.jsonl, усе
+fail-open, гроші — нуль.
 """
 import array
 import asyncio
@@ -291,7 +301,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.40 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.41 (https://github.com/khomyak75roman-dotcom/video-generator)"
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -319,6 +329,7 @@ FREEKEY_ENGINES = {
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
 }
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
+CHAT_FILE = os.path.join(TOOLS_DIR, "chat.json")  # 💬 v41: історія чату Асистента, лише локально
 MIX_CROSSFADE = 7.0   # секунди перехресного затухання між треками міксу
 # v17 🖼: Pinterest — куди скачуються обрані зображення пошуку
 # v18 🖼: обрані фото пошуку (Openverse / Pixabay / Pinterest) скачуються сюди
@@ -589,7 +600,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v40"}
+            d = {"app": "Генератор відео v41"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -727,7 +738,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v40"}
+                "app": "Генератор відео v41"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2059,13 +2070,13 @@ def ollama_list_models(url, timeout=8):
         return []
 
 
-def ollama_chat(url, model, prompt, system=None, timeout=90):
+def ollama_chat(url, model, prompt, system=None, timeout=90, history=None):  # 💬 v41: history — діалог
     """🧠 v29: один запит до локального Ollama (/api/chat, stream=false).
     Повертає текст відповіді або "" — нема сервера/таймаут/помилка (fail-open)."""
     try:
         body = {"model": model, "stream": False,
                 "messages": ([{"role": "system", "content": system}] if system else [])
-                + [{"role": "user", "content": prompt}]}
+                + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41: діалог
         r = requests.post((url or "").rstrip("/") + "/api/chat", json=body,
                           timeout=timeout)
         if r.status_code != 200:
@@ -2148,13 +2159,13 @@ def router_list_models(url, timeout=8):
         return []
 
 
-def router_chat(url, model, prompt, system=None, timeout=90):
+def router_chat(url, model, prompt, system=None, timeout=90, history=None):
     """🌐 v31: 9Router — один запит /v1/chat/completions (OpenAI-формат).
     Повертає текст відповіді або "" — нема роутера/таймаут/помилка (fail-open)."""
     try:
         body = {"model": model,
                 "messages": ([{"role": "system", "content": system}] if system else [])
-                + [{"role": "user", "content": prompt}]}
+                + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
         r = requests.post((url or "").rstrip("/") + "/v1/chat/completions",
                           json=body, timeout=timeout)
         if r.status_code != 200:
@@ -2190,14 +2201,14 @@ def pollinations_list_models(url, timeout=8):
         return ["gpt-oss-20b"]
 
 
-def pollinations_chat(url, model, prompt, system=None, timeout=120):
+def pollinations_chat(url, model, prompt, system=None, timeout=120, history=None):
     """🌐 v35: один запит до Pollinations — POST /openai (OpenAI-формат, БЕЗ ключа).
     Не вдався (429/402 — анонімний ліміт, ~1 запит/15 с) — GET-фолбек:
     /<промпт>?model=…&system=… . Повертає текст або "" (fail-open, нуль ключів)."""
     base = (url or POLLINATIONS_URL).rstrip("/")
     body = {"model": (model or "gpt-oss-20b").strip() or "gpt-oss-20b",
             "messages": ([{"role": "system", "content": system}] if system else [])
-            + [{"role": "user", "content": prompt}]}
+            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
     try:
         r = requests.post(base + "/openai", json=body, timeout=timeout,
                           headers={"User-Agent": UA_STRING})
@@ -2209,7 +2220,8 @@ def pollinations_chat(url, model, prompt, system=None, timeout=120):
     except Exception:
         pass
     try:  # GET-фолбек: промпт прямо в URL (той самий безключовий сервіс)
-        q = (base + "/" + quote_plus((prompt or "")[:1500])
+        p_full = chat_history_prompt(history, prompt) if history else prompt  # 💬 v41
+        q = (base + "/" + quote_plus((p_full or "")[:1500])
              + "?model=" + quote_plus((model or "gpt-oss-20b").strip() or "gpt-oss-20b"))
         if system:
             q += "&system=" + quote_plus(system[:1500])
@@ -2264,13 +2276,13 @@ def kilo_list_models(url, timeout=10):
         return ["kilo-auto/free"]
 
 
-def kilo_chat(url, model, prompt, system=None, timeout=120):
+def kilo_chat(url, model, prompt, system=None, timeout=120, history=None):
     """⚡ v36: один запит до Kilo Code БЕЗ ключа (POST /chat/completions,
     OpenAI-формат; ~200 зап/год — у рази щільніше за Pollinations).
     Не вдався (429 — вичерпали годинний пул) — "" (fail-open, нуль ключів)."""
     body = {"model": (model or "").strip() or "kilo-auto/free",
             "messages": ([{"role": "system", "content": system}] if system else [])
-            + [{"role": "user", "content": prompt}]}
+            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
     try:
         r = requests.post((url or KILO_URL).rstrip("/") + "/chat/completions",
                           json=body, timeout=timeout, headers={"User-Agent": UA_STRING})
@@ -2315,7 +2327,7 @@ def freekey_list_models(url, timeout=10):
         return claude3
 
 
-def freekey_chat(url, model, prompt, system=None, timeout=120):
+def freekey_chat(url, model, prompt, system=None, timeout=120, history=None):
     """🔑 v36/v39: один запит через безкоштовний ключ (🤖 Claude у Puter /
     Groq / GitHub Models / Gemini — OpenAI-сумісні, Bearer; своя модель
     для кожного). Нема ключа/помилка/429/402 — "" (fail-open, гроші — нуль;
@@ -2329,7 +2341,7 @@ def freekey_chat(url, model, prompt, system=None, timeout=120):
         m = conf["model"]
     body = {"model": m,
             "messages": ([{"role": "system", "content": system}] if system else [])
-            + [{"role": "user", "content": prompt}]}
+            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
     try:
         r = requests.post(conf["url"].rstrip("/") + "/chat/completions",
                           json=body, timeout=timeout,
@@ -2359,12 +2371,12 @@ def llm7_list_models(url, timeout=10):
         return []
 
 
-def llm7_chat(url, model, prompt, system=None, timeout=120):
+def llm7_chat(url, model, prompt, system=None, timeout=120, history=None):
     """🌐 v40: один запит до LLM7 БЕЗ реєстрації (Bearer "unused"). Не вдався
     (429/модель зникла/шлюз лежить) — "" (fail-open, нуль ключів)."""
     body = {"model": (model or "").strip() or "gpt-5.5",
             "messages": ([{"role": "system", "content": system}] if system else [])
-            + [{"role": "user", "content": prompt}]}
+            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
     try:
         r = requests.post((url or LLM7_URL).rstrip("/") + "/chat/completions",
                           json=body, timeout=timeout,
@@ -2378,13 +2390,13 @@ def llm7_chat(url, model, prompt, system=None, timeout=120):
         return ""
 
 
-def _oai_chat(url, key, model, prompt, system=None, timeout=120):
+def _oai_chat(url, key, model, prompt, system=None, timeout=120, history=None):
     """🔑 v40: один OpenAI-сумісний запит з Bearer-ключем (ступінь драбини
     «Авто»: Puter/Anthropic/Groq/GitHub/Gemini). Помилка/429/402 — ""
     (fail-open)."""
     body = {"model": (model or "").strip(),
             "messages": ([{"role": "system", "content": system}] if system else [])
-            + [{"role": "user", "content": prompt}]}
+            + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
     try:
         r = requests.post((url or "").rstrip("/") + "/chat/completions", json=body,
                           timeout=timeout,
@@ -2419,7 +2431,24 @@ def auto_chain_steps():
     return steps
 
 
-def auto_llm_chat(prompt, system=None, timeout=120):
+def chat_history_prompt(history, last):
+    """💬 v41: історія діалогу → текстовий промпт (для GET-фолбеку Pollinations:
+    у URL messages не вмістити). Формат — простий діалог, щоб модель тримала
+    контекст розмови. Порожня історія — останнє повідомлення як є."""
+    if not history:
+        return last
+    lines = []
+    for m in (history or [])[-12:]:
+        if not isinstance(m, dict) or not m.get("content"):
+            continue
+        who = "Юзер" if m.get("role") == "user" else "Асистент"
+        lines.append(who + ": " + str(m["content"])[:1000])
+    lines.append("Юзер: " + (last or ""))
+    return ("Це діалог користувача з Асистентом. Відповісти ЛИШЕ на останнє "
+            "повідомлення юзера, пам'ятаючи попередні відповіді:\n" + "\n".join(lines))
+
+
+def auto_llm_chat(prompt, system=None, timeout=120, history=None):
     """🔄 v40: «Авто» — зграя джерел: пробує по драбині, поки хтось не
     відповість змістом. Вичерпаний ліміт (402/429) або лежачий шлюз —
     чесно пропускаю, іду далі (кожен ступінь у llm_trace). Дефолтних
@@ -2430,16 +2459,17 @@ def auto_llm_chat(prompt, system=None, timeout=120):
         try:
             if st["kind"] == "kilo":
                 txt = kilo_chat(st["url"], st["model"], prompt, system=system,
-                               timeout=step_t)
+                               timeout=step_t, history=history)
             elif st["kind"] == "llm7":
                 txt = llm7_chat(st["url"], st["model"], prompt, system=system,
-                                timeout=step_t)
+                                timeout=step_t, history=history)
             elif st["kind"] == "pollinations":
-                txt = pollinations_chat(st["url"], st["model"], prompt, system=system,
-                                        timeout=step_t)
+                txt = pollinations_chat(st["url"], st["model"], prompt,
+                                        system=system, timeout=step_t,
+                                        history=history)
             else:
                 txt = _oai_chat(st["url"], st["key"], st["model"], prompt,
-                               system=system, timeout=step_t)
+                               system=system, timeout=step_t, history=history)
         except Exception:
             txt = ""
         llm_trace("auto", st["label"], st["model"], t0, bool(txt), len(txt or ""))
@@ -2766,21 +2796,29 @@ def llm_list_models(provider, url, timeout=8):
     return ollama_list_models(url, timeout)
 
 
-def llm_chat(provider, url, model, prompt, system=None, timeout=90):
+def llm_chat(provider, url, model, prompt, system=None, timeout=90, history=None):
     """🌐 v31/v35/v36/v40: один запит за провайдером: Ollama, 9Router,
     Pollinations, Kilo Code, безкоштовний ключ (Claude/Groq/GitHub/Gemini)
-    або 🔄 «Авто» — драбина всіх джерел (fail-open на кожному ступені)."""
+    або 🔄 «Авто» — драбина всіх джерел (fail-open на кожному ступені).
+    💬 v41: history — список {"role","content"} попередніх реплік діалогу
+    (чат Асистента): моделі бачать усю розмову, а не лише останню фразу."""
     if provider == "auto":
-        return auto_llm_chat(prompt, system=system, timeout=timeout)
+        return auto_llm_chat(prompt, system=system, timeout=timeout,
+                             history=history)
     if provider == "9router":
-        return router_chat(url, model, prompt, system=system, timeout=timeout)
+        return router_chat(url, model, prompt, system=system, timeout=timeout,
+                          history=history)
     if provider == "pollinations":
-        return pollinations_chat(url, model, prompt, system=system, timeout=timeout)
+        return pollinations_chat(url, model, prompt, system=system,
+                                 timeout=timeout, history=history)
     if provider == "kilo":
-        return kilo_chat(url, model, prompt, system=system, timeout=timeout)
+        return kilo_chat(url, model, prompt, system=system, timeout=timeout,
+                         history=history)
     if provider == "freekey":
-        return freekey_chat(url, model, prompt, system=system, timeout=timeout)
-    return ollama_chat(url, model, prompt, system=system, timeout=timeout)
+        return freekey_chat(url, model, prompt, system=system, timeout=timeout,
+                           history=history)
+    return ollama_chat(url, model, prompt, system=system, timeout=timeout,
+                       history=history)
 
 
 def llm_trace(kind, provider, model, t0, ok, chars):
@@ -4547,6 +4585,13 @@ class App:
     GREEN = "#10B981"     # готово
     MUTED = "#8E8E9C"     # приглушений текст
     SEP = "#2A2A38"       # розділювачі/рамки
+    CLAUDE_BG = "#FAF9F5"      # 💬 v41: чат — крем claude (ivory)
+    CLAUDE_CARD = "#F0EEE6"    # бульбашки і панелі чату
+    CLAUDE_ACCENT = "#D97757"  # теракота claude
+    CLAUDE_ACCENT_H = "#C15F3C"
+    CLAUDE_TEXT = "#141413"    # текст чату
+    CLAUDE_MUTED = "#87867F"   # приглушений текст чату
+    CLAUDE_LINE = "#E8E6DC"    # рамки чату
     GEN_BASE = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     STEPS = ("📝 Текст", "🎙 Озвучка", "💬 Субтитри", "🎬 Фон", "⚙️ Рендер")
     STEP_KEYS = (
@@ -4766,6 +4811,10 @@ class App:
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(13, "bold"),
                       command=lambda: self.paste_into(self.agent_entry)).pack(
                           side="left", fill="x", expand=True, padx=(0, 4))
+        ctk.CTkButton(abtn, text="💬 Чат", width=112, height=36, corner_radius=18,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(13, "bold"),
+                      command=self.open_chat_window).pack(side="left", padx=(4, 4))
         ctk.CTkButton(abtn, text="🤖  Виконати фразу", height=36, corner_radius=18,
                       font=self._f(13, "bold"), command=self._agent_send).pack(
                           side="left", fill="x", expand=True, padx=(4, 0))
@@ -5564,7 +5613,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v40 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен; 🔄 Авто — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v41 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі Groq/GitHub/Gemini і 🤖 Claude через Puter-токен; 🔄 Авто — драбина всіх джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — багатохідна розмова з пам'яттю, історія збережена лише локально, кнопки Копіювати/Ще раз/⏹ Стоп і ефект друку, 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -6910,6 +6959,8 @@ class App:
                     self._agent_llm_done(msg[1])
                 elif kind == "ollama_check":  # 🧠 v29: перевірка Ollama готова
                     self._ollama_check_done(msg[1])
+                elif kind == "chat_reply":  # 💬 v41: відповідь чату Асистента
+                    self._chat_reply(msg[1])
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -7044,6 +7095,398 @@ class App:
         self._agent_apply(p)
         self.say("🧠 AI-модель підказала{} — перевір поля й пиши «давай»".format(
             " і написала сценарій" if sc else ""))
+
+    # 💬 v41: чат Асистента у стилі Claude — окреме вікно-розмова (дизайн:
+    # крем claude ivory, теракотовий акцент, бульбашка юзера праворуч, текст
+    # асистента зліва; функціонал: багатохідна розмова з пам'яттю, збережена
+    # історія у tools/chat.json (лише локально), кнопки Копіювати / Ще раз,
+    # ⏹ Стоп, ефект друку, чіпси-підказки; джерело — що обрано в картці).
+
+    CHAT_PRETTY = {"puter": "🤖 Claude (Puter)", "anthropic": "🤖 Claude (Anthropic)",
+                   "groq": "🔑 Groq", "github": "🔑 GitHub", "gemini": "🔑 Gemini",
+                   "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
+                   "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
+                   "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
+    CHAT_CHIPS = ("Налаштуй Shorts про космос, голосом Поліни, з караоке",
+                  "Напиши сценарій: коротка історія штучного інтелекту",
+                  "Що ти вмієш і які у тебе джерела думання?")
+
+    def _chat_source(self):
+        """💬 v41: гарна назва обраного джерела для шапки і міток чату."""
+        try:
+            p = self._llm_provider()
+            if p == "freekey":
+                eng = freekey_engine()
+                if eng:
+                    return self.CHAT_PRETTY.get(eng, "🔑 Ключ")
+            return self.CHAT_PRETTY.get(p, "🧠 Ollama")
+        except Exception:
+            return "🧠 Ollama"
+
+    def _chat_system(self):
+        """💬 v41: системний промпт чату — характер і завдання Асистента."""
+        s = ("Ти — Асистент «Генератора відео» (український десктопний генератор "
+             "Shorts і відео: озвучка, субтитри, фон з YouTube чи фото, рендер). "
+             "Відповідай українською, тепло і стисло, як Claude: конкретика, без "
+             "води, приклади. Якщо просять налаштувати генерацію — дай ОДНУ готову "
+             "фразу для поля Асистента у головному вікні (наприклад: «Shorts про "
+             "космос, голос Поліна, караоке»). Користувач може натиснути «⚙️ у поля» — "
+             "твоя порада стане командою генератору.")
+        rules = project_rules()  # 📏 v32: правила проєкту — обов'язкові для моделі
+        if rules:
+            s += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
+        return s
+
+    def _chat_history_for_llm(self):
+        """💬 v41: останні репліки розмови у форматі messages (контекст чату)."""
+        out = []
+        for m in (getattr(self, "chat_messages", None) or [])[-12:]:
+            if m.get("role") in ("user", "assistant") and m.get("text"):
+                out.append({"role": m["role"], "content": str(m["text"])[:1200]})
+        return out
+
+    def _chat_load(self):
+        """💬 v41: історія чату з tools/chat.json — лише локально (як ключ
+        Pixabay); нема/кривий файл — порожній список (fail-open)."""
+        try:
+            with open(CHAT_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            msgs = d.get("messages") if isinstance(d, dict) else d
+            if isinstance(msgs, list):
+                return [{"role": m.get("role"), "text": str(m.get("text") or "")[:4000],
+                         "src": m.get("src") or ""}
+                        for m in msgs if isinstance(m, dict)
+                        and m.get("role") in ("user", "assistant")][-60:]
+        except Exception:
+            pass
+        return []
+
+    def _chat_save(self):
+        """💬 v41: зберегти історію чату (останні 60 реплік). Не вийшло —
+        тихо пропускаю: чат працює і без збереження (fail-open)."""
+        try:
+            os.makedirs(TOOLS_DIR, exist_ok=True)
+            with open(CHAT_FILE, "w", encoding="utf-8") as f:
+                json.dump({"messages": (getattr(self, "chat_messages", None) or [])[-60:]},
+                          f, ensure_ascii=False, indent=1)
+        except Exception:
+            pass
+
+    def open_chat_window(self):
+        """💬 v41: вікно чату — дизайн і функціонал у стилі Claude: крем-фон,
+        бульбашки, багатохідна розмова, ⏹ Стоп, ефект друку відповіді."""
+        if getattr(self, "chat_win", None) is not None:
+            try:
+                if self.chat_win.winfo_exists():
+                    self.chat_win.focus_set()
+                    return
+            except Exception:
+                pass
+        self._chat_busy = False
+        self._chat_cancel = False
+        self.chat_messages = self._chat_load()
+        win = ctk.CTkToplevel(self.root)
+        win.title("✳ Асистент — чат")
+        win.geometry("780x840")
+        win.attributes("-topmost", True)
+        win.after(400, lambda: win.attributes("-topmost", False))
+        try:
+            win.grab_set()
+        except Exception:
+            pass
+        win.configure(fg_color=self.CLAUDE_BG)
+        self.chat_win = win
+
+        # шапка: ✳ мітка, джерело, «＋ Нова розмова» — як панель Claude
+        head = ctk.CTkFrame(win, fg_color=self.CLAUDE_CARD, corner_radius=0)
+        head.pack(fill="x", side="top")
+        ctk.CTkLabel(head, text="✳ Асистент", font=self._f(16, "bold"),
+                     text_color=self.CLAUDE_TEXT).pack(side="left", padx=(16, 8),
+                                                       pady=(12, 4))
+        self.chat_src_lbl = ctk.CTkLabel(
+            head, text="Джерело думання: " + self._chat_source(),
+            font=self._f(11), text_color=self.CLAUDE_MUTED)
+        self.chat_src_lbl.pack(side="left", padx=(0, 8), pady=(14, 4))
+        ctk.CTkButton(head, text="＋ Нова розмова", height=30, corner_radius=15,
+                      fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
+                      text_color="#FFFFFF", font=self._f(12),
+                      command=self._chat_new).pack(side="right", padx=(8, 16),
+                                                   pady=(10, 4))
+
+        # стрічка повідомлень
+        self.chat_scroll = ctk.CTkScrollableFrame(win, fg_color=self.CLAUDE_BG,
+                                                   corner_radius=0)
+        self.chat_scroll.pack(fill="both", expand=True, side="top", pady=(0, 0))
+
+        # панель введення — як у Claude: біла картка з рамкою, Enter — надіслати
+        bar = ctk.CTkFrame(win, fg_color="#FFFFFF", corner_radius=16,
+                          border_width=1, border_color=self.CLAUDE_LINE)
+        bar.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
+        self.chat_input = ctk.CTkTextbox(bar, height=92, font=self._f(13),
+                                         wrap="word", fg_color="transparent",
+                                         text_color=self.CLAUDE_TEXT)
+        self.chat_input.pack(fill="x", padx=10, pady=(10, 2))
+
+        def _chat_enter(e):
+            if e.state & 0x0001:  # Shift+Enter — новий рядок, як у Claude
+                return None
+            self._chat_send()
+            return "break"
+        self._bind_safe(self.chat_input, "<Return>", _chat_enter)
+        row = ctk.CTkFrame(bar, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(2, 10))
+        ctk.CTkButton(row, text="📥 Вставити", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=lambda: self.paste_into(self.chat_input)).pack(
+                          side="left")
+        ctk.CTkButton(row, text="⚙️ у поля генератора", height=34, corner_radius=17,
+                      fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._chat_to_fields).pack(side="left", padx=(8, 0))
+        self.chat_send_btn = ctk.CTkButton(
+            row, text="⬆", width=44, height=34, corner_radius=17,
+            fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
+            text_color="#FFFFFF", font=self._f(14, "bold"),
+            command=self._chat_send)
+        self.chat_send_btn.pack(side="right")
+        ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
+                     "⚙️ у поля — фраза з поля чату стає командою генератора",
+                     font=self._f(10), text_color=self.CLAUDE_MUTED,
+                     anchor="w").pack(fill="x", padx=16, pady=(0, 6))
+
+        if self.chat_messages:
+            for m in self.chat_messages:
+                self._chat_render(m["role"], m["text"], m.get("src") or "")
+        else:
+            self._chat_chips()
+
+    def _chat_chips(self):
+        """💬 v41: порожній чат — підказки-запити, як стартовий екран Claude."""
+        ctk.CTkLabel(self.chat_scroll, text="✳ Привіт! Я Асистент твого "
+                     "Генератора відео — питай що завгодно\nабо тапни підказку:",
+                     font=self._f(13), text_color=self.CLAUDE_TEXT,
+                     justify="left", anchor="w").pack(fill="x", padx=16,
+                                                     pady=(16, 8), anchor="w")
+        for chip in self.CHAT_CHIPS:
+            ctk.CTkButton(self.chat_scroll, text=chip, anchor="w", height=40,
+                          corner_radius=16, fg_color=self.CLAUDE_CARD,
+                          hover_color="#E8E5D9", text_color=self.CLAUDE_TEXT,
+                          font=self._f(12),
+                          command=lambda t=chip: self._chat_chip(t)).pack(
+                              fill="x", padx=16, pady=3)
+
+    def _chat_chip(self, text):
+        """💬 v41: тап на підказку — фраза летить у розмову одразу."""
+        self._chat_send_now(text)
+
+    def _chat_render(self, role, text, src=""):
+        """💬 v41: намалювати репліку: юзер — бульбашка праворуч; асистент —
+        текст зліва з міткою джерела і кнопками 📋 Копіювати / 🔁 Ще раз."""
+        wrap = 520
+        if role == "user":
+            b = ctk.CTkFrame(self.chat_scroll, fg_color=self.CLAUDE_CARD,
+                             corner_radius=18)
+            b.pack(anchor="e", fill="x", padx=(90, 16), pady=(8, 2))
+            ctk.CTkLabel(b, text=text, font=self._f(13), wraplength=wrap - 40,
+                         justify="left", text_color=self.CLAUDE_TEXT).pack(
+                             anchor="e", padx=14, pady=(8, 10))
+        else:
+            a = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+            a.pack(anchor="w", fill="x", padx=(16, 60), pady=(8, 2))
+            ctk.CTkLabel(a, text="✳ " + (src or "Асистент") + " • " +
+                         time.strftime("%H:%M"), font=self._f(10),
+                         text_color=self.CLAUDE_MUTED, anchor="w").pack(fill="x")
+            lbl = ctk.CTkLabel(a, text=text, font=self._f(13), wraplength=wrap,
+                               justify="left", text_color=self.CLAUDE_TEXT)
+            lbl.pack(fill="x", anchor="w", pady=(2, 4))
+            acts = ctk.CTkFrame(a, fg_color="transparent")
+            acts.pack(fill="x", anchor="w", pady=(0, 2))
+            ctk.CTkButton(acts, text="📋 Копіювати", height=26, corner_radius=13,
+                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                          text_color=self.CLAUDE_MUTED, font=self._f(10),
+                          command=lambda t=text: self._chat_copy(t)).pack(side="left")
+            ctk.CTkButton(acts, text="🔁 Ще раз", height=26, corner_radius=13,
+                          fg_color=self.CLAUDE_CARD, hover_color="#E8E5D9",
+                          text_color=self.CLAUDE_MUTED, font=self._f(10),
+                          command=self._chat_regen).pack(side="left", padx=(6, 0))
+        self.chat_scroll.after(30, lambda: self.chat_scroll._parent_canvas.yview_moveto(1.0))
+
+    def _chat_typing(self, on):
+        """💬 v41: індикатор «✳ Думаю…» + кнопка ⬆↔⏹ — стан чату під час запиту."""
+        try:
+            if on:
+                self._chat_typ_lbl = ctk.CTkLabel(
+                    self.chat_scroll, text="✳ Думаю…", font=self._f(12),
+                    text_color=self.CLAUDE_MUTED, anchor="w")
+                self._chat_typ_lbl.pack(fill="x", padx=16, pady=(6, 2), anchor="w")
+                self.chat_send_btn.configure(text="⏹", command=self._chat_stop)
+            else:
+                try:
+                    self._chat_typ_lbl.destroy()
+                except Exception:
+                    pass
+                self.chat_send_btn.configure(text="⬆", command=self._chat_send)
+        except Exception:
+            pass  # 💬 v41: вікно могло закритись — тихо (fail-open)
+
+    def _chat_send(self):
+        """💬 v41: Enter/⬆ — фраза з поля летить у розмову."""
+        text = self.chat_input.get("1.0", "end").strip()
+        if not text:
+            return
+        self.chat_input.delete("1.0", "end")
+        self._chat_send_now(text)
+
+    def _chat_send_now(self, text, add_user=True):
+        """💬 v41: репліка юзера → фоновий запит до обраного джерела з усією
+        історією розмови (Tk не блокується; відповідь — через чергу _poll)."""
+        if getattr(self, "_chat_busy", False):
+            self.say("💬 Чат: вже думаю над відповіддю — ⏹ Стоп або зачекай")
+            return
+        text = " ".join((text or "").split())
+        if not text:
+            return
+        if add_user:
+            self.chat_messages.append({"role": "user", "text": text, "src": ""})
+            self._chat_render("user", text)
+            self._chat_save()
+        self._chat_cancel = False
+        self._chat_busy = True
+        self._chat_typing(True)
+        threading.Thread(target=self._chat_thread, args=(text,), daemon=True).start()
+
+    def _chat_thread(self, text):
+        """💬 v41: запит чату у фоні: джерело з картки Асистента + історія
+        розмови (до 12 останніх реплік). Кожен запит — у llm_trace.jsonl."""
+        t0 = time.time()
+        prov = self._llm_provider()
+        url = model = ""
+        try:
+            url = self.ollama_url.get().strip()
+            model = (self.ollama_model.get() or "").strip()
+        except Exception:
+            pass
+        txt = llm_chat(prov, url, model, text, system=self._chat_system(),
+                       timeout=180, history=self._chat_history_for_llm())
+        llm_trace("chat", prov, model or "-", t0, bool(txt), len(txt or ""))
+        self.q.put(("chat_reply", txt))
+
+    def _chat_reply(self, txt):
+        """💬 v41: відповідь моделі (головний потік): репліка асистента +
+        ефект друку. Порожня — чесно кажу, що джерела мовчать (fail-open)."""
+        self._chat_busy = False
+        self._chat_typing(False)
+        if getattr(self, "chat_win", None) is None:
+            return
+        try:
+            if not self.chat_win.winfo_exists():
+                return
+        except Exception:
+            return
+        if self._chat_cancel:
+            return  # ⏹ Стоп — відповідь не потрібна
+        if not txt:
+            txt = ("Джерела мовчать (ліміт або нема мережі) — спробуй ще раз "
+                   "чи перемкни джерело в картці Асистента.")
+        self.chat_messages.append({"role": "assistant", "text": txt,
+                                   "src": self._chat_source()})
+        self._chat_save()
+        self._chat_render("assistant", "", self._chat_source())
+        lbl = self._last_assistant_label()
+        self._chat_type(lbl, txt, 0)
+
+    def _last_assistant_label(self):
+        """💬 v41: мітка тексту щойно намальованої відповіді (для ефекту друку)."""
+        try:
+            a = self.chat_scroll.winfo_children()[-1]
+            for w in reversed(a.winfo_children()):
+                if isinstance(w, ctk.CTkLabel) and w.cget("text") == "":
+                    return w
+        except Exception:
+            pass
+        return None
+
+    def _chat_type(self, lbl, text, i):
+        """💬 v41: ефект друку — відповіди з'являється плавно, як стрімінг
+        Claude (по 3 символи кожні 14 мс); ⏹ Стоп — показати все одразу."""
+        if lbl is None:
+            return
+        try:
+            if self._chat_cancel or i >= len(text):
+                lbl.configure(text=text)
+                return
+            lbl.configure(text=text[:i] + " ▌")
+            self.chat_win.after(14, lambda: self._chat_type(lbl, text, i + 3))
+        except Exception:
+            pass  # вікно закрили — тихо
+
+    def _chat_stop(self):
+        """💬 v41: ⏹ Стоп — не чекати відповіді/зупинити ефект друку."""
+        self._chat_cancel = True
+        self._chat_busy = False
+        self._chat_typing(False)
+        self.say("💬 Чат: зупинив")
+
+    def _chat_copy(self, text):
+        """💬 v41: 📋 Копіювати — відповідь асистента у буфер обміну."""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.say("💬 Чат: відповідь скопійовано")
+        except Exception:
+            self.say("💬 Чат: не вийшло скопіювати")
+
+    def _chat_regen(self):
+        """💬 v41: 🔁 Ще раз — перепитати останній запит юзера (як у Claude:
+        відповідь генерується заново, попередня прибирається)."""
+        if getattr(self, "_chat_busy", False):
+            return
+        msgs = getattr(self, "chat_messages", None) or []
+        last_user = None
+        for m in reversed(msgs):
+            if m["role"] == "user":
+                last_user = m["text"]
+                break
+        while msgs and msgs[-1]["role"] == "assistant":
+            msgs.pop()
+        if not last_user:
+            self.say("💬 Чат: нема запиту, який перепитати")
+            return
+        try:  # прибрати попередні бульбашки з екрана (перерисую історію)
+            for w in self.chat_scroll.winfo_children():
+                w.destroy()
+            for m in msgs:
+                self._chat_render(m["role"], m["text"], m.get("src") or "")
+        except Exception:
+            pass
+        self._chat_send_now(last_user, add_user=False)
+
+    def _chat_new(self):
+        """💬 v41: ＋ Нова розмова — чистий аркуш: історія і chat.json
+        прибираються, з'являються підказки (як «New chat» у Claude)."""
+        self.chat_messages = []
+        self._chat_cancel = True  # старий запит не цікавить
+        self._chat_busy = False
+        self._chat_save()
+        try:
+            for w in self.chat_scroll.winfo_children():
+                w.destroy()
+        except Exception:
+            pass
+        self._chat_chips()
+        self.say("💬 Чат: нова розмова")
+
+    def _chat_to_fields(self):
+        """💬 v41: ⚙️ у поля генератора — фраза з поля чату стає командою
+        головного вікна (мостина між розмовою і генерацією відео)."""
+        text = self.chat_input.get("1.0", "end").strip()
+        if not text:
+            self.say("💬 Чат: поле порожнє — напиши фразу для генератора")
+            return
+        self.agent_entry.delete("1.0", "end")
+        self.agent_entry.insert("1.0", text)
+        self._agent_send()
 
     def _llm_provider(self):
         """🌐 v31/v35/v36/v40: що обрано в картці Асистента: 'ollama', '9router',
