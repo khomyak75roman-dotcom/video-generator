@@ -248,6 +248,14 @@ GLM, Qwen, Mistral — список моделей обраного джерел
 КАРТИНКИ на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → переклад драбиною → 4 txt) і 📷
 ОБКЛАДИНКА ІНШОЮ МОВОЮ — та сама картинка, перекладений заголовок,
 4 нові обкладинки. Усе fail-open, гроші — нуль.
+v50: 🔎 ЛІКАР ПОШУКУ: DuckDuckGo блокував запити з «не-браузерним»
+User-Agent (VideoGenerator/1.49) — тихо мовчав 403/anomaly, тому агент
+і браузер не знаходили НІЧОГО. Тепер: WEB_UA — справжній браузерний
+заголовок для пошуку і сторінок; драбина рушіїв — DuckDuckGo (html →
+lite), а як лежить/лімітить — ЗАПАСНИЙ Mojeek (незалежний рушій, майже
+не блокує, без ключів); пошук у своєму браузері більше НЕ фетчить
+lite-сторінку — одразу драбина і список «№ — відкрию»; мітки кажуть,
+ЯКИЙ рушій знайшов (DuckDuckGo чи Mojeek). Пошук без ключів, як і був.
 """
 import array
 import asyncio
@@ -271,7 +279,7 @@ import zipfile
 from collections import Counter
 from datetime import datetime
 from tkinter import messagebox, filedialog, simpledialog
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 
 import customtkinter as ctk
 import edge_tts
@@ -383,7 +391,9 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.49 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/1.50 (https://github.com/khomyak75roman-dotcom/video-generator)"
+WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
@@ -758,7 +768,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v49"}
+            d = {"app": "Генератор відео v50"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -896,7 +906,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v49"}
+                "app": "Генератор відео v50"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2543,7 +2553,7 @@ def fetch_page_text(url, timeout=20, limit=48000):
     if hit and now - hit[1] < 600:
         return hit[0]
     r = requests.get(url, timeout=timeout,
-                     headers={"User-Agent": UA_STRING,
+                     headers={"User-Agent": WEB_UA,  # 🔎 v50: сайти пускають «браузер»
                               "Accept-Language": "uk,en;q=0.8"})
     if r.status_code != 200:
         raise Exception("HTTP " + str(r.status_code))
@@ -2571,10 +2581,67 @@ def fetch_page_text(url, timeout=20, limit=48000):
     return out
 
 
+def _uddg_unwrap(u):
+    """🔎 v50: DuckDuckGo ховає посилання у редірект uddg=… — розгортаю."""
+    try:
+        m = re.search(r"[?&]uddg=([^&\"']+)", u or "")
+        return unquote_plus(m.group(1)) if m else (u or "")
+    except Exception:
+        return u or ""
+
+
+def _ddg_parse(page, max_hits):
+    """🔎 v50: розмітка DuckDuckGo (html І lite) → [{title,url,snip}]."""
+    hits = []
+    links = (re.findall(r"<a[^>]*class=['\"]result-link['\"][^>]*href=['\"]"
+                       r"([^'\"]+)['\"][^>]*>(.*?)</a>", page, re.S)
+             or re.findall(r"<a[^>]*class=['\"]result__a['\"][^>]*href=['\"]"
+                           r"([^'\"]+)['\"][^>]*>(.*?)</a>", page, re.S))
+    snips = re.findall(r"class=['\"](?:result-snippet|result__snippet)"
+                       r"['\"][^>]*>(.*?)</(?:td|a|div|span)>", page, re.S)
+    for i, (u, t) in enumerate(links):
+        title = html.unescape(re.sub(r"<[^>]+>", " ", t)).strip()
+        url = _uddg_unwrap(html.unescape(u))
+        snip = ""
+        if i < len(snips):
+            snip = html.unescape(re.sub(r"<[^>]+>", " ",
+                                        snips[i])).strip()
+        if url.startswith("http") and title:
+            hits.append({"title": title, "url": url, "snip": snip,
+                         "engine": "DuckDuckGo"})
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
+def _mojeek_parse(page, max_hits):
+    """🔎 v50: розмітка Mojeek (запасний рушій) → [{title,url,snip}]."""
+    hits = []
+    links = re.findall(r"<a[^>]*class=['\"]ob['\"][^>]*href=['\"]"
+                       r"([^'\"]+)['\"][^>]*>(.*?)</a>", page, re.S)
+    snips = re.findall(r"<p[^>]*class=['\"]s['\"][^>]*>(.*?)</p>",
+                      page, re.S)
+    for i, (u, t) in enumerate(links):
+        title = html.unescape(re.sub(r"<[^>]+>", " ", t)).strip()
+        snip = ""
+        if i < len(snips):
+            snip = html.unescape(re.sub(r"<[^>]+>", " ",
+                                        snips[i])).strip()
+        if u.startswith("http") and title:
+            hits.append({"title": title, "url": u, "snip": snip,
+                         "engine": "Mojeek"})
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
 def ddg_search(query, timeout=15, max_hits=5):
-    """🔎 v47: DuckDuckGo Lite — ПОШУК БЕЗ КЛЮЧІВ (анонімний, ~1 с).
-    Повертає [{title, url, snip}] — заголовок, посилання, витяг.
-    Лежить/429/порожньо — [] (fail-open, гроші — нуль)."""
+    """🔎 v47/v50: ПОШУК БЕЗ КЛЮЧІВ — ДРАБИНА РУШІЇВ: спершу DuckDuckGo
+    (html → lite) зі справжнім браузерним UA (VideoGenerator вони
+    блокували — ось чому пошук не працював), а як DDG лежить/429 —
+    ЗАПАСНИЙ Mojeek (незалежний, майже не блокує). Повертає
+    [{title, url, snip, engine}] — заголовок, посилання, витяг, рушій;
+    нічого не знайшлось — [] (fail-open, гроші — нуль)."""
     q = (query or "").strip()
     if not q:
         return []
@@ -2583,29 +2650,35 @@ def ddg_search(query, timeout=15, max_hits=5):
     if hit and now - hit[1] < 600:
         return hit[0]
     hits = []
-    try:
-        r = requests.post("https://lite.duckduckgo.com/lite/", data={"q": q},
-                          timeout=timeout, headers={"User-Agent": UA_STRING})
+    try:  # 1) DuckDuckGo html — стабільна розмітка, браузерний UA
+        r = requests.get("https://html.duckduckgo.com/html/?q="
+                         + quote_plus(q), timeout=timeout,
+                         headers={"User-Agent": WEB_UA,
+                                  "Accept-Language": "uk,en;q=0.8"})
         if r.status_code == 200:
-            links = re.findall(
-                r"<a[^>]*class=['\"]result-link['\"][^>]*href=['\"]"
-                r"([^'\"]+)['\"][^>]*>(.*?)</a>", r.text, re.S)
-            snips = re.findall(
-                r"(?i)<td[^>]*class=['\"]result-snippet['\"][^>]*>(.*?)</td>",
-                r.text, re.S)
-            for i, (u, t) in enumerate(links):
-                title = html.unescape(re.sub(r"<[^>]+>", " ", t)).strip()
-                snip = ""
-                if i < len(snips):
-                    snip = html.unescape(re.sub(r"<[^>]+>", " ",
-                                                 snips[i])).strip()
-                if u.startswith("http") and title:
-                    hits.append({"title": title, "url": html.unescape(u),
-                                 "snip": snip})
-                if len(hits) >= max_hits:
-                    break
+            hits = _ddg_parse(r.text, max_hits)
     except Exception:
         hits = []
+    if not hits:  # 2) DuckDuckGo Lite — старий POST, раптом оживе
+        try:
+            r = requests.post("https://lite.duckduckgo.com/lite/",
+                              data={"q": q}, timeout=timeout,
+                              headers={"User-Agent": WEB_UA})
+            if r.status_code == 200:
+                hits = _ddg_parse(r.text, max_hits)
+        except Exception:
+            hits = []
+    if not hits:  # 3) Mojeek — запасний рушій, без ключів (не мовчимо)
+        try:
+            r = requests.get("https://www.mojeek.com/search?q="
+                             + quote_plus(q), timeout=timeout,
+                             headers={"User-Agent": WEB_UA,
+                                      "Accept-Language": "uk,en;q=0.8"})
+            if r.status_code == 200:
+                hits = _mojeek_parse(r.text, max_hits)
+        except Exception:
+            hits = []
+    hits = hits[:max_hits]
     PAGE_CACHE["ddg:" + q] = (hits, now)
     return hits
 
@@ -2642,7 +2715,9 @@ def agent_web_context(query, timeout=15):
             ctx += ("\n\nВитяг з " + hits[0]["url"] + ":\n" + page[:3000])
     except Exception:
         pass  # сторінка не далась — хітів і так вистачить (fail-open)
-    return ctx, "знайшов " + str(len(hits)) + " свіжих джерел у мережі"
+    eng = (hits[0].get("engine") if hits else "") or "мережі"
+    return ctx, ("знайшов " + str(len(hits)) + " свіжих джерел (" + eng
+                 + ", без ключів)")
 
 
 LLM_REPLY_CACHE = {}  # 💾 v48: ключ кешу → (відповідь, час) — те саме питання без повторної оплати
@@ -2663,7 +2738,7 @@ def llm_cache_key(provider, model, prompt, system, history):
 
 
 BROWSER_HOMES = (  # 🏠 v47: домашні сторінки власного браузера
-    ("🔎 DuckDuckGo", "https://lite.duckduckgo.com/lite/"),
+    ("🔎 Пошук (DDG → Mojeek)", "https://lite.duckduckgo.com/lite/"),
     ("🟣 GLM Z.AI", "https://z.ai/manage-apikey/apikey-list"),
     ("🤖 Google AI Studio", "https://aistudio.google.com/apikey"),
     ("🧭 OpenRouter", "https://openrouter.ai/settings/keys"),
@@ -6362,7 +6437,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v49 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 🔐 Google — кнопка у шапці чату: одразу віко входу Google → ключ Gemini; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео v50 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 🔐 Google — кнопка у шапці чату: одразу віко входу Google → ключ Gemini; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -8269,8 +8344,9 @@ class App:
         return ""
 
     def _brow_go(self, url=None, force=False, remember=True):
-        """🌐 v47: відкрити адресу/запит У ФОНІ (Tk не блокується, не тупить):
-        не адреса — пошук DuckDuckGo; № — результат пошуку; кеш 10 хв."""
+        """🌐 v47/v50: відкрити адресу/запит У ФОНІ (Tk не блокується):
+        не адреса — ДРАБИНА ПОШУКУ (DuckDuckGo, а як лежить — Mojeek);
+        № — результат пошуку; кеш 10 хв."""
         try:
             cur = self._brow_url.get().strip()
         except Exception:
@@ -8289,11 +8365,11 @@ class App:
                     self._brow_url.insert(0, target)
                 except Exception:
                     pass
-        if not target.startswith("http"):  # запит словами → DuckDuckGo
+        if not target.startswith("http"):  # запит словами → ДРАБИНА ПОШУКУ
             if "://" in target or "." in target.split(" ")[0]:
                 target = "https://" + target
             else:
-                target = "https://lite.duckduckgo.com/lite/?q=" + quote_plus(target)
+                target = "search:" + target  # 🔎 v50: без фетчу lite-сторінки
         if remember and target != self._brow_current():
             try:
                 self._brow_hist = self._brow_hist[:self._brow_pos + 1] + [target]
@@ -8301,46 +8377,58 @@ class App:
             except Exception:
                 pass
         try:
-            self._brow_status.configure(text="⏳ Завантажую " + target[:80] + "…")
+            self._brow_status.configure(
+                text=("⏳ Шукаю " + target[7:][:80] + "…"
+                      if target.startswith("search:")
+                      else "⏳ Завантажую " + target[:80] + "…"))
         except Exception:
             pass
 
         def job():
-            try:
-                text = fetch_page_text(target, timeout=20)
-                kind = "page"
-            except Exception as e:
-                text = ("⚠️ Сторінка не далась: " + str(e)[:120]
-                        + "\nСпробуй ще раз або «🌍 У Chrome» — можливо, "
-                          "сторінці потрібен JavaScript чи вхід.")
-                kind = "err"
-            try:
-                if kind == "page" and "lite.duckduckgo.com" in target:
-                    hits = ddg_search(
-                        (target.split("q=")[-1].replace("+", " ")
-                         if "q=" in target else ""), timeout=15)
-                    if hits:
-                        self._brow_results = hits
-                        text = "\n".join(
-                            "{}. {} — {}\n   {}".format(i, h["title"],
-                                                        h["url"], h["snip"])
-                            for i, h in enumerate(hits, 1))
-                        text = ("🔎 Знайшов " + str(len(hits))
-                                + " (без ключів). Введи номер — відкрию "
-                                  "результат:\n\n" + text)
-                        kind = "search"
-            except Exception:
-                pass
+            kind, text = "page", ""
+            if target.startswith("search:"):  # 🔎 v50: запит → драбина рушіїв
+                hits = ddg_search(target[7:], timeout=18)
+                if hits:
+                    self._brow_results = hits
+                    text = "\n".join(
+                        "{}. {} — {}\n   {}".format(i, h["title"], h["url"],
+                                                    h["snip"])
+                        for i, h in enumerate(hits, 1))
+                    text = ("🔎 Знайшов " + str(len(hits)) + " ("
+                            + (hits[0].get("engine") or "мережа")
+                            + ", без ключів). Введи номер — відкрию "
+                              "результат:\n\n" + text)
+                    kind = "search"
+                else:
+                    text = ("🔎 Пошуковики мовчать (DuckDuckGo і Mojeek).\n"
+                            "Спробуй інший запит, повтори за хвилину або "
+                            "«🌍 У Chrome» — справжній браузер.")
+                    kind = "err"
+            elif target.rstrip("/") == "https://lite.duckduckgo.com/lite":
+                text = ("💡 Напиши запит у полі вище і «➡ Йти» — пошук іде\n"
+                        "БЕЗ ключів: DuckDuckGo, а як лежить — запасний "
+                        "Mojeek.\nВведи номер результату — відкрию сторінку. "
+                        "Гарного дня! 🌞")
+            else:
+                try:
+                    text = fetch_page_text(target, timeout=20)
+                except Exception as e:
+                    text = ("⚠️ Сторінка не далась: " + str(e)[:120]
+                            + "\nСпробуй ще раз або «🌍 У Chrome» — можливо, "
+                              "сторінці потрібен JavaScript чи вхід.")
+                    kind = "err"
             self.q.put(("brow_page", (target, text, kind)))
         threading.Thread(target=job, daemon=True).start()
 
     def _brow_page_done(self, payload):
         """🌐 v47: сторінка допливла — малюю у вікні (черга _poll)."""
         url, text, kind = payload
-        status = ("✅ Готово: " + url[:90] + " • ПКМ — копіювати/виділити • "
-                  "⬅➡ — історія")
+        status = ("🔎 Результати: " + url[7:][:90]
+                  if url.startswith("search:")
+                  else "✅ Готово: " + url[:90]
+                  + " • ПКМ — копіювати/виділити • ⬅➡ — історія")
         if kind == "err":
-            status = "⚠️ Не завантажилось: " + url[:90]
+            status = "⚠️ Не вийшло: " + url[:90]
         self._brow_put(text, status)
 
     def _brow_back(self):
