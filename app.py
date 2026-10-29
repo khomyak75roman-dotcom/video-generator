@@ -256,6 +256,50 @@ lite), а як лежить/лімітить — ЗАПАСНИЙ Mojeek (нез
 не блокує, без ключів); пошук у своєму браузері більше НЕ фетчить
 lite-сторінку — одразу драбина і список «№ — відкрию»; мітки кажуть,
 ЯКИЙ рушій знайшов (DuckDuckGo чи Mojeek). Пошук без ключів, як і був.
+v51: 📦 ПАКЕТ ІЗ ЗАМІТОК — чотири фічі з беклоґу: 💾 ДИСК-КЕШ LLM
+(llm_cache.jsonl поруч із ключами) — відповіді переживають перезапуск
+програми: постав те саме питання після запуску — відповідь миттєва;
+📄 «Експорт» у шапці чату — розмова у читабельний txt (хто, джерело,
+текст, дата); 🎤 «Голос» у шапці чату — ПРОДИКТУЙ питання: мікрофон
+(dshow) → Whisper на Groq → текст у полі чату (без нових залежностей,
+ключ Groq той самий, що для авто-субтитрів); 🌐 «Перекласти субтитри»
+— будь-який .srt на будь-яку мову: LibreTranslate (без ключів), а як
+інстанси мовчать — драбина LLM; таймінги не чіпаю. Усе fail-open.
+v52: 🧹 БРАУЗЕР ПРИБРАНО (за запитом) — агент і «🔗 URL у чаті»
+залишились; 🚰 LLMFaucet — «сірий» чесний безключовий агрегатор
+(Bearer "free", селектори auto/auto:fast/auto:smart/auto:coding)
+ступенем у драбині «Авто» і окремим джерелом чату; 🐎 AI HORDE —
+краудсорс-сітка волонтерів (без реєстрації, до хвилини черги)
+останнім ступенем драбини: драбина «Авто» — 21 джерело; 🧩 COHRE —
+16-й безкоштовний шлюз з ключем (trial 1000 зап/міс, без картки);
+🧭 OpenRouter — СВІЖІ :free-моделі (Nemotron 3.5-lightning:free
+дефолт, gemma-4, dots-3, north-mini-code, inkling, flint); 🕵️
+АГЕНТ×2: чистий запит (agent_query_clean), дата в контексті,
+витяги ПЕРШИХ ДВОХ сторінок, tool-use до 2 раундів — після двох
+чесне пояснення. НЕ прикріплено і чому: gpt4free/OmniRoute/ТГ-пули —
+справді сірі, вірусні і вкрай нестабільні.
+2.0: 🎬 ГЕНЕРАТОР 2.0 — кардинальна переробка за підсумками реверс-
+інжинірингу 80+ репозиторіїв і 9 ТГ-каналів (архітектурна карта:
+ЗАПИТ → edge-tts/HF-озвучка → фон (YouTube/Openverse/Wikimedia/Pixabay/
+Pinterest/кеш-банк) → монтаж (xfade/beat-sync) → субтитри (libass
+фолбек drawtext) → оверлеї → QC → рендер (BT.709, апаратний кодек);
+АСИСТЕНТ → драбина 21 джерела + агент DDG→Mojeek ×2 раунди →
+стрімінг → кеш RAM+диск → чат Claude-стилю). Нове у 2.0: 🏷️ ВЕРХНІ
+ОВЕРЛЕЇ ffmpeg (плашка-заголовок, водяний знак, смуга прогресу —
+патерн kajisho5/claude-motion: моушн-графіка без After Effects);
+🛡️ QC+ — скан спалахів кадру і аудіо-попів (signalstats/volumedetect),
+КОНТАКТ-ШИТ (5×4 мініатюри у qc.txt поруч) і статистика яскравості;
+✂️ «Прибрати тишу з ГОТОВОГО відео» (auto-editor-молекула: silencedetect
+→ нарізка живих сегментів → зшивка); 🎙️ ДУБЛЯЖ ЗА СУБТИТРАМИ (.srt →
+edge-tts на рядок → atempo-фіт у таймінги → готова аудіодоріжка, а є
+відео з тим самим ім'ям — і готовий дубляж-ролик); 🧪 A/B-ЗАГОЛОВКИ
+(драбина LLM генерує 8 варіантів → оцінка хук-формулою → топ-3 у
+журнал); 🔑 РОТАЦІЯ КЛЮЧІВ (кілька ключів одного шлюзу через кому у
+freekeys.json — llm-apipool-патерн: 429/ліміт одного ключа ≠ стоп,
+програма бере наступний); 🎯 auto:smart у «Авто» (важке питання —
+Faucet сам підбирає розумнішу модель); 📋 EDL-ЕКСПОРТ (таймлайн
+компіляції → CMX3600, відкривається у DaVinci Resolve). Усі фічі
+fail-open, гроші — нуль, ключі — лише локально.
 """
 import array
 import asyncio
@@ -391,7 +435,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/1.50 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.0 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -429,10 +473,11 @@ FREEKEY_ENGINES = {
     "zai": {"url": "https://api.z.ai/api/paas/v4", "model": "glm-4.7-flash"},  # 🟣 v45: GLM (Z.AI міжнародний) — glm-4.7-flash (200K), 4.5-flash, 4.6v-flash — $0
     "siliconflow": {"url": "https://api.siliconflow.cn/v1", "model": "Qwen/Qwen3-8B"},  # 🌊 v45: SiliconFlow — фрітір 1000 зап/хв, Qwen3-8B безкоштовна
     "modelscope": {"url": "https://api-inference.modelscope.cn/v1", "model": "Qwen/Qwen3-8B"},  # 🟠 v45: ModelScope (Alibaba) — Qwen безкоштовно, ~2000 зап/день
+    "cohere": {"url": "https://api.cohere.ai/compatibility/v1", "model": "command-a-plus-05-2026"},  # 🧩 v52: Cohere — OpenAI-сумісний шар, trial 1000 зап/міс без картки
 }
 FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
                  "gemini", "openrouter", "nvidia", "sambanova", "huggingface",
-                 "zhipu", "zai", "siliconflow", "modelscope")  # 🪜 v43–v45: порядок драбини «Авто»
+                 "zhipu", "zai", "siliconflow", "modelscope", "cohere")  # 🪜 v43–v52: порядок драбини «Авто»
 # 🌐 v44: де взяти безкоштовний ключ — сторінка відкривається у Chrome
 KEY_SIGNUP = {
     "puter": "https://puter.com/dashboard#account",  # Create token
@@ -450,6 +495,7 @@ KEY_SIGNUP = {
     "zai": "https://z.ai/manage-apikey/apikey-list",  # 🟣 GLM (міжнародний)
     "siliconflow": "https://cloud.siliconflow.cn/account/ak",  # 🌊 SiliconFlow
     "modelscope": "https://modelscope.cn/my/myaccesstoken",  # 🟠 ModelScope
+    "cohere": "https://dashboard.cohere.com/api-keys",  # 🧩 v52: Cohere
 }
 # 🔑 v44: коротка інструкція для кожного шлюзу (показується у вікні ключів)
 KEY_HINTS = {
@@ -468,6 +514,7 @@ KEY_HINTS = {
     "zai": "🟣 GLM (Z.AI міжнародний): z.ai → API Keys → Create key — glm-4.7-flash (200K контекст!), glm-4.5-flash і glm-4.6v-flash — $0 за токен, без картки.",
     "siliconflow": "🌊 SiliconFlow: cloud.siliconflow.cn → API-ключі — безкоштовні моделі позначені «Free» (Qwen3-8B), ~1000 зап/хв у фрітірі.",
     "modelscope": "🟠 ModelScope (Alibaba): modelscope.cn → Access Tokens — токен без картки; Qwen3.5/Qwen3 — безкоштовно, ~2000 зап/день.",
+    "cohere": "🧩 Cohere: dashboard.cohere.com → API keys — trial-ключ: 1000 запитів/міс БЕЗ картки; модель command-a-plus-05-2026.",
 }
 # 🧠 v44: вибір моделей для кожного шлюзу (у т.ч. трійка Claude — як Sonnet/Haiku/Opus)
 FREEKEY_MODELS = {
@@ -479,10 +526,16 @@ FREEKEY_MODELS = {
                 "open-mistral-nemo", "magistral-small-latest"],
     "github": ["openai/gpt-4o", "openai/gpt-4o-mini", "microsoft/phi-4"],
     "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-    "openrouter": ["z-ai/glm-4.5-air:free", "z-ai/glm-5.2:free",
-                   "z-ai/glm-4.5-flash:free", "google/gemini-2.0-flash-exp:free",
-                   "deepseek/deepseek-chat-v3.1:free", "qwen/qwen3-235b-a22b:free",
-                   "meta-llama/llama-3.3-70b-instruct:free"],
+    "openrouter": ["nvidia/nemotron-3.5-lightning:free",  # 🧭 v52: СВІЖИЙ каталог :free (25.10) — старі gpt-oss/GLM:free зникли
+                   "nvidia/nemotron-3-ultra-550b-a55b:free",
+                   "nvidia/nemotron-3-super-120b-a12b:free",
+                   "google/gemma-4-31b-it:free",
+                   "google/gemma-4-26b-a4b-it:free",
+                   "dots-studio/dots-3-note-preview:free",
+                   "cohere/north-mini-code:free",
+                   "thinkingmachines/inkling:free",
+                   "recursive/flint-v1.0:free",
+                   "openrouter/free"],
     "nvidia": ["meta/llama-3.3-70b-instruct", "openai/gpt-oss-120b", "qwen/qwen3-235b-a22b-instruct"],
     "sambanova": ["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-8B-Instruct"],
     "huggingface": ["meta-llama/Llama-3.3-70B-Instruct", "openai/gpt-oss-120b"],
@@ -494,7 +547,13 @@ FREEKEY_MODELS = {
                     "Qwen/Qwen3-Coder-30B-A3B-Instruct"],
     "modelscope": ["Qwen/Qwen3-8B", "Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-27B",
                    "Qwen/Qwen2.5-7B-Instruct"],
+    "cohere": ["command-a-plus-05-2026"],
 }
+# 🧭 v52: дефолт OpenRouter — свіжа :free-модель (стара зникла з каталогу)
+FREEKEY_ENGINES["openrouter"]["model"] = "nvidia/nemotron-3.5-lightning:free"
+LLMFAUCET_URL = "https://api.llmfaucet.dev/v1"  # 🚰 v52: безключовий агрегатор (Pollinations+LLM7+OVH+AI Horde), Bearer "free"
+FAUCET_MODELS = ("auto", "auto:fast", "auto:smart", "auto:coding")  # 🚰 селектори Faucet
+HORDE_URL = "https://aihorde.net/api/v2"  # 🐎 v52: краудсорс-сітка волонтерів, анонімний apikey "0000000000"
 LLM_TRACE_FILE = os.path.join(TOOLS_DIR, "llm_trace.jsonl")  # 📝 v32: журнал запитів Tier 2, лише локально
 CHAT_FILE = os.path.join(TOOLS_DIR, "chat.json")  # 💬 v41: історія чату Асистента, лише локально
 MEMORY_FILE = os.path.join(TOOLS_DIR, "memory.json")  # 🧠 v42: пам'ять чату (факти про користувача), лише локально
@@ -768,7 +827,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео v50"}
+            d = {"app": "Генератор відео 2.0"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -899,6 +958,357 @@ def qc_report(workdir, say):
         pass  # 🛡️ v28: QC — лише діагностика, ніколи не ламає генерацію
 
 
+def qc_visual(workdir, say):
+    """🛡️ 2.0: QC+ — зріз ще глибше (патерни claude-motion QC-молекул):
+    КОНТАКТ-ШИТ (мініатюри всього ролика сіткою 5×4 — qc_contact_sheet.jpg),
+    СКАН СПЛАХІВ кадру (середня яскравість 2 рази/с; стрибок > 55 одиниць
+    між сусідніми зрізами — «моргання», помітиш ворога одразу), АУДІО-ПОПИ
+    (пікова гучність volumedetect) і статистика яскравості. Усе — у qc.txt.
+    Fail-open: жодне попередження не ламає генерацію."""
+    final = os.path.join(workdir, "final.mp4")
+    if not os.path.isfile(final):
+        return
+    try:
+        ff = ffmpeg_path()
+        dur = audio_duration(final)
+        # КОНТАКТ-ШИТ: до 20 кадрів рівномірно по ролику → сітка 5×4
+        sheet = os.path.join(workdir, "qc_contact_sheet.jpg")
+        try:
+            step = max(dur / 20.0, 0.5)
+            sel = "+".join("between(t,{:.2f},{:.2f})".format(
+                i * step, i * step + 0.04) for i in range(20))
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", final,
+                 "-vf", "select='{}',scale=320:-1,tile=5x4".format(sel),
+                 "-frames:v", "1", "-q:v", "4", sheet], cwd=workdir)
+        except Exception:
+            sheet = None
+        # Яскравість кадру 2 рази/с → спалахи (стрибок між сусідніми зрізами)
+        flashes, lows, highs, vals = 0, 0, 0, []
+        try:
+            pr = subprocess.run([ff, "-hide_banner", "-nostdin", "-i", final,
+                                 "-vf", "fps=2,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+                                 "-f", "null", "-"],
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="ignore", timeout=600)
+            for mm in re.findall(r"lavfi\.signalstats\.YAVG=([\d.]+)",
+                                 pr.stderr or ""):
+                try:
+                    vals.append(float(mm))
+                except ValueError:
+                    continue
+            for a, b in zip(vals, vals[1:]):
+                if abs(b - a) > 55:
+                    flashes += 1
+            if vals:
+                lows, highs = int(min(vals)), int(max(vals))
+        except Exception:
+            vals = []
+        # Аудіо-попи: пік гучності (максимум біля 0 dB — кліпінг/тріск)
+        peak = None
+        try:
+            pr2 = subprocess.run([ff, "-hide_banner", "-nostdin", "-i", final,
+                                  "-af", "volumedetect", "-f", "null", "-"],
+                                 capture_output=True, text=True,
+                                 encoding="utf-8", errors="ignore", timeout=600)
+            mp = re.search(r"max_volume:\s*(-?[\d.]+)\s*dB", pr2.stderr or "")
+            if mp:
+                peak = float(mp.group(1))
+        except Exception:
+            pass
+        try:
+            with open(os.path.join(workdir, "qc.txt"), "a", encoding="utf-8") as f:
+                f.write("\nQC+ (2.0):\nконтакт-шит: {}\nспалахів кадру: {}"
+                        "\nяскравість: мін {} / макс {}\nпік гучності: {} dB\n".format(
+                            "qc_contact_sheet.jpg" if sheet and os.path.isfile(sheet) else "не вийшло",
+                            flashes, lows, highs,
+                            ("{:.1f}".format(peak) if peak is not None else "?")))
+            if sheet and os.path.isfile(sheet):
+                say("🛡️ QC+: контакт-шит (20 кадрів сіткою) — qc_contact_sheet.jpg")
+            if flashes:
+                say("🛡️ QC+: {} різких спалахів яскравості — перевір, чи не "
+                    "«моргає» відео (деталі у qc.txt)".format(flashes))
+            if peak is not None and peak > -0.5:
+                say("🛡️ QC+: пік гучності {:.1f} dB — звук на межі кліпінгу "
+                    "(тріск на колонках); див. qc.txt".format(peak))
+        except OSError:
+            pass
+    except Exception:
+        pass  # 🛡️ QC — лише діагностика, ніколи не ламає генерацію
+
+
+def silence_trim_video(video, say, min_sil=0.6):
+    """✂️ 2.0: прибрати тишу з ГОТОВОГО відео (auto-editor-молекула:
+    silencedetect → живі сегменти з підкладками 0.15 с → нарізка →
+    зшивка → поруч <ім'я>_без_тиші.mp4). Мовчання коротше 0.6 с НЕ ріжу
+    (природні паузи мови). Тиші нема/не вийшло — відео не чіпаю (fail-open)."""
+    try:
+        if not video or not os.path.isfile(video):
+            say("✂️ Спершу обери відео 🙂")
+            return None
+        ensure_ffmpeg(say)
+        ff = ffmpeg_path()
+        say("✂️ Слухаю тишу (silencedetect)…")
+        pr = subprocess.run([ff, "-hide_banner", "-nostdin", "-i", video,
+                             "-af", "silencedetect=noise=-35dB:d={:.2f}".format(min_sil),
+                             "-f", "null", "-"],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=1800)
+        log = pr.stderr or ""
+        starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", log)]
+        ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", log)]
+        cuts = list(zip(starts, ends[:len(starts)]))
+        if not cuts or all((b - a) < min_sil + 0.05 for a, b in cuts):
+            say("✂️ Тиші нема — відео і так щільне, різати нема чого 🙂")
+            return None
+        total_dur = audio_duration(video) or (cuts[-1][1] + 1.0)
+        segs, t = [], 0.0  # живі ділянки: [початок, кінець] з підкладкою 0.15 с
+        pad = 0.15
+        for a, b in cuts:
+            if a - t > 0.3:
+                segs.append((t, min(a + pad, total_dur)))
+            t = max(t, b - pad)
+        if total_dur - t > 0.3:
+            segs.append((t, total_dur))
+        segs = segs[:60]  # захист: не більше 60 шматків (інакше це не паузи, а дріб'язок)
+        if len(segs) < 2:
+            say("✂️ Знайшов лише одну живу ділянку — різати не буду")
+            return None
+        say("✂️ Тиша: {} пауз ({} с) — ріжу {} шматків…".format(
+            len(cuts), "{:.1f}".format(sum(b - a for a, b in cuts)),
+            len(segs)))
+        workdir = os.path.dirname(os.path.abspath(video))
+        parts, lst = [], os.path.join(workdir, "_trim_list.txt")
+        for i, (a, b) in enumerate(segs):
+            p = os.path.join(workdir, "_trim_{:02d}.mp4".format(i))
+            run([ff, "-y", "-hide_banner", "-nostdin",
+                 "-ss", "{:.2f}".format(a), "-i", video,
+                 "-t", "{:.2f}".format(b - a),
+                 "-c:v", "libx264", "-crf", "21", "-preset", "veryfast",
+                 "-c:a", "aac", "-b:a", "160k", "-ar", "48000", p], cwd=workdir)
+            parts.append(p)
+        with open(lst, "w", encoding="utf-8") as f:
+            for p in parts:
+                f.write("file '{}'\n".format(p))
+        out = os.path.splitext(video)[0] + "_без_тиші.mp4"
+        run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat",
+             "-safe", "0", "-i", lst, "-c", "copy", out], cwd=workdir)
+        try:
+            os.remove(lst)
+            for p in parts:
+                os.remove(p)
+        except OSError:
+            pass
+        if os.path.isfile(out) and os.path.getsize(out) > 1024:
+            say("✂️ Готово: {} (було {:.1f} с → стало {:.1f} с)".format(
+                os.path.basename(out), total_dur, audio_duration(out)))
+            try:
+                os.startfile(workdir)
+            except Exception:
+                pass
+            return out
+        say("✂️ Зшивка не вийшла — оригінал не зачеплений (fail-open)")
+        return None
+    except Exception as e:
+        say("✂️ Не вийшло: " + str(e)[:160])
+        return None
+
+
+def _hook_score(text):
+    """🧪 2.0: числова оцінка заголовка за тією ж хук-формулою, що й «🧲
+    Оцінити заголовок» (число/звертання/інтрига/вигода/довжина) — для
+    рейтингу A/B-варіантів. 0–100."""
+    t = " ".join((text or "").split())
+    score = 50
+    if re.search(r"\d", t):
+        score += 15
+    if re.search(r"(?iu)\b(ти|твій|твоє|твоя|ви|ваш|ваша|своє)\b", t):
+        score += 12
+    if re.search(r"(?iu)\b(як|чому|секрет|помилк|ніхто|найкращ|спосіб)\b", t):
+        score += 13
+    if re.search(r"(?iu)\b(без|стоп|покроков|порад|заощад|навчис|зароб|швидк)\b", t):
+        score += 10
+    if len(t) > 80:
+        score -= 12
+    elif len(t) >= 15:
+        score += 10
+    return max(0, min(100, score))
+
+
+def ab_titles(query, say):
+    """🧪 2.0: A/B-ЗАГОЛОВКИ (HypeIt-патерн): драбина LLM («Авто» — без
+    грошей) генерує 8 варіантів хука під тему; кожен оцінюють хук-формулою
+    (число/ти/інтрига/вигода/довжина) → топ-3 у журнал, усі — у
+    ab_titles.txt (там же, де ключі, щоб не губились). Fail-open: LLM
+    мовчить — підказка й вихід."""
+    q = " ".join((query or "").split())
+    if len(q) < 4:
+        say("🧪 Спершу напиши тему у поле запиту 🙂")
+        return
+    say("🧪 Генерую 8 варіантів заголовка (драбина «Авто»)…")
+    raw = llm_chat("auto", "", "",
+                   "Тема відео: " + q + ". Придумай РІВНО 8 варіантів "
+                   "короткого заголовка-хука для Shorts (українською, до 70 "
+                   "символів кожен, без нумерації та лапок, кожен з нового "
+                   "рядка). Різні формули: число, вигода, інтрига, помилка, "
+                   "звертання «ти».",
+                   system="Ти — редактор короткого відео. Лише 8 рядків "
+                          "заголовків, без вступу і пояснень.",
+                   timeout=90)
+    lines = []
+    for ln in (raw or "").splitlines():
+        ln = ln.strip().lstrip("-•*0123456789.)").strip()
+        if 8 <= len(ln) <= 100:
+            lines.append(ln)
+    lines = list(dict.fromkeys(lines))[:12]  # dedup, порядок зберігаю
+    if len(lines) < 3:
+        say("🧪 Драбина LLM мовчить — спробуй ще раз або питай в Асистента")
+        return
+    scored = sorted(((_hook_score(t), t) for t in lines), reverse=True)
+    say("🧪 A/B-заголовки — топ-3 за хук-формулою:")
+    for i, (sc, t) in enumerate(scored[:3], 1):
+        say("🧪 {}. {}/100 — {}".format(i, sc, t))
+    try:
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        with open(os.path.join(TOOLS_DIR, "ab_titles.txt"), "w", encoding="utf-8") as f:
+            f.write("A/B-заголовки: " + q + " ("
+                    + datetime.now().strftime("%d.%m.%Y %H:%M") + ")\n\n")
+            for sc, t in scored:
+                f.write("{:3d}/100  {}\n".format(sc, t))
+        say("🧪 Усі {} варіантів з оцінками — ab_titles.txt (папка інструментів)".format(len(scored)))
+    except Exception:
+        pass  # файл не вийшов — журнал і так показав топ-3 (fail-open)
+
+
+def overlays_pass(final, title, workdir, say):
+    """🏷️ 2.0: ВЕРХНІ ОВЕРЛЕЇ на готове відео (патерн kajisho5/claude-motion:
+    моушн-графіка чистим ffmpeg+PIL, без After Effects): 1) ПЛАШКА-ЗАГОЛОВОК
+    знизу ліворуч (перші 5 с — theme за статикою kajisho5 «lower third»);
+    2) ВОДЯНИЙ ЗНАК праворуч внизу (легкий, півпрозорий); 3) СМУГА ПРОГРЕСУ
+    знизу через весь кадр (drawbox, росте з часом — патерн Shorts). Оригінал
+    НЕ чіпаю: результат → final.mp4 лише якщо оверлей-рендер пройшов,
+    інакше лишається як є (fail-open)."""
+    try:
+        if not final or not os.path.isfile(final):
+            return
+        ff = ffmpeg_path()
+        dur = audio_duration(final) or 10.0
+        pr = subprocess.run([ff, "-hide_banner", "-nostdin", "-i", final],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=60)
+        m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", pr.stderr or "")
+        if not m:
+            say("🏷️ Оверлеї пропускаю — не бачу розміру кадру")
+            return
+        w, h = int(m.group(1)), int(m.group(2))
+        clean = "".join(ch for ch in (title or "") if ord(ch) <= 65535)[:90]
+        inputs, filt = ["-i", final], []
+        have_lower = have_wm = False
+        if PILImage is not None and clean:
+            try:
+                from PIL import ImageDraw, ImageFont
+                fs = max(16, int(w / 40))
+                font = None
+                for fp in ("C:\\Windows\\Fonts\\segoeuib.ttf",
+                           "C:\\Windows\\Fonts\\arialbd.ttf",
+                           "C:\\Windows\\Fonts\\segoeui.ttf"):
+                    try:
+                        font = ImageFont.truetype(fp, fs)
+                        break
+                    except Exception:
+                        font = None
+                if font is not None:
+                    # плашка: напівпрозора капсула + текст (lower third)
+                    lw = min(int(w * 0.62), int(fs * 0.62 * max(len(clean), 8)) + fs * 2)
+                    lh = int(fs * 2.2)
+                    img = PILImage.new("RGBA", (lw, lh), (0, 0, 0, 0))
+                    d = ImageDraw.Draw(img)
+                    d.rounded_rectangle([0, 0, lw - 1, lh - 1], radius=lh // 2,
+                                        fill=(10, 12, 20, 168))
+                    tw = d.textlength(clean, font=font)
+                    d.text(((lw - tw) / 2, (lh - fs * 1.25) / 2), clean,
+                           font=font, fill=(255, 255, 255, 238))
+                    lower = os.path.join(workdir, "_ov_lower.png")
+                    img.save(lower)
+                    inputs += ["-i", lower]
+                    have_lower = True
+                    # водяний знак: маленький і скромний
+                    wm_t = "VideoGenerator"
+                    wfs = max(12, int(w / 72))
+                    wm_img = PILImage.new("RGBA", (int(wfs * 7.5), int(wfs * 1.9)),
+                                          (0, 0, 0, 0))
+                    dw = ImageDraw.Draw(wm_img)
+                    wmfont = ImageFont.truetype(fp, wfs)
+                    dw.text((2, 1), wm_t, font=wmfont, fill=(255, 255, 255, 92))
+                    wm = os.path.join(workdir, "_ov_wm.png")
+                    wm_img.save(wm)
+                    inputs += ["-i", wm]
+                    have_wm = True
+            except Exception:
+                have_lower = have_wm = False
+        last = "0:v"
+        if have_lower:
+            filt.append("[0:v][1:v]overlay=x={}:y={}:enable='between(t,0.2,5)'[v1]"
+                        .format(int(w * 0.04), int(h * 0.82)))
+            last = "v1"
+        if have_wm:
+            wm_i = 2 if have_lower else 1
+            filt.append("[{}][{}:v]overlay=x=W-w-{}:y=H-h-{}[v2]"
+                        .format(last, wm_i, int(w * 0.025), int(h * 0.03)))
+            last = "v2"
+        # смуга прогресу: drawbox, ширина росте з t (патерн Shorts-прогресу)
+        filt.append("[{}]drawbox=x=0:y=ih-6:w='iw*t/{:.3f}':h=6:"
+                    "color=0x0A84FF@0.85:t=fill[vf]".format(last, max(dur, 1.0)))
+        out = os.path.join(workdir, "_ov_out.mp4")
+        run([ff, "-y", "-hide_banner", "-nostdin"] + inputs +
+            ["-filter_complex", ";".join(filt), "-map", "[vf]",
+             "-map", "0:a?", "-c:v", "libx264", "-crf", "20",
+             "-preset", "veryfast", "-pix_fmt", "yuv420p",
+             "-c:a", "copy", out], cwd=workdir)
+        if os.path.isfile(out) and os.path.getsize(out) > 1024:
+            os.replace(out, final)
+            say("🏷️ Оверлеї: плашка-заголовок + водяний знак + смуга прогресу — на місці")
+        else:
+            say("⚠️ Оверлей-рендер не вдався — відео лишилось чистим (fail-open)")
+        for p in ("_ov_lower.png", "_ov_wm.png"):
+            try:
+                os.remove(os.path.join(workdir, p))
+            except OSError:
+                pass
+    except Exception as e:
+        say("⚠️ Оверлеї не вийшли ({}), відео лишається як є".format(str(e)[:120]))
+
+
+def write_edl(slots, workdir, say=None, fps=25):
+    """📋 2.0: EDL-ЕКСПОРТ (CMX3600) — таймлайн компіляції фону: кожен
+    фрагмент з тривалістю і позначкою джерела. Відкривається у DaVinci
+    Resolve / Premiere (імпорт EDL) — перемонтюй, якщо хочеш інакше.
+    Артефакт-тека: до manifest.json поруч. Fail-open."""
+    try:
+        if not slots:
+            return
+
+        def _tc(sec):
+            fr = max(int(round(float(sec) * fps)), 0)
+            return "{:02d}:{:02d}:{:02d}:{:02d}".format(
+                fr // (3600 * fps), (fr // (60 * fps)) % 60,
+                (fr // fps) % 60, fr % fps)
+        lines = ["TITLE: videogen_timeline", "FCM: NON-DROP FRAME", ""]
+        t = 0.0
+        for i, (c, take) in enumerate(slots, 1):
+            d = float(take or 0)
+            lines.append("{:03d}  AX  V  C        {} {} {} {}".format(
+                i, _tc(0), _tc(d), _tc(t), _tc(t + d)))
+            lines.append("* FROM CLIP NAME: " + os.path.basename(str(c)))
+            lines.append("")
+            t += d
+        with open(os.path.join(workdir, "timeline.edl"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        if say:
+            say("📋 Таймлайн — timeline.edl ({} фрагментів, відкривається у Resolve)".format(len(slots)))
+    except Exception:
+        pass  # артефакт, ніколи не ламає генерацію
+
+
 def write_manifest(info, workdir, say):
     """📋 v28: manifest.json — план і результат генерації у робочій папці:
     режим, тема або частини сценарію (текст, запит, посилання, тривалість),
@@ -906,7 +1316,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео v50"}
+                "app": "Генератор відео 2.0"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1557,6 +1967,7 @@ def build_bg_from_clips(clips, dur, w, h, workdir, transition="", no_faces=False
              "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
         segs.append(seg)
         takes.append(take)
+    write_edl(slots, workdir, say)  # 📋 2.0: таймлайн компіляції — у EDL (Resolve)
     if transition and len(segs) >= 2:  # v14: спершу пробуємо з переходами
         try:
             return xfade_join(segs, takes, workdir, TRANSITIONS.get(transition) or transition)
@@ -2518,6 +2929,12 @@ def chat_pick_steps(name):
                       "Асистента → «🇪🇺 Mistral» → «🌐 Отримати ключ» "
                       "(console.mistral.ai, experiment-план — безкоштовні "
                       "запити) → встав → «💾 Запам'ятати назавжди».")
+    if "LLMFaucet" in name:  # 🚰 v52: безключовий агрегатор — окреме джерело чату
+        return [{"label": "faucet", "kind": "faucet", "url": LLMFAUCET_URL,
+                 "model": "auto", "key": None}], ""
+    if "AI Horde" in name:  # 🐎 v52: волонтерська сітка — окреме джерело чату
+        return [{"label": "horde", "kind": "horde", "url": HORDE_URL,
+                 "model": "horde", "key": None}], ""
     if "Kilo" in name:
         return [{"label": "kilo", "kind": "kilo", "url": KILO_URL,
                  "model": "kilo-auto/free", "key": None}], ""
@@ -2539,7 +2956,7 @@ def chat_pick_steps(name):
                   "«🔄 Як в картці».")
 
 
-PAGE_CACHE = {}  # 🌐 v47: url → (текст, час) — кеш 10 хв, щоб браузер не тупив
+PAGE_CACHE = {}  # 🌐 v47/2.0: url → (текст, час) — кеш 10 хв для агента і «🔗 URL» у чаті
 
 
 def fetch_page_text(url, timeout=20, limit=48000):
@@ -2685,7 +3102,8 @@ def ddg_search(query, timeout=15, max_hits=5):
 
 AGENT_WEB_WORDS = ("знайди", "пошукай", "погугли", "новин", "актуальн",
                    "сьогодн", "погода", "курс ", "рейтин", "search",
-                   "find latest", "who is", "скільки кошту")
+                   "find latest", "who is", "скільки кошту", "цін",
+                   "прогноз", "розклад", "release", "latest")
 
 
 def agent_wants_web(text):
@@ -2695,9 +3113,27 @@ def agent_wants_web(text):
     return any(w in t for w in AGENT_WEB_WORDS)
 
 
+def agent_query_clean(text):
+    """🕵️ v52: прибрати «знайди/пошукай/покажи/search/find» на початку —
+    у DuckDuckGo летить ЧИСТИЙ запит без прохань, а не «знайди мені
+    свіжі новини ШІ», який рушій розуміє гірше. Слова не в початку
+    НЕ чіпаю (сенс зберігається, fail-open)."""
+    t = " ".join((text or "").split()).strip()
+    for _ in range(4):
+        m = re.match(r"(?iu)^(знайди|пошукай|покажи|погугли|знайдіть|пошукайте|search|find|look\s?up)\s+", t)
+        if not m:
+            break
+        t = t[m.end():].strip()
+    m2 = re.match(r"(?iu)^(мені|будь ласка|зараз|свіжі|нові|останні)\s+", t)
+    if m2:
+        t = t[m2.end():].strip()
+    return t or (text or "").strip()
+
+
 def agent_web_context(query, timeout=15):
-    """🕵️ v47: АГЕНТ — свіжі дані з мережі для відповіді: 5 хітів DuckDuckGo
-    (заголовок+посилання+витяг) + читабельний витяг першої сторінки.
+    """🕵️ v47/2.0: АГЕНТ — свіжі дані з мережі для відповіді: 5 хітів
+    DuckDuckGo → Mojeek (заголовок+посилання+витяг) + витяги ПЕРШИХ
+    ДВОХ сторінок + сьогоднішня дата (модель знає, який зараз день).
     (ctx, note) — note для мітки чату; нічого не знайшлось — ("", "")."""
     hits = ddg_search(query, timeout=timeout)
     if not hits:
@@ -2706,15 +3142,18 @@ def agent_web_context(query, timeout=15):
     for i, h in enumerate(hits, 1):
         parts.append("[{}] {} — {}\n{}".format(i, h["title"], h["url"],
                                                h["snip"]))
-    ctx = ("Свіжі дані з мережі (пошук DuckDuckGo, без ключів) — обов'язково "
-           "використай їх у відповіді і зазнач джерела ПОСИЛАННЯМИ "
-           "(просто URL у тексті):\n" + "\n".join(parts))
-    try:  # глибина: перша сторінка — коротким витягом (фоновий потік і так)
-        page = fetch_page_text(hits[0]["url"], timeout=timeout, limit=3000)
-        if page:
-            ctx += ("\n\nВитяг з " + hits[0]["url"] + ":\n" + page[:3000])
-    except Exception:
-        pass  # сторінка не далась — хітів і так вистачить (fail-open)
+    ctx = ("Сьогоднішня дата: " + datetime.now().strftime("%d.%m.%Y")
+           + ".\nСвіжі дані з мережі (пошук DuckDuckGo → Mojeek, без "
+           "ключів) — обов'язково використай їх у відповіді і зазнач "
+           "джерела ПОСИЛАННЯМИ (просто URL у тексті):\n"
+           + "\n".join(parts))
+    for h in hits[:2]:  # 🕵️ v52: глибина — витяги ПЕРШИХ ДВОХ сторінок
+        try:
+            page = fetch_page_text(h["url"], timeout=timeout, limit=2500)
+            if page:
+                ctx += ("\n\nВитяг з " + h["url"] + ":\n" + page[:2500])
+        except Exception:
+            pass  # сторінка не далась — хітів і так вистачить (fail-open)
     eng = (hits[0].get("engine") if hits else "") or "мережі"
     return ctx, ("знайшов " + str(len(hits)) + " свіжих джерел (" + eng
                  + ", без ключів)")
@@ -2737,16 +3176,86 @@ def llm_cache_key(provider, model, prompt, system, history):
         return ""
 
 
-BROWSER_HOMES = (  # 🏠 v47: домашні сторінки власного браузера
-    ("🔎 Пошук (DDG → Mojeek)", "https://lite.duckduckgo.com/lite/"),
-    ("🟣 GLM Z.AI", "https://z.ai/manage-apikey/apikey-list"),
-    ("🤖 Google AI Studio", "https://aistudio.google.com/apikey"),
-    ("🧭 OpenRouter", "https://openrouter.ai/settings/keys"),
-    ("🌊 SiliconFlow", "https://cloud.siliconflow.cn/account/ak"),
-    ("🟠 ModelScope", "https://modelscope.cn/my/myaccesstoken"),
-    ("▶ YouTube Studio", "https://studio.youtube.com"),
-    ("📦 Репозиторій", "https://github.com/khomyak75roman-dotcom/video-generator"),
-)
+LLM_CACHE_FILE = os.path.join(TOOLS_DIR, "llm_cache.jsonl")  # 💾 v51: диск-кеш LLM — відповіді переживають перезапуск програми
+
+
+def _llm_disk_get(key):
+    """💾 v51: знайти відповідь у дисковому кеші (jsonl, лінивий лінійний
+    скан — файл малий; швидкий фільтр "key in ln" ще до JSON-парсингу).
+    Нема файла/ключа — None (fail-open: кеш просто не працює)."""
+    try:
+        if not key or not os.path.isfile(LLM_CACHE_FILE):
+            return None
+        with open(LLM_CACHE_FILE, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                if key not in ln:
+                    continue  # рядок точно не про наш ключ — мимо, дешево
+                try:
+                    row = json.loads(ln)
+                except Exception:
+                    continue
+                if row.get("k") == key:
+                    return str(row.get("v") or "")
+        return None
+    except Exception:
+        return None
+
+
+def _llm_disk_add(key, val):
+    """💾 v51: дописати відповідь у диск-кеш (append-only jsonl). Файл
+    підріс до ~2 МБ — переписую, лишаючи свіжі 400 записів. Нема диска
+    або прав — живу без кешу (fail-open)."""
+    try:
+        if not key or not val:
+            return
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        with open(LLM_CACHE_FILE, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"k": key, "v": val,
+                                 "t": int(time.time())},
+                                ensure_ascii=False) + "\n")
+        try:
+            if os.path.getsize(LLM_CACHE_FILE) > 2 * 1024 * 1024:
+                rows = []
+                with open(LLM_CACHE_FILE, "r", encoding="utf-8") as fh:
+                    for ln in fh:
+                        if ln.strip():
+                            rows.append(ln)
+                with open(LLM_CACHE_FILE, "w", encoding="utf-8") as fh:
+                    fh.writelines(rows[-400:])
+        except Exception:
+            pass  # обрізка не вийшла — файл і так читається (fail-open)
+    except Exception:
+        pass
+
+
+KEY_ROTATE_IDX = {}  # 🔑 2.0: шлюз → наступний індекс ключа в ротації
+
+
+def key_pool(raw):
+    """🔑 2.0: РОТАЦІЯ КЛЮЧІВ — у freekeys.json можна писати кілька ключів
+    одного шлюзу через кому ("sk-…,sk-…"). Повертаю список живих ключів
+    у порядку round-robin: 429/ліміт одного ключа ≠ стоп, беру наступний
+    (llm-apipool-патерн). Один ключ — список з одного (як раніше)."""
+    try:
+        pool = [k.strip() for k in str(raw or "").split(",") if len(k.strip()) >= 20]
+        return pool or []
+    except Exception:
+        return []
+
+
+def key_rotate(name, raw):
+    """🔑 2.0: обрати ключ із пулу шлюзу по черзі (round-robin)."""
+    pool = key_pool(raw)
+    if not pool:
+        return ""
+    if len(pool) == 1:
+        return pool[0]
+    try:
+        i = int(KEY_ROTATE_IDX.get(str(name), 0)) % len(pool)
+        KEY_ROTATE_IDX[str(name)] = i + 1
+        return pool[i]
+    except Exception:
+        return pool[0]
 
 
 def kilo_list_models(url, timeout=10):
@@ -2898,25 +3407,118 @@ def _oai_chat(url, key, model, prompt, system=None, timeout=120, history=None):
         return ""
 
 
-def auto_chain_steps():
-    """🔄 v40/v43: драбина джерел «Авто»: Claude (Puter) → Claude (Anthropic) →
-    Cerebras → Groq → Mistral → GitHub → Google AI Studio → OpenRouter →
-    NVIDIA → SambaNova → HF → ⚡ Kilo → 🌐 LLM7 → 🌐 Pollinations. Лише
-    наявні (ключі з freekeys.json) + три безключові; кожен ступінь fail-open."""
+def faucet_chat(url, model, prompt, system=None, timeout=75, history=None):
+    """🚰 v52: LLMFaucet — «сірий», але ЧЕСНИЙ безключовий агрегатор
+    (джерела: Pollinations+LLM7+OVH+AI Horde): POST /chat/completions,
+    Authorization: Bearer "free", модель-селектор auto/auto:fast/
+    auto:smart/auto:coding. Автор сам попереджає: «для прототипів» —
+    тому це СТУПІНЬ драбини, а не опора. Мовчить — "" (fail-open)."""
+    try:
+        msgs = ([{"role": "system", "content": system}] if system else []) \
+            + (history or []) + [{"role": "user", "content": prompt}]
+        r = requests.post((url or LLMFAUCET_URL).rstrip("/") + "/chat/completions",
+                          json={"model": (model or "auto").strip(),
+                                "messages": msgs, "stream": False},
+                          headers={"Authorization": "Bearer free",
+                                   "User-Agent": UA_STRING}, timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        j = r.json()
+        ch = (j.get("choices") or [{}])[0]
+        return str(((ch.get("message") or {}).get("content"))
+                   or ((ch.get("text") or ""))).strip()
+    except Exception:
+        return ""
+
+
+def horde_chat(prompt, system=None, timeout=90, history=None):
+    """🐎 v52: AI HORDE — краудсорс-сітка волонтерських GPU/LLM (без
+    реєстрації, анонімний apikey "0000000000"). Черга async: віддаю
+    завдання → полю статус кожні 2.5 с → done беру generations[0].text;
+    дедлайн — DELETE завдання (зняти з черги: повага до волонтерів).
+    До хвилини очікування — НОРМА для Horde. Мовчить — "" (fail-open)."""
+    try:
+        full = (system or "").strip()
+        for m in (history or [])[-6:]:
+            who = "Юзер" if m.get("role") == "user" else "Асистент"
+            full += "\n" + who + ": " + str(m.get("content") or "")[:1000]
+        full += "\nЮзер: " + (prompt or "")
+        r = requests.post(HORDE_URL.rstrip("/") + "/generate/text/async",
+                          json={"prompt": full[:12000],
+                                "params": {"max_new_tokens": 700,
+                                           "temperature": 0.7}},
+                          headers={"apikey": "0000000000",
+                                   "Client-Agent": UA_STRING}, timeout=20)
+        if r.status_code not in (200, 201, 202):
+            return ""
+        jid = (r.json() or {}).get("id")
+        if not jid:
+            return ""
+        deadline = time.time() + max(30, min(int(timeout or 90), 150))
+        try:
+            while time.time() < deadline:
+                time.sleep(2.5)
+                s = requests.get(HORDE_URL.rstrip("/") + "/generate/text/status/"
+                                 + str(jid),
+                                 headers={"Client-Agent": UA_STRING},
+                                 timeout=15)
+                if s.status_code != 200:
+                    continue
+                sj = s.json()
+                if sj.get("done"):
+                    gens = sj.get("generations") or []
+                    if gens:
+                        return str((gens[0] or {}).get("text") or "").strip()
+                    break
+                if sj.get("faulted") or sj.get("is_possible") is False:
+                    break
+        finally:
+            try:  # прибрати за собою — зняти завдання з черги волонтерів
+                requests.delete(HORDE_URL.rstrip("/") + "/generate/text/status/"
+                                + str(jid),
+                                headers={"Client-Agent": UA_STRING}, timeout=10)
+            except Exception:
+                pass
+        return ""
+    except Exception:
+        return ""
+
+
+def auto_chain_steps(prompt=None):
+    """🔄 v40–v52: драбина джерел «Авто»: усі шлюзи з живими ключами
+    (freekeys.json) → ⚡ Kilo → 🌐 LLM7 → 🚰 LLMFaucet → 🌐 Pollinations
+    → 🐎 AI Horde — всього до 21 ступеня; кожен fail-open. 🎯 2.0:
+    важке питання (prompt) — Faucet-ступінь іде з селектором auto:smart
+    (сам підбирає розумнішу модель); просте — auto (швидка)."""
     keys = load_freekeys()
     steps = []
     for name in FREEKEY_ORDER:
-        k = str(keys.get(name) or "").strip()
-        if len(k) >= 20 and name in FREEKEY_ENGINES:
+        pool = key_pool(keys.get(name))  # 🔑 2.0: ротація — ключів може бути кілька через кому
+        if pool and name in FREEKEY_ENGINES:
             conf = FREEKEY_ENGINES[name]
             steps.append({"label": name, "kind": "oai", "url": conf["url"],
-                          "model": conf["model"], "key": k})
+                          "model": conf["model"], "key": pool[0],
+                          "pool": pool})
+    smart = False
+    try:
+        p = str(prompt or "").lower()
+        smart = len(p) > 240 or any(w in p for w in
+                                    ("чому", "порівня", "розпиши", "аналіз",
+                                     "код", "python", "кодекс", "покроков"))
+    except Exception:
+        smart = False
     steps.append({"label": "kilo", "kind": "kilo", "url": KILO_URL,
-                  "model": "kilo-auto/free", "key": None})
+                  "model": "kilo-auto/free", "key": None, "pool": []})
     steps.append({"label": "llm7", "kind": "llm7", "url": LLM7_URL,
-                  "model": "gpt-5.5", "key": None})
+                  "model": "gpt-5.5", "key": None, "pool": []})
+    steps.append({"label": "faucet", "kind": "faucet", "url": LLMFAUCET_URL,
+                  "model": ("auto:smart" if smart else "auto"),
+                  "key": None, "pool": []})  # 🚰 v52: між LLM7 і Pollinations
     steps.append({"label": "pollinations", "kind": "pollinations",
-                  "url": POLLINATIONS_URL, "model": "gpt-oss-20b", "key": None})
+                  "url": POLLINATIONS_URL, "model": "gpt-oss-20b",
+                  "key": None, "pool": []})
+    steps.append({"label": "horde", "kind": "horde", "url": HORDE_URL,
+                  "model": "horde", "key": None, "pool": []})  # 🐎 останній ступінь
     return steps
 
 
@@ -2938,33 +3540,53 @@ def chat_history_prompt(history, last):
 
 
 def auto_llm_chat(prompt, system=None, timeout=120, history=None):
-    """🔄 v40: «Авто» — зграя джерел: пробує по драбині, поки хтось не
+    """🔄 v40/2.0: «Авто» — зграя джерел: пробує по драбині, поки хтось не
     відповість змістом. Вичерпаний ліміт (402/429) або лежачий шлюз —
-    чесно пропускаю, іду далі (кожен ступінь у llm_trace). Дефолтних
-    моделей джерел — не обираю вручну: драбина сама знає. Гроші — нуль."""
+    чесно пропускаю, іду далі (кожен ступінь у llm_trace). 🔑 2.0: у
+    ступені з кількома ключами (через кому у freekeys.json) — спершу
+    всі його ключі по черзі, і лише потім наступний шлюз. Дефолтних
+    моделей — не обираю вручну: драбина сама знає. Гроші — нуль."""
     step_t = min(int(timeout or 120), 90)  # щедро для одного джерела, але не вічно
-    for st in auto_chain_steps():
-        t0 = time.time()
-        try:
-            if st["kind"] == "kilo":
-                txt = kilo_chat(st["url"], st["model"], prompt, system=system,
-                               timeout=step_t, history=history)
-            elif st["kind"] == "llm7":
-                txt = llm7_chat(st["url"], st["model"], prompt, system=system,
-                                timeout=step_t, history=history)
-            elif st["kind"] == "pollinations":
-                txt = pollinations_chat(st["url"], st["model"], prompt,
-                                        system=system, timeout=step_t,
-                                        history=history)
-            else:
-                txt = _oai_chat(st["url"], st["key"], st["model"], prompt,
-                               system=system, timeout=step_t, history=history)
-        except Exception:
-            txt = ""
-        llm_trace("auto", st["label"], st["model"], t0, bool(txt), len(txt or ""))
-        if txt:
-            return txt
+    for st in auto_chain_steps(prompt):
+        keys_for_step = st.get("pool") or ([st["key"]] if st.get("key") else [])
+        if st["kind"] in ("faucet", "horde", "kilo", "llm7",
+                          "pollinations"):
+            keys_for_step = [""]  # безключові ступені — один «порожній» прохід
+        for k in keys_for_step:  # 🔑 2.0: ротація — 429 одного ключа ≠ стоп
+            t0 = time.time()
+            try:
+                if st["kind"] == "kilo":
+                    txt = kilo_chat(st["url"], st["model"], prompt,
+                                    system=system, timeout=step_t,
+                                    history=history)
+                elif st["kind"] == "llm7":
+                    txt = llm7_chat(st["url"], st["model"], prompt,
+                                    system=system, timeout=step_t,
+                                    history=history)
+                elif st["kind"] == "faucet":  # 🚰 v52
+                    txt = faucet_chat(st["url"], st["model"], prompt,
+                                      system=system, timeout=step_t,
+                                      history=history)
+                elif st["kind"] == "horde":  # 🐎 v52
+                    txt = horde_chat(prompt, system=system,
+                                     timeout=step_t + 30, history=history)
+                elif st["kind"] == "pollinations":
+                    txt = pollinations_chat(st["url"], st["model"], prompt,
+                                            system=system, timeout=step_t,
+                                            history=history)
+                else:
+                    kk = key_rotate(st["label"], k) if len(keys_for_step) > 1 else k
+                    txt = _oai_chat(st["url"], kk, st["model"], prompt,
+                                    system=system, timeout=step_t,
+                                    history=history)
+            except Exception:
+                txt = ""
+            llm_trace("auto", st["label"], st["model"], t0, bool(txt),
+                      len(txt or ""))
+            if txt:
+                return txt
     return ""
+
 
 
 def groq_transcribe_srt(video, say):
@@ -3034,6 +3656,264 @@ def groq_transcribe_srt(video, say):
             os.remove(aud)
         except OSError:
             pass
+
+
+def groq_stt_text(wav_path, timeout=90):
+    """🎤 v51: голос → текст (STT): Whisper whisper-large-v3-turbo на Groq —
+    той самий безкоштовний фрітір-ключ, що для авто-субтитрів; нових
+    залежностей нуль. Помилка/нема ключа — "" (fail-open)."""
+    try:
+        key = str(load_freekeys().get("groq") or "").strip()
+        if len(key) < 20:
+            return ""
+        with open(wav_path, "rb") as fh:
+            r = requests.post(
+                FREEKEY_ENGINES["groq"]["url"].rstrip("/") + "/audio/transcriptions",
+                files={"file": (os.path.basename(wav_path), fh, "audio/wav")},
+                data={"model": "whisper-large-v3-turbo",
+                      "response_format": "text"},
+                headers={"Authorization": "Bearer " + key,
+                         "User-Agent": UA_STRING}, timeout=timeout)
+        if r.status_code != 200:
+            return ""
+        return (r.text or "").strip()
+    except Exception:
+        return ""
+
+
+def _dshow_mic_name():
+    """🎤 v51: ім'я ПЕРШОГО мікрофона Windows (DirectShow): ffmpeg
+    -list_devices → парсинг секції «DirectShow audio devices» (рядки
+    «[dshow @ …] "Назва мікрофона"»); микрофонів нема/ffmpeg лежить —
+    "" (fail-open — запис тоді не стартне і чесно скажу чому)."""
+    try:
+        ff = ffmpeg_path()
+        pr = subprocess.run([ff, "-hide_banner", "-list_devices", "true",
+                             "-f", "dshow", "-i", "dummy"],
+                            capture_output=True, text=True,
+                            encoding="utf-8", errors="ignore", timeout=20)
+        out = (pr.stderr or "") + (pr.stdout or "")
+        if "DirectShow audio devices" not in out:
+            return ""
+        tail = out.split("DirectShow audio devices", 1)[1]
+        m = re.search(r'"([^"]+)"\s*\(\w', tail)
+        if m:
+            return m.group(1).strip()
+        m2 = re.search(r'"([^"]+)"', tail)  # фолбек: будь-яка цитована назва
+        return (m2.group(1).strip() if m2 else "")
+    except Exception:
+        return ""
+
+
+LIBRE_INSTANCES = ("https://libretranslate.de",
+                   "https://translate.terraprint.xyz",
+                   "https://libretranslate.com")  # 🌐 v51: публічні LibreTranslate (без ключів), драбина
+
+
+def libre_translate(text, target, timeout=25):
+    """🌐 v51: перекладач БЕЗ ключів — публічні інстанси LibreTranslate,
+    по черзі (як лежить один — наступний). Повертаю (текст, інстанс);
+    усі мовчать/лімітять — ("", "") і викликач падає на драбину LLM
+    (її гарантовано наша ж інфраструктура тримає). Fail-open."""
+    for base in LIBRE_INSTANCES:
+        try:
+            r = requests.post(base.rstrip("/") + "/translate",
+                              json={"q": str(text or "")[:4000],
+                                    "source": "auto", "target": str(target or "en"),
+                                    "format": "text"},
+                              timeout=timeout,
+                              headers={"User-Agent": WEB_UA})
+            if r.status_code == 200:
+                j = r.json()
+                if j.get("translatedText"):
+                    return str(j["translatedText"]), base
+        except Exception:
+            continue  # цей інстанс мовчить — пробую наступний (fail-open)
+    return "", ""
+
+
+def translate_srt_file(srt_path, lang, say):
+    """🌐 v51: переклад .srt-субтитрів на будь-яку мову: LibreTranslate
+    (публічні інстанси, без ключів), а як вони мовчать — драбина LLM
+    («auto» — теж без грошей). Блоки (до 200) перекладаю ПОРЯДОК-у-порядок:
+    нумерацію і таймінги НЕ чіпаю, лише текст; прогрес — нота кожні 25
+    блоків. Вивід — <ім'я>_<мова>.srt поруч з оригіналом. Fail-open."""
+    try:
+        if not srt_path or not os.path.isfile(srt_path):
+            say("🌐 Спершу обери файл .srt 🙂")
+            return None
+        lang = (lang or "en").strip().lower()[:5] or "en"
+        with open(srt_path, "r", encoding="utf-8", errors="ignore") as fh:
+            raw = fh.read()
+        blocks = re.split(r"\n\s*\n", raw.strip())
+        blocks = [b for b in blocks if b.strip()][:200]  # ліміт: 200 блоків
+        if not blocks:
+            say("🌐 У файлі нема блоків субтитрів")
+            return None
+        say("🌐 Перекладаю {} блоків субтитрів на «{}»…".format(len(blocks), lang))
+        via = ""
+        out_blocks, done = [], 0
+        for b in blocks:
+            lines = b.splitlines()
+            text_i = next((i for i, ln in enumerate(lines)
+                           if "-->" not in ln
+                           and not ln.strip().isdigit()), min(2, len(lines) - 1))
+            src_text = "\n".join(lines[text_i:]).strip()
+            new_text = src_text
+            if src_text:
+                t, inst = libre_translate(src_text, lang)
+                if t:
+                    new_text = t
+                    via = via or ("LibreTranslate: " + inst.replace("https://", ""))
+                else:  # інстанси мовчать — драбина LLM (гарантований запас)
+                    t2 = llm_chat("auto", "", "",
+                                  "Переклади текст субтитрів на мову з кодом "
+                                  + lang + ". Дай ЛИШЕ переклад, без пояснень.",
+                                  system="Ти — точний перекладач субтитрів. "
+                                         "Збережи тон; коротко; без приміток.",
+                                  timeout=60)
+                    if t2:
+                        new_text = " ".join(str(t2).split())[:1500]
+                        via = via or "драбина LLM"
+            out_blocks.append("\n".join(lines[:text_i] + [new_text]))
+            done += 1
+            if done % 25 == 0:
+                say("🌐 {} з {} блоків…".format(done, len(blocks)))
+        out_path = os.path.splitext(srt_path)[0] + "_" + lang + ".srt"
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write("\n\n".join(out_blocks) + "\n")
+        say("🌐 Готово: {} ({} блоків{}{})".format(
+            os.path.basename(out_path), len(blocks),
+            " — " if via else "", via))
+        try:
+            os.startfile(os.path.dirname(out_path) or ".")
+        except Exception:
+            pass
+        return out_path
+    except Exception as e:
+        say("🌐 Переклад субтитрів не вийшов: " + str(e)[:160])
+        return None
+
+
+def srt_blocks_parse(srt_path):
+    """🎙 2.0: розібрати .srt на блоки [(початок_с, кінець_с, текст)] —
+    для ДУБЛЯЖУ субтитрів (озвука кожної репліки edge-tts і фіт у
+    таймінги). Кривий файл — [] (fail-open: дубляж тоді не стартне)."""
+    try:
+        with open(srt_path, "r", encoding="utf-8", errors="ignore") as fh:
+            raw = fh.read()
+        out = []
+
+        def _t(s):
+            try:
+                hh, mm, rest = s.strip().split(":")
+                ss, ms = rest.split(",")
+                return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+            except Exception:
+                return 0.0
+        for b in re.split(r"\n\s*\n", raw.strip()):
+            lines = [ln for ln in b.splitlines() if ln.strip()]
+            if not lines:
+                continue
+            m = None
+            for ln in lines:
+                m = re.match(r"(\d+:\d+:\d+,\d+)\s*-->\s*(\d+:\d+:\d+,\d+)", ln)
+                if m:
+                    break
+            if not m:
+                continue
+            text = " ".join(ln for ln in lines
+                            if "-->" not in ln and not ln.strip().isdigit()).strip()
+            if text:
+                out.append((_t(m.group(1)), _t(m.group(2)), text))
+        return out
+    except Exception:
+        return []
+
+
+def dub_srt_file(srt_path, voice_label, say):
+    """🎙 2.0: ДУБЛЯЖ ЗА СУБТИТРАМИ (.srt → edge-tts репліка-на-репліку):
+    кожен рядок озвучується окремо, потім atempo-фіт У ТАЙМІНГИ
+    оригіналу (скорочення не >1.35x — інакше репліка вільна, паузу не
+    ріжу), на паузах між репліками — тиша. Вихід: <ім'я>_дубляж.mp3;
+    поруч є відео з тим самим ім'ям — і <ім'я>_дубляж.mp4 з новою
+    доріжкою (ShortGPT-патерн дубляжу). Fail-open на кожному кроці."""
+    try:
+        blocks = srt_blocks_parse(srt_path)
+        if not blocks:
+            say("🎙 Не вийшло прочитати репліки з .srt — перевір формат")
+            return None
+        workdir = os.path.dirname(os.path.abspath(srt_path))
+        parts, names = [], []
+        for i, (a, b, text) in enumerate(blocks):
+            if not text.strip():
+                continue
+            mp3 = os.path.join(workdir, "dub_{:03d}.mp3".format(i))
+            if not tts_save(text.strip()[:1500], voice_label, mp3, say):
+                continue
+            span = max(float(b) - float(a), 0.5)
+            fitted = speed_fit(mp3, span, workdir, say) if span else mp3
+            parts.append(fitted or mp3)
+            names.append((a, fitted or mp3))
+        if not parts:
+            say("🎙 Озвучка реплік не вийшла — дубляжу нема")
+            return None
+        say("🎙 Зшиваю дубляж: {} реплік у таймлайні…".format(len(parts)))
+        # таймлайн з тишинами: аудіо кожної репліки стає на СВІЙ момент
+        ff = ffmpeg_path()
+        inputs, flt, t = [], [], 0.0
+        for idx, (a, p) in enumerate(names):
+            gap = max(float(a) - t, 0.0)
+            if gap > 0.05:
+                inputs += ["-f", "lavfi",
+                           "-t", "{:.2f}".format(gap),
+                           "-i", "anullsrc=r=24000:cl=mono"]
+                flt.append("[{}:a]atrim=duration={:.2f}[s{}]".format(
+                    len(inputs) // 3 - 1, gap, idx))
+                flt.append("[s{}]aresample=24000[a{}]".format(idx, idx))
+            inputs.append("-i")
+            inputs.append(p)
+            flt.append("[{}:a]aresample=24000[r{}]".format(
+                len(inputs) // 3 - 1, idx))
+            try:
+                d = audio_duration(p)
+            except Exception:
+                d = 1.0
+            t = float(a) + max(float(d), 0.2)
+        concat = "".join("[a{0}][r{0}]".format(i) for i, _ in enumerate(names))
+        flt.append(concat + "concat=n={}:v=0:a=1[out]".format(len(names) * 2))
+        out_mp3 = os.path.splitext(srt_path)[0] + "_дубляж.mp3"
+        run([ff, "-y", "-hide_banner", "-nostdin"] + inputs +
+            ["-filter_complex", ";".join(flt), "-map", "[out]",
+             "-c:a", "libmp3lame", "-q:a", "4", out_mp3], cwd=workdir)
+        for p in parts:
+            try:
+                if os.path.basename(p).startswith("dub_"):
+                    os.remove(p)
+            except OSError:
+                pass
+        if not os.path.isfile(out_mp3) or os.path.getsize(out_mp3) < 200:
+            say("🎙 Дубляж не зшився — перевір ffmpeg у журналі вище")
+            return None
+        say("🎙 Дубляж-доріжка готова: " + os.path.basename(out_mp3))
+        video = os.path.splitext(srt_path)[0] + ".mp4"  # поруч те саме відео?
+        if os.path.isfile(video):
+            out_mp4 = os.path.splitext(srt_path)[0] + "_дубляж.mp4"
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", video,
+                 "-i", out_mp3, "-map", "0:v", "-map", "1:a",
+                 "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                 "-shortest", out_mp4], cwd=workdir)
+            if os.path.isfile(out_mp4):
+                say("🎬 Дубляж-ролик: " + os.path.basename(out_mp4)
+                    + " (оригінальне відео з новою озвучкою)")
+        try:
+            os.startfile(workdir)
+        except Exception:
+            pass
+        return out_mp3
+    except Exception as e:
+        say("🎙 Дубляж не вийшов: " + str(e)[:160])
+        return None
 
 
 def hf_space_call(base, api, data, timeout=900):
@@ -3303,6 +4183,12 @@ def llm_chat(provider, url, model, prompt, system=None, timeout=90, history=None
     if provider == "kilo":
         return kilo_chat(url, model, prompt, system=system, timeout=timeout,
                          history=history)
+    if provider == "faucet":  # 🚰 v52
+        return faucet_chat(url, model, prompt, system=system, timeout=timeout,
+                           history=history)
+    if provider == "horde":  # 🐎 v52
+        return horde_chat(prompt, system=system, timeout=timeout,
+                          history=history)
     if provider == "freekey":
         return freekey_chat(url, model, prompt, system=system, timeout=timeout,
                            history=history)
@@ -3389,7 +4275,9 @@ GATEWAY_PRETTY = {  # 📡 v49: гарні імена шлюзів для нот
     "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
     "zhipu": "🟣 GLM (Zhipu)", "zai": "🟣 GLM (Z.AI)",
     "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
-    "kilo": "⚡ Kilo", "llm7": "🌐 LLM7", "pollinations": "🌐 Pollinations"}
+    "cohere": "🧩 Cohere",
+    "kilo": "⚡ Kilo", "llm7": "🌐 LLM7", "faucet": "🚰 LLMFaucet",
+    "pollinations": "🌐 Pollinations", "horde": "🐎 AI Horde"}
 
 
 def llm_stream(provider, url, model, prompt, system=None, history=None,
@@ -3415,6 +4303,17 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                     txt = _sse_stream_chat(st["url"].rstrip("/") + "/chat/completions",
                                            "unused", st["model"], msgs, on_delta,
                                            stop, step_t)
+                elif st["kind"] == "faucet":  # 🚰 v52: не засмітився — одним шматком
+                    txt = faucet_chat(st["url"], st["model"], prompt,
+                                      system=system, timeout=step_t,
+                                      history=history)
+                    if txt and on_delta:
+                        on_delta(txt)
+                elif st["kind"] == "horde":  # 🐎 v52: останній ступінь — черга до хвилини
+                    txt = horde_chat(prompt, system=system,
+                                     timeout=step_t + 60, history=history)
+                    if txt and on_delta:
+                        on_delta(txt)
                 elif st["kind"] == "pollinations":
                     txt = _sse_stream_chat(st["url"].rstrip("/") + "/openai",
                                            None, st["model"], msgs, on_delta,
@@ -3467,19 +4366,21 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
             m = (model or "").strip()
             order = [n for n in ([eng] + [x for x in FREEKEY_ORDER if x != eng])
                      if n in FREEKEY_ENGINES
-                     and len(str(keys.get(n) or "").strip()) >= 20]
+                     and key_pool(keys.get(n))]
             step_t2 = min(int(timeout or 180), 90)
             for name in order:  # 🪜 v46: обраний шлюз першим, за ним — жива драбина
                 conf = FREEKEY_ENGINES[name]
                 mm = m if (name == eng and m and m != "модель не обрана") \
                     else conf["model"]
-                t0 = time.time()
-                txt = _sse_stream_chat(conf["url"].rstrip("/") + "/chat/completions",
-                                       str(keys.get(name) or "").strip(), mm,
-                                       msgs, on_delta, stop, step_t2)
-                llm_trace("stream", name, mm, t0, bool(txt), len(txt or ""))
-                if txt:
-                    return txt
+                pool = key_pool(keys.get(name))  # 🔑 2.0: ротація — ключів може бути кілька
+                for k in pool:  # 429/ліміт одного ключа — беру наступний його ж ключ
+                    t0 = time.time()
+                    kk = key_rotate(name, keys.get(name)) if len(pool) > 1 else pool[0]
+                    txt = _sse_stream_chat(conf["url"].rstrip("/") + "/chat/completions",
+                                           kk, mm, msgs, on_delta, stop, step_t2)
+                    llm_trace("stream", name, mm, t0, bool(txt), len(txt or ""))
+                    if txt:
+                        return txt
                 try:  # ⏳ v49: який шлюз мовчить — видно у чаті
                     if on_note and callable(on_note):
                         on_note("⏳ " + GATEWAY_PRETTY.get(name, name)
@@ -3498,6 +4399,8 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                 try:
                     if model and model in (FREEKEY_MODELS.get(st["label"]) or []):
                         mm = model
+                    elif st["kind"] == "faucet" and model in FAUCET_MODELS:  # 🚰 v52: селектори auto:*
+                        mm = model
                 except Exception:
                     mm = st["model"]
                 try:
@@ -3511,6 +4414,18 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                                                + "/chat/completions",
                                                "unused", mm, msgs,
                                                on_delta, stop, step_t2)
+                    elif st["kind"] == "faucet":  # 🚰 v52: не засмічився — шматком
+                        txt = faucet_chat(st["url"], mm, prompt,
+                                          system=system, timeout=step_t2,
+                                          history=history)
+                        if txt and on_delta:
+                            on_delta(txt)
+                    elif st["kind"] == "horde":  # 🐎 v52: черга волонтерів
+                        txt = horde_chat(prompt, system=system,
+                                         timeout=step_t2 + 60,
+                                         history=history)
+                        if txt and on_delta:
+                            on_delta(txt)
                     elif st["kind"] == "pollinations":
                         txt = _sse_stream_chat(st["url"].rstrip("/") + "/openai",
                                                None, mm, msgs, on_delta,
@@ -3523,10 +4438,15 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                             if txt and on_delta:
                                 on_delta(txt)
                     else:
-                        txt = _sse_stream_chat(st["url"].rstrip("/")
-                                               + "/chat/completions",
-                                               st["key"], mm, msgs,
-                                               on_delta, stop, step_t2)
+                        pool2 = key_pool(st.get("key")) or [st.get("key") or ""]  # 🔑 2.0
+                        txt = ""
+                        for k2 in pool2:  # ротація ключів обраного шлюзу
+                            txt = _sse_stream_chat(st["url"].rstrip("/")
+                                                   + "/chat/completions",
+                                                   k2, mm, msgs,
+                                                   on_delta, stop, step_t2)
+                            if txt:
+                                break
                 except Exception:
                     txt = ""
                 llm_trace("stream", st["label"], mm, t0,
@@ -4102,7 +5022,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -4358,6 +5278,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
         say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    if overlays:  # 🏷️ 2.0: плашка-заголовок + водяний знак + смуга прогресу
+        overlays_pass(os.path.join(workdir, "final.mp4"), query, workdir, say)
     if cover:  # 📷 v14: обкладинка для YouTube
         try:
             make_cover(workdir, query, say)
@@ -4378,6 +5300,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         pass
     try:  # 🛡️ v28: QC-звіт — декодування -xerror, кадр-проби, підсумок qc.txt
         qc_report(workdir, say)
+        qc_visual(workdir, say)  # 🛡️ 2.0: QC+ (контакт-шит, спалахи, пік гучності)
     except Exception:
         pass
     try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
@@ -4529,7 +5452,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -4717,6 +5640,12 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
         run(cmd2, cwd=workdir)
         say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    if overlays:  # 🏷️ 2.0: плашка-заголовок (перша частина) + знак + смуга прогресу
+        overlays_pass(os.path.join(workdir, "final.mp4"),
+                      (scenes[0]["text"].splitlines()[0].strip()
+                       if scenes and scenes[0]["text"].splitlines()
+                       else (scenes[0]["q"] if scenes else "")),
+                      workdir, say)
     if cover:  # 📷 v14: обкладинка — назва з першої частини сценарію
         try:
             first_line = scenes[0]["text"].splitlines()[0].strip() if scenes else ""
@@ -4743,6 +5672,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         pass
     try:  # 🛡️ v28: QC-звіт — декодування -xerror, кадр-проби, підсумок qc.txt
         qc_report(workdir, say)
+        qc_visual(workdir, say)  # 🛡️ 2.0: QC+ (контакт-шит, спалахи, пік гучності)
     except Exception:
         pass
     try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
@@ -5586,6 +6516,9 @@ class App:
         ctk.CTkButton(qrow, text="🧲 Оцінити", width=100, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.score_now).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(qrow, text="🧪 A/B-заголовки", width=128, height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.ab_now).pack(side="left", padx=(8, 0))
         ctk.CTkButton(qrow, text="🌐 YouTube", width=100, height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.open_youtube_search).pack(side="left", padx=(8, 0))
@@ -5670,9 +6603,6 @@ class App:
         ctk.CTkButton(orow, text="🔑 Ключі", height=32, corner_radius=16,  # 🔑 v44: вікно ключів
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self._key_window).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(orow, text="🌐 Браузер", height=32, corner_radius=16,  # 🌐 v47: свій браузер
-                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
-                      command=self.open_browser_win).pack(side="left", padx=(8, 0))
         self.ollama_status = ctk.CTkLabel(
             ac, text="🌐 Онлайн працює одразу — нічого не встановлювати. Перевір — підпишу модель. Налаштування лише локально; без AI — Асистент як раніше (парсер).",
             font=self._f(10), text_color=self.MUTED, anchor="w", wraplength=560)
@@ -5969,6 +6899,9 @@ class App:
         self.trim_sil = ctk.BooleanVar(value=False)  # ✂️ v14: паузи з озвучки
         ctk.CTkSwitch(self.extra_body, text="✂️ Прибирати паузи з озвучки", variable=self.trim_sil,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.overlays_on = ctk.BooleanVar(value=False)  # 🏷️ 2.0: оверлеї на фіналі
+        ctk.CTkSwitch(self.extra_body, text="🏷️ Оверлеї (плашка, знак, прогрес)", variable=self.overlays_on,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
         ctk.CTkSwitch(self.extra_body, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
@@ -6242,6 +7175,20 @@ class App:
         ctk.CTkButton(self.tools_body, text="🔄 Перевірити всі нейромережі", height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.core_check).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🎭 Пост-обробка готового відео",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        ctk.CTkButton(self.tools_body, text="✂️ Прибрати тишу з відео", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.trim_silence_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🌐 Перекласти субтитри (.srt)", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.translate_srt_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎙 Озвучити субтитри (дубляж)", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.dub_srt_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body,
+                     text="✂️ тиша (auto-editor) • 🌐 LibreTranslate (3 інстанси, фолбек LLM) • 🎙 дубляж з TC-дубляжем",
+                     font=self._f(11), text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="💾 Пресети налаштувань",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         self.preset_menu = ctk.CTkOptionMenu(self.tools_body, values=["(порожньо)"], height=32,
@@ -6437,7 +7384,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео v50 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo і 🌐 LLM7 — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 18 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 15 шлюзів, ⚡ Kilo/🌐 LLM7 без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 🔐 Google — кнопка у шапці чату: одразу віко входу Google → ключ Gemini; 🕵️ АГЕНТ: «знайди/новини…» або кнопка «🌐 Пошук» — свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями; 🏠 СВІЙ БРАУЗЕР (кнопка «🌐 Браузер»): адреса/запит, reader-режим, історія ⬅➡, «🌍 У Chrome»; 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 💾 кеш відповідей (24 год) — повторне питання миттєве, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.0 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -7504,6 +8451,85 @@ class App:
         finally:
             self.q.put(None)
 
+    def trim_silence_now(self):
+        """✂️ 2.0: прибрати тишу з готового відео — окремим потоком."""
+        p = filedialog.askopenfilename(title="Відео, з якого прибрати тишу",
+                                       filetypes=[("Відео", "*.mp4 *.mkv *.mov *.avi *.webm")])
+        if not p:
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._trim_silence_thread, args=(p,), daemon=True).start()
+
+    def _trim_silence_thread(self, p):
+        try:
+            silence_trim_video(p, self.say)
+        except Exception as e:
+            self.say("❌ Прибрання тиші: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def translate_srt_now(self):
+        """🌐 2.0: переклад .srt (LibreTranslate → фолбек LLM-драбина)."""
+        p = filedialog.askopenfilename(title="Субтитри (.srt)",
+                                       filetypes=[("Субтитри", "*.srt")])
+        if not p:
+            return
+        lang = simpledialog.askstring("Мова перекладу",
+                                     "Двокод мови (наприклад: en, es, it, ru, de, pl):",
+                                     initialvalue="en", parent=self)
+        if not lang:
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._translate_srt_thread, args=(p, lang.strip().lower()), daemon=True).start()
+
+    def _translate_srt_thread(self, p, lang):
+        try:
+            translate_srt_file(p, lang, self.say)
+        except Exception as e:
+            self.say("❌ Переклад субтитрів: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def dub_srt_now(self):
+        """🎙 2.0: дубляж — озвучити .srt голосом із поля голосу, притиснувши
+        кожну репліку у її таймінг; поруч є .mp4 — перезапишу йому доріжку."""
+        p = filedialog.askopenfilename(title="Субтитри для дубляжу (.srt)",
+                                       filetypes=[("Субтитри", "*.srt")])
+        if not p:
+            return
+        voice = self.voice.get() if hasattr(self, "voice") else ""
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._dub_srt_thread, args=(p, voice), daemon=True).start()
+
+    def _dub_srt_thread(self, p, voice):
+        try:
+            dub_srt_file(p, voice, self.say)
+        except Exception as e:
+            self.say("❌ Дубляж: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def ab_now(self):
+        """🧪 2.0: A/B-заголовки за темою з поля запиту — окремим потоком."""
+        q = self.query.get("1.0", "end").strip() if hasattr(self, "query") else ""
+        if len(q) < 4:
+            messagebox.showwarning("Стоп", "Спершу напиши тему у поле «Тема» 🙂")
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._ab_thread, args=(q,), daemon=True).start()
+
+    def _ab_thread(self, q):
+        try:
+            ab_titles(q, self.say)
+        except Exception as e:
+            self.say("❌ A/B-заголовки: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
     def pick_clone_ref(self):
         """🗣 v37: обрати зразок голосу (5–20 с чистої мови без музики)."""
         p = filedialog.askopenfilename(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg")])
@@ -7977,10 +9003,10 @@ class App:
                     self._ollama_check_done(msg[1])
                 elif kind == "chat_stream":  # ⚡ v42: токен стріму — малюю одразу
                     self._chat_stream_delta(msg[1])
+                elif kind == "voice_text":  # 🎤 v51: диктовка розпізнана
+                    self._voice_text_done(msg[1])
                 elif kind == "chat_done":  # ⚡ v42: відповідь допливла повністю
                     self._chat_done(msg[1])
-                elif kind == "brow_page":  # 🌐 v47: сторінка свого браузера готова
-                    self._brow_page_done(msg[1])
                 elif kind == "gen_end":
                     ok = msg[1]
                     self.bar.stop()
@@ -8133,6 +9159,7 @@ class App:
                    "sambanova": "🟧 SambaNova", "huggingface": "🤗 HF Router",
                    "zhipu": "🟣 GLM (Zhipu)", "zai": "🟣 GLM (Z.AI)",
                    "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
+                   "cohere": "🧩 Cohere",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
@@ -8190,11 +9217,15 @@ class App:
                     + ["kilo-auto/free", "gpt-5.5", "gpt-oss-20b"]
             elif "Gemini онлайн" in v:
                 vals += FREEKEY_MODELS.get("gemini", []) \
-                    + ["google/gemini-2.0-flash-exp:free"]
+                    + ["google/gemma-4-31b-it:free"]  # 🧭 v52: свіжі :free у фолбеку
             elif "Mistral онлайн" in v:
                 vals += FREEKEY_MODELS.get("mistral", [])
             elif v in rev and rev[v] in FREEKEY_MODELS:
                 vals += FREEKEY_MODELS[rev[v]]
+            elif "LLMFaucet" in v:  # 🚰 v52: селектори Faucet
+                vals += list(FAUCET_MODELS)
+            elif "AI Horde" in v:  # 🐎 v52: перемикача моделей нема — як у картці
+                pass
             elif "Kilo" in v:
                 vals += ["kilo-auto/free"]
             elif "LLM7" in v:
@@ -8246,228 +9277,6 @@ class App:
         except Exception:
             pass
         self.say("🌙 Темна тема чату" if dark else "☀️ Світла тема чату")
-
-    def open_browser_win(self):
-        """🌐 v47: СВІЙ БРАУЗЕР — вікно з адресою, історією, reader-режимом
-        (сторінка → читабельний текст, без важкого движка — тому не тупить),
-        пошуком DuckDuckGo БЕЗ ключів і кнопкою «🌍 У Chrome» для сторінок
-        із входом/JS. Все у фоні, кеш 10 хв (fail-open)."""
-        try:
-            if getattr(self, "_brow_win", None) is not None \
-                    and self._brow_win.winfo_exists():
-                self._brow_win.lift()
-                return
-        except Exception:
-            pass
-        self._brow_hist = getattr(self, "_brow_hist", [])
-        self._brow_pos = getattr(self, "_brow_pos", -1)
-        self._brow_results = []
-        win = ctk.CTkToplevel(self.root)
-        win.title("🌐 Свій браузер — Генератор відео")
-        win.geometry("980x660")
-        self._brow_win = win
-        try:
-            win.attributes("-topmost", True)
-            win.after(400, lambda: win.attributes("-topmost", False))
-        except Exception:
-            pass
-        nav = ctk.CTkFrame(win, fg_color="transparent")
-        nav.pack(fill="x", padx=10, pady=(10, 4))
-        ctk.CTkButton(nav, text="⬅", width=40, height=32, corner_radius=16,
-                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
-                      font=self._f(13), command=self._brow_back).pack(
-                          side="left")
-        ctk.CTkButton(nav, text="➡", width=40, height=32, corner_radius=16,
-                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
-                      font=self._f(13), command=self._brow_fwd).pack(
-                          side="left", padx=(6, 0))
-        ctk.CTkButton(nav, text="🔄", width=40, height=32, corner_radius=16,
-                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
-                      font=self._f(13),
-                      command=lambda: self._brow_go(force=True)).pack(
-                          side="left", padx=(6, 0))
-        self._brow_url = ctk.CTkEntry(nav, height=32, font=self._f(12))
-        self._brow_url.pack(side="left", fill="x", expand=True, padx=(8, 4))
-        self.attach_paste_menu(self._brow_url)  # 🖱 ПКМ — як усюди
-        self._bind_safe(self._brow_url, "<Return>",
-                        lambda e: self._brow_go())
-        ctk.CTkButton(nav, text="➡ Йти", height=32, corner_radius=16,
-                      fg_color=self.CLAUDE_ACCENT, hover_color=self.CLAUDE_ACCENT_H,
-                      text_color="#FFFFFF", font=self._f(12),
-                      command=self._brow_go).pack(side="left")
-        ctk.CTkButton(nav, text="🌍 У Chrome", height=32, corner_radius=16,
-                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_LINE,
-                      font=self._f(12),
-                      command=self._brow_chrome).pack(side="left", padx=(8, 0))
-        self._brow_home_menu = ctk.CTkOptionMenu(
-            nav, width=170, height=32, font=self._f(11),
-            values=[n for n, u in BROWSER_HOMES],
-            command=self._brow_home)
-        self._brow_home_menu.set("🔎 DuckDuckGo")
-        self._brow_home_menu.pack(side="left", padx=(8, 0))
-        self._brow_view = ctk.CTkTextbox(win, font=self._f(13), wrap="word")
-        self._brow_view.pack(fill="both", expand=True, padx=10, pady=(4, 2))
-        self._ro_selectable(self._brow_view)  # виділення + Ctrl+A/C + ПКМ-копіювання
-        self._brow_status = ctk.CTkLabel(
-            win, text="Введи адресу або запит (не адреса — знайду в DuckDuckGo, "
-                      "без ключів) • номер знайденого результату → відкрию його • "
-                      "вхід у акаунти — «🌍 У Chrome»",
-            font=self._f(10), text_color=self.CLAUDE_MUTED, anchor="w",
-            wraplength=940)
-        self._brow_status.pack(fill="x", padx=14, pady=(0, 8))
-        self._brow_put("👋 Це твій браузер: адреса або запит угорі — і «➡ Йти».\n"
-                       "Reader-режим показує ЧИТАБЕЛЬНИЙ текст сторінки (без "
-                       "реклами і скриптів) — тому миттєво.\nСторінки з входом "
-                       "(ключі, акаунти) — кнопка «🌍 У Chrome».\nГарного дня! 🌞")
-        self._brow_go(url="https://lite.duckduckgo.com/lite/")
-
-    def _brow_put(self, text, status=None):
-        """🌐 v47: намалювати текст сторінки у вікні браузера (як відповідь
-        чату: ЖИВЕ виділення і копіювання, друкувати не даю)."""
-        try:
-            self._brow_view.configure(state="normal")
-            self._brow_view.delete("1.0", "end")
-            self._brow_view.insert("1.0", text)
-            self._brow_view.yview_moveto(0.0)
-            if status is not None:
-                self._brow_status.configure(text=status)
-        except Exception:
-            pass  # вікно закрили — тихо (fail-open)
-
-    def _brow_current(self):
-        """🌐 v47: адреса зараз на екрані."""
-        try:
-            if 0 <= getattr(self, "_brow_pos", -1) < len(self._brow_hist):
-                return self._brow_hist[self._brow_pos]
-        except Exception:
-            pass
-        return ""
-
-    def _brow_go(self, url=None, force=False, remember=True):
-        """🌐 v47/v50: відкрити адресу/запит У ФОНІ (Tk не блокується):
-        не адреса — ДРАБИНА ПОШУКУ (DuckDuckGo, а як лежить — Mojeek);
-        № — результат пошуку; кеш 10 хв."""
-        try:
-            cur = self._brow_url.get().strip()
-        except Exception:
-            cur = ""
-        target = (url or cur).strip()
-        if not target and not force:
-            return
-        if not target:  # 🔄 порожньо — оновлюю поточну (або стартова DuckDuckGo)
-            target = self._brow_current() or "https://lite.duckduckgo.com/lite/"
-        if target.isdigit() and self._brow_results:  # № результату пошуку
-            i = int(target) - 1
-            if 0 <= i < len(self._brow_results):
-                target = self._brow_results[i]["url"]
-                try:
-                    self._brow_url.delete(0, "end")
-                    self._brow_url.insert(0, target)
-                except Exception:
-                    pass
-        if not target.startswith("http"):  # запит словами → ДРАБИНА ПОШУКУ
-            if "://" in target or "." in target.split(" ")[0]:
-                target = "https://" + target
-            else:
-                target = "search:" + target  # 🔎 v50: без фетчу lite-сторінки
-        if remember and target != self._brow_current():
-            try:
-                self._brow_hist = self._brow_hist[:self._brow_pos + 1] + [target]
-                self._brow_pos = len(self._brow_hist) - 1
-            except Exception:
-                pass
-        try:
-            self._brow_status.configure(
-                text=("⏳ Шукаю " + target[7:][:80] + "…"
-                      if target.startswith("search:")
-                      else "⏳ Завантажую " + target[:80] + "…"))
-        except Exception:
-            pass
-
-        def job():
-            kind, text = "page", ""
-            if target.startswith("search:"):  # 🔎 v50: запит → драбина рушіїв
-                hits = ddg_search(target[7:], timeout=18)
-                if hits:
-                    self._brow_results = hits
-                    text = "\n".join(
-                        "{}. {} — {}\n   {}".format(i, h["title"], h["url"],
-                                                    h["snip"])
-                        for i, h in enumerate(hits, 1))
-                    text = ("🔎 Знайшов " + str(len(hits)) + " ("
-                            + (hits[0].get("engine") or "мережа")
-                            + ", без ключів). Введи номер — відкрию "
-                              "результат:\n\n" + text)
-                    kind = "search"
-                else:
-                    text = ("🔎 Пошуковики мовчать (DuckDuckGo і Mojeek).\n"
-                            "Спробуй інший запит, повтори за хвилину або "
-                            "«🌍 У Chrome» — справжній браузер.")
-                    kind = "err"
-            elif target.rstrip("/") == "https://lite.duckduckgo.com/lite":
-                text = ("💡 Напиши запит у полі вище і «➡ Йти» — пошук іде\n"
-                        "БЕЗ ключів: DuckDuckGo, а як лежить — запасний "
-                        "Mojeek.\nВведи номер результату — відкрию сторінку. "
-                        "Гарного дня! 🌞")
-            else:
-                try:
-                    text = fetch_page_text(target, timeout=20)
-                except Exception as e:
-                    text = ("⚠️ Сторінка не далась: " + str(e)[:120]
-                            + "\nСпробуй ще раз або «🌍 У Chrome» — можливо, "
-                              "сторінці потрібен JavaScript чи вхід.")
-                    kind = "err"
-            self.q.put(("brow_page", (target, text, kind)))
-        threading.Thread(target=job, daemon=True).start()
-
-    def _brow_page_done(self, payload):
-        """🌐 v47: сторінка допливла — малюю у вікні (черга _poll)."""
-        url, text, kind = payload
-        status = ("🔎 Результати: " + url[7:][:90]
-                  if url.startswith("search:")
-                  else "✅ Готово: " + url[:90]
-                  + " • ПКМ — копіювати/виділити • ⬅➡ — історія")
-        if kind == "err":
-            status = "⚠️ Не вийшло: " + url[:90]
-        self._brow_put(text, status)
-
-    def _brow_back(self):
-        """🌐 v47: назад по історії (з кешу — миттєво, не тупить)."""
-        try:
-            if self._brow_pos > 0:
-                self._brow_pos -= 1
-                self._brow_go(url=self._brow_hist[self._brow_pos],
-                              remember=False)
-        except Exception:
-            pass
-
-    def _brow_fwd(self):
-        """🌐 v47: вперед по історії."""
-        try:
-            if self._brow_pos < len(self._brow_hist) - 1:
-                self._brow_pos += 1
-                self._brow_go(url=self._brow_hist[self._brow_pos],
-                              remember=False)
-        except Exception:
-            pass
-
-    def _brow_chrome(self):
-        """🌐 v47: потрібен справжній браузер (вхід, JavaScript) — у Chrome."""
-        u = self._brow_current() or (self._brow_url.get().strip() or "")
-        if u:
-            open_in_chrome(u if u.startswith("http") else "https://" + u)
-
-    def _brow_home(self, name):
-        """🌐 v47: домашня сторінка з меню."""
-        for n, u in BROWSER_HOMES:
-            if n == name:
-                try:
-                    self._brow_url.delete(0, "end")
-                    self._brow_url.insert(0, u)
-                except Exception:
-                    pass
-                self._brow_go(url=u)
-                return
 
     def _mem_load(self):
         """🧠 v42: пам'ять чату — факти про користувача з tools/memory.json
@@ -8565,20 +9374,22 @@ class App:
             rerender()
 
     def _chat_system(self):
-        """💬 v42: системний промпт чату — характер, завдання і ПАМ'ЯТЬ."""
+        """💬 v42/2.0: системний промпт чату — характер, завдання, дата
+        і ПАМ'ЯТЬ (агент може шукати до 2 раундів — модель знає межу)."""
         s = ("Ти — Асистент «Генератора відео» (український десктопний генератор "
              "Shorts і відео: озвучка, субтитри, фон з YouTube чи фото, рендер). "
+             "Сьогоднішня дата: " + datetime.now().strftime("%d.%m.%Y") + ". "
              "Відповідай українською, тепло і стисло, як Claude: конкретика, без "
              "води. Великий код (сценарій, JSON, команди) оформляй блоком у "
              "три гратки ``` — він стане артефактом з кнопками. Якщо просять "
              "налаштувати генерацію — дай ОДНУ готову фразу для поля Асистента "
              "(наприклад: «Shorts про космос, голос Поліна, караоке»). "
              "Ти ще й АГЕНТ: якщо нижче є «Свіжі дані з мережі» — це твій "
-             "інструмент-пошук (DuckDuckGo): відповідай, спираючись на них, "
+             "інструмент-пошук (DuckDuckGo → Mojeek): відповідай, спираючись на них, "
              "і вкажи джерела URL-посиланнями. 🤖 Якщо для відповіді потрібні "
-             "свіжі дані з мережі, а їх у промпті нема — відповій ЛИШЕ "
-             "рядком «🔍ПОШУК: що знайти» — агент знайде і передасть тобі "
-             "дані для другої відповіді.")
+             "свіжі дані з мережі, а їх у промпті нема — відповісти ЛИШЕ "
+             "рядком «🔍ПОШУК: що знайти» — агент шукає ДО 2 РАУНДІВ і "
+             "передасть тобі дані для другої відповіді.")
         rules = project_rules()  # 📏 v32: правила проєкту — обов'язкові для моделі
         if rules:
             s += "\nПравила проєкту (обов'язкові):\n- " + "\n- ".join(rules)
@@ -8665,7 +9476,9 @@ class App:
                     "🤖 Gemini онлайн", "🇪🇺 Mistral онлайн"]
             + [self.CHAT_PRETTY[n] for n in FREEKEY_ORDER]
             + ["⚡ Kilo (без ключа)", "🌐 LLM7 (без ключа)",
-               "🌐 Pollinations (без ключа)"],
+               "🚰 LLMFaucet (без ключа)",
+               "🌐 Pollinations (без ключа)",
+               "🐎 AI Horde (без ключа)"],
             command=self._chat_pick_switch)
         self.chat_pick.set("🔄 Як в картці")
         self.chat_pick.pack(side="left", pady=(8, 2))
@@ -8683,12 +9496,19 @@ class App:
                       text_color="#FFFFFF", font=self._f(12),
                       command=self._chat_new).pack(side="right", padx=(8, 16),
                                                    pady=(10, 4))
-        ctk.CTkButton(head, text="🌐 Браузер", height=30, corner_radius=15,  # 🌐 v47
+        ctk.CTkButton(head, text="📄 Експорт", height=30, corner_radius=15,  # 📄 v51: розмова → читабельний txt
                       fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
-                      command=self.open_browser_win).pack(side="right",
-                                                          padx=(0, 8),
-                                                          pady=(10, 4))
+                      command=self._chat_export).pack(side="right",
+                                                       padx=(0, 8),
+                                                       pady=(10, 4))
+        self._voice_btn = ctk.CTkButton(  # 🎤 v51: продиктуй питання — мікрофон → Whisper Groq
+            head, text=("⏹️" if getattr(self, "_voice_rec", False) else "🎤"),
+            width=44, height=30, corner_radius=15,
+            fg_color=self.CLAUDE_BAR, hover_color=self.CLAUDE_LINE,
+            text_color=self.CLAUDE_TEXT, font=self._f(12),
+            command=self._chat_voice_toggle)
+        self._voice_btn.pack(side="right", padx=(0, 8), pady=(10, 4))
         ctk.CTkButton(head, text=("☀️" if getattr(self, "_chat_dark", False)
                                   else "🌙"), width=44, height=30,
                       corner_radius=15,  # 🌙 v48: темна тема чату — одним кліком
@@ -9182,6 +10002,11 @@ class App:
             if no_cache:  # «🔁 Ще раз» — стару відповідь викидаю зі свіжого життя
                 LLM_REPLY_CACHE.pop(key, None)
             hit = None if no_cache else LLM_REPLY_CACHE.get(key)
+            if not hit:  # 💾 v51: RAM-промах — гляну у ДИСКОВИЙ кеш (переживає перезапуск)
+                dval = None if no_cache else _llm_disk_get(key)
+                if dval:
+                    hit = (dval, time.time())
+                    LLM_REPLY_CACHE[key] = hit  # прогрів RAM-кешу з диска
             if hit and time.time() - hit[1] < 86400:  # свіжість кешу — 24 год
                 self.q.put(("chat_stream", hit[0]))
                 llm_trace("cache", prov, model or "-", t0, True,
@@ -9195,46 +10020,51 @@ class App:
                           on_delta=lambda d: self.q.put(("chat_stream", d)),
                           stop=lambda: getattr(self, "_chat_cancel", False),
                           timeout=180, on_note=_note)
-        try:  # 🤖 v48/v49: справжній tool-use — модель просять мережу, агент дає дані (1 раунд)
-            m = re.match(r"^\s*🔍ПОШУК:\s*(.+?)\s*$", (full or "").strip(), re.S)
-            if m and not getattr(self, "_chat_cancel", False):
-                query = m.group(1).strip()[:300]
+        try:  # 🤖 v48/v49/v52: СПРАВЖНІЙ tool-use — модель просить мережу, агент дає дані (ДО 2 РАУНДІВ)
+            for _round in range(2):  # 🕵️ v52: другий раунд — якщо знову «🔍ПОШУК:»
+                m = re.match(r"^\s*🔍ПОШУК:\s*(.+?)\s*$", (full or "").strip(), re.S)
+                if not m or getattr(self, "_chat_cancel", False):
+                    break
+                query = agent_query_clean(m.group(1))[:300]  # 🕵️ v52: чистий запит у рушій
                 self.q.put(("chat_stream",
-                            "🔎 Агент шукає: " + query + "…\n\n"))
+                            "🔎 Агент шукає (раунд " + str(_round + 1) + "/2): "
+                            + query + "…\n\n"))
                 try:
                     ctx, note = agent_web_context(query, timeout=15)
                 except Exception:
                     ctx, note = "", ""
-                if ctx:
-                    self.q.put(("chat_stream", "🔎 " + note
-                                + " — відповідаю з ними…\n\n"))
+                if not ctx:
+                    break  # мережа мовчить — на чесне пояснення нижче
+                self.q.put(("chat_stream", "🔎 " + note
+                            + " — відповідаю з ними…\n\n"))
+                second = ""
+                try:
+                    second = llm_stream(prov, url, model, text,
+                                        system=(system or "") + "\n\n" + ctx,
+                                        history=history,
+                                        on_delta=lambda d: self.q.put(
+                                            ("chat_stream", d)),
+                                        stop=lambda: getattr(self,
+                                                             "_chat_cancel",
+                                                             False),
+                                        timeout=180, on_note=_note) or ""
+                except Exception:
                     second = ""
-                    try:
-                        second = llm_stream(prov, url, model, text,
-                                           system=(system or "") + "\n\n" + ctx,
-                                           history=history,
-                                           on_delta=lambda d: self.q.put(
-                                               ("chat_stream", d)),
-                                           stop=lambda: getattr(self,
-                                                                "_chat_cancel",
-                                                                False),
-                                           timeout=180, on_note=_note) or ""
-                    except Exception:
-                        second = ""
-                    if second:
-                        full = second
-                if (full or "").strip().startswith("🔍ПОШУК:"):
-                    # 🆕 v49: модель просила мережу, мережа мовчить — чесно
-                    # пояснюю, а не показую сирий «🔍ПОШУК: …» як відповідь
-                    full = ("🔎 Агент не зміг дістати свіжі дані з мережі "
-                            "(мережа мовчить або DuckDuckGo лімітує) — "
-                            "спробуй «🌐 Пошук» ще раз, перемкни джерело у "
-                            "шапці або питай без свіжих даних.")
+                if second:
+                    full = second
+            if (full or "").strip().startswith("🔍ПОШУК:"):
+                # 🆕 v49/v52: модель просила мережу, мережа мовчить (2 раунди) —
+                # чесно пояснюю, а не показую сирий «🔍ПОШУК: …» як відповідь
+                full = ("🔎 Агент не зміг дістати свіжі дані з мережі "
+                        "(мережа мовчить або DuckDuckGo лімітує) — "
+                        "спробуй «🌐 Пошук» ще раз, перемкни джерело у "
+                        "шапці або питай без свіжих даних.")
         except Exception:
             pass  # раунд агента впав — лишається перша відповідь (fail-open)
-        try:  # 💾 v48: зберегти у кеш — наступне таке саме питання миттєве
+        try:  # 💾 v48/v51: зберегти у кеш — наступне таке саме питання миттєве
             if key and full:
                 LLM_REPLY_CACHE[key] = (full, time.time())
+                _llm_disk_add(key, full)  # 💾 v51: і на диск — переживе перезапуск
                 if len(LLM_REPLY_CACHE) > 300:  # не роздуваємо пам'ять
                     LLM_REPLY_CACHE.pop(next(iter(LLM_REPLY_CACHE)))
         except Exception:
@@ -9446,6 +10276,140 @@ class App:
         self.agent_entry.delete("1.0", "end")
         self.agent_entry.insert("1.0", text)
         self._agent_send()
+
+    def _chat_export(self):
+        """📄 v51: розмова чату → читабельний txt (шапка з датою; хто,
+        [джерело], текст). Порожній чат — підказка (fail-open)."""
+        try:
+            msgs = list(getattr(self, "chat_messages", None) or [])
+            if not msgs:
+                self.say("📄 Розмова порожня — нема що експортувати 🙂")
+                return
+            path = filedialog.asksaveasfilename(
+                title="Куди зберегти розмову", defaultextension=".txt",
+                initialfile="розмова_чата_" + datetime.now().strftime("%Y%m%d") + ".txt",
+                filetypes=[("Текст", "*.txt")])
+            if not path:
+                return
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("Розмова з Асистентом «Генератора відео» — "
+                         + datetime.now().strftime("%d.%m.%Y %H:%M") + "\n")
+                fh.write("=" * 60 + "\n\n")
+                for m in msgs:
+                    who = "ТИ" if m.get("role") == "user" else "АСИСТЕНТ"
+                    src = str(m.get("src") or "").strip()
+                    head = "[" + who + ("]" if not src else " | " + src + "]")
+                    fh.write(head + "\n" + str(m.get("text") or "") + "\n\n")
+            self.say("📄 Розмову збережено: " + os.path.basename(path))
+            try:
+                os.startfile(os.path.dirname(path) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("📄 Не вийшло зберегти розмову: " + str(e)[:120])
+
+    def _chat_voice_toggle(self):
+        """🎤 v51: продиктуй питання — СТАРТ/СТОП запису: мікрофон (dshow)
+        → wav 16 кГц моно → Whisper на Groq → текст у полі чату. Нема
+        groq-ключа/ffmpeg/мікрофона — чесна підказка (fail-open)."""
+        if getattr(self, "_voice_rec", False):
+            self._voice_stop()
+            return
+        key = str(load_freekeys().get("groq") or "").strip()
+        if len(key) < 20:
+            messagebox.showwarning(
+                "Стоп", "🎤 Для диктовки потрібен безкоштовний ключ Groq\n"
+                        "(console.groq.com → API Keys, без картки) —\n"
+                        "кнопка «🔑 Ключі» у картці Асистента 🙂")
+            return
+        ensure_ffmpeg(self.say)
+        if not ffmpeg_available():
+            self.say("🎤 Нема ffmpeg — диктовка недоступна (див. журнал)")
+            return
+        mic = _dshow_mic_name()
+        if not mic:
+            self.say("🎤 Не знайшов мікрофона Windows — перевір підключення")
+            return
+        self._voice_rec = True
+        self._voice_wav = os.path.join(TOOLS_DIR, "_chat_voice.wav")
+        try:
+            os.makedirs(TOOLS_DIR, exist_ok=True)
+            self._voice_proc = subprocess.Popen(
+                [ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
+                 "-f", "dshow", "-i", "audio=" + mic,
+                 "-ar", "16000", "-ac", "1", self._voice_wav])
+        except Exception as e:
+            self._voice_rec = False
+            self.say("🎤 Запис не стартнув: " + str(e)[:120])
+            return
+        try:
+            self._voice_btn.configure(text="⏹️")
+        except Exception:
+            pass
+        self.say("🎤 Слухаю… натисни ⏹️ (до 45 с) — розпізнаю Whisper на Groq")
+
+        def _watch():
+            waited = 0.0
+            while getattr(self, "_voice_rec", False) and waited < 45.0:
+                time.sleep(0.5)
+                waited += 0.5
+            try:  # авто-стоп на 45 с — щоб не писав у пустоту
+                if getattr(self, "_voice_rec", False):
+                    self._voice_stop()
+            except Exception:
+                pass
+        threading.Thread(target=_watch, daemon=True).start()
+
+    def _voice_stop(self):
+        """🎤 v51: стоп запису → Groq Whisper → текст у поле чату."""
+        self._voice_rec = False
+        try:
+            self._voice_btn.configure(text="🎤")
+        except Exception:
+            pass
+        proc = getattr(self, "_voice_proc", None)
+        try:
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=60)
+                except Exception:
+                    proc.kill()
+        except Exception:
+            pass
+        wav = getattr(self, "_voice_wav", "")
+        if not wav or not os.path.isfile(wav) or os.path.getsize(wav) < 2048:
+            self.say("🎤 Запис порожній — скажи щось довше 🙂")
+            try:
+                if wav and os.path.isfile(wav):
+                    os.remove(wav)
+            except OSError:
+                pass
+            return
+        self.say("🎤 Розпізнаю (Whisper на Groq)…")
+
+        def _job():
+            try:
+                txt = groq_stt_text(wav)
+            finally:
+                try:
+                    os.remove(wav)
+                except OSError:
+                    pass
+            if txt:
+                self.q.put(("voice_text", txt))
+            else:
+                self.q.put(("chat_stream", "🎤 Не розпізнав — спробуй ще раз\n"))
+        threading.Thread(target=_job, daemon=True).start()
+
+    def _voice_text_done(self, txt):
+        """🎤 v51: розпізнаний текст — у поле чату (курор на місці)."""
+        try:
+            self.chat_input.insert("end", txt)
+            self.chat_input.focus()
+            self.say("🎤 Продиктував: додано у поле чату")
+        except Exception:
+            pass
 
     def _llm_provider(self):
         """🌐 v31/v35/v36/v40: що обрано в картці Асистента: 'ollama', '9router',
@@ -9914,6 +10878,7 @@ class App:
                   and self.pub_platform.get() != "Не" else None)  # 📺 v32: платформа публікації
             up4 = bool(self.upscale4k.get()) if hasattr(self, "upscale4k") else False  # 📈 v34: 4К
             asc = bool(self.autoscrape.get()) if hasattr(self, "autoscrape") else False  # 🧹 v34: авоскраб
+            ov = bool(self.overlays_on.get()) if hasattr(self, "overlays_on") else False  # 🏷️ 2.0: оверлеї
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
@@ -9921,7 +10886,7 @@ class App:
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
                                       no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                      upscale4k=up4, autoscrape=asc)
+                                      upscale4k=up4, autoscrape=asc, overlays=ov)
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
@@ -9948,7 +10913,7 @@ class App:
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
                                        trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                       upscale4k=up4, autoscrape=asc)
+                                       upscale4k=up4, autoscrape=asc, overlays=ov)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
