@@ -317,6 +317,16 @@ Groq розшифровує voice.mp3 і звіряє зі сценарієм �
 озвучки → фрази субтитрів. 📜 VIDEO RECEIPTS (молекула П23): провенас
 кожного кроку (хто писав сценарій, звідки факти, чи верифіковано озвучку)
 зберігається у manifest.json. Усе — нуль нових ключів, нуль нових pip.
+2.2: ⚡ ШВИДКИЙ ДОСТУП АГЕНТІВ ДО ІНТЕРНЕТУ («щоб агенти швидко
+працювали»): fetch_pages_fast — сторінки читаються ПАРАЛЕЛЬНО
+(ThreadPoolExecutor, 2–3 одночасно, жорсткий тайм-бюджет: повільна
+сторінка не гальмує решту; було — черга по 12–15 с кожна); web_research —
+пошук прудкий (тайм-аут 10 с) + паралельні витяги сторінок; ГЛАВНЕ —
+дослідження біжить У ФОНІ (потік) ПАРАЛЕЛЬНО режисерові оркестру: поки
+той планує структуру, мережа збирає факти, і лише сценарист чекає
+решту (join ≤25 с) — оркестр + інтернет ≈ час одного оркестру; агент
+чату (🕵️ «знайди…») читає свої 2 сторінки одночасно — відповідь прудша.
+Нуль нових ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -452,7 +462,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.1 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.2 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -844,7 +854,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.1"}
+            d = {"app": "Генератор відео 2.2"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1326,8 +1336,38 @@ def write_edl(slots, workdir, say=None, fps=25):
         pass  # артефакт, ніколи не ламає генерацію
 
 
+def fetch_pages_fast(urls, per_page=1200, timeout=8, workers=3):
+    """⚡ 2.2: ШВИДКИЙ ДОСТУП АГЕНТІВ ДО ІНТЕРНЕТУ — сторінки читаються
+    ПАРАЛЕЛЬНО (ThreadPoolExecutor, 2–3 одночасно) замість черги по
+    12–15 с на сторінку: дослідження в 2–3 рази швидше. Жорсткий
+    тайм-бюджет: повільна сторінка не гальмує решту (fail-open — що
+    встигло, те й потрапило у витяги). Повертає {url: витяг}."""
+    out = {}
+    urls = [u for u in (urls or []) if u][:4]
+    if not urls:
+        return out
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(urls)))) as ex:
+            futs = {ex.submit(fetch_page_text, u, timeout, 4000): u for u in urls}
+            try:
+                for fut in as_completed(futs, timeout=timeout + 6):
+                    try:
+                        t = fut.result() or ""
+                    except Exception:
+                        t = ""
+                    if t:
+                        out[futs[fut]] = " ".join(t.split())[:per_page]
+            except Exception:
+                pass  # тайм-бюджет вичерпано — беру що встигло
+    except Exception:
+        pass  # паралельність не завелася — дослідження без витягів сторінок
+    return out
+
+
 def web_research(topic, say=None, max_pages=2):
-    """🌐 2.1: ІНТЕРНЕТ-ДОСЛІДЖЕННЯ теми ПЕРЕД сценарієм (нуль ключів):
+    """🌐 2.1: ІНТЕРНЕТ-ДОСЛІДЖЕННЯ теми ПЕРЕД сценарієм (нуль ключів; ⚡ 2.2: сторінки —
+    ПАРАЛЕЛЬНО, у 2–3 рази швидше):
     драбина DuckDuckGo → Mojeek (v50), витяги перших сторінок через
     міні-браузер fetch_page_text — патерн Vane/STORM: свіжі факти
     стають контекстом сценаристу. Нема мережі/пошук мовчить — ""
@@ -1336,7 +1376,7 @@ def web_research(topic, say=None, max_pages=2):
         q = (topic or "").strip()
         if not q:
             return ""
-        hits = ddg_search(q) or []
+        hits = ddg_search(q, timeout=10) or []
         if not hits:
             if say:
                 say("🌐 Пошук не дав джерел — сценарій без дослідження")
@@ -1344,21 +1384,19 @@ def web_research(topic, say=None, max_pages=2):
         top = hits[:4]
         ctx = ["СВІЖІ ФАКТИ З ІНТЕРНЕТУ ({} джерел, DuckDuckGo → Mojeek, {})".format(
             len(top), datetime.now().strftime("%d.%m.%Y"))]
+        extracts = fetch_pages_fast([h.get("url") or "" for h in top[:max_pages]],
+                                    per_page=1200, timeout=8, workers=3)  # ⚡ 2.2: паралельно
         pages = 0
         for h in top:
             ctx.append("— «{}» ({}): {}".format(
                 (h.get("title") or "").strip()[:90], h.get("url") or "",
                 (h.get("snip") or "").strip()[:280]))
-            if pages < max_pages:
-                try:
-                    body = fetch_page_text(h.get("url") or "", timeout=12, limit=6000)
-                    if body:
-                        ctx.append("  витяг: " + " ".join(body.split())[:1200])
-                        pages += 1
-                except Exception:
-                    pass  # сторінка не далась — джерело лишається з витягом пошуку
+            ex = extracts.get(h.get("url") or "")
+            if ex:
+                ctx.append("  витяг: " + ex)
+                pages += 1
         if say:
-            say("🌐 Дослідження: {} джерел, {} сторінок прочитано".format(len(top), pages))
+            say("🌐 Дослідження: {} джерел, {} сторінок ПАРАЛЕЛЬНО ⚡".format(len(top), pages))
         return "\n".join(ctx)
     except Exception:
         return ""  # інтернет — підсилювач, не залежність
@@ -1395,17 +1433,18 @@ def orchestra_script(query, research, say=None):
     (чернетка) → 🧐 КРИТИК (оцінка NN/100 + правки) → ✨ РЕДАКТОР (фінал).
     Кожен агент — окремий хід безкоштовною драбиною «Авто»; ступінь
     мовчить — живе результат попереднього агента (fail-open на КОЖНОГО,
-    оркестр ніколи не ламає генерацію). Повертає "" — тоді живе текст теми."""
+    оркестр ніколи не ламає генерацію). ⚡ 2.2: дослідження мережі
+    біжить ПАРАЛЕЛЬНО режисерові (фоновий потік) — факти підхоплює
+    сценарист. Повертає "" — тоді живе текст теми."""
     def _say(m):
         if say:
             say(m)
     _say("🎭 Оркестр агентів: 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор")
-    base = (research + "\n\n") if research else ""
     # 1) 🎯 РЕЖИСЕР — план структури
     plan = ""
     try:
         plan = llm_chat("auto", "", "",
-                        base + "Тема відео: " + (query or "").strip() + "\n\n" +
+                        "Тема відео: " + (query or "").strip() + "\n\n" +
                         "Склади ПЛАН ролика на 4–6 пунктів: хук перших 5 секунд, "
                         "3–4 основні тези (до кожної — рядок-підказка), фінальний "
                         "заклик (підписатись/запитання глядачу). Тільки список "
@@ -1419,6 +1458,11 @@ def orchestra_script(query, research, say=None):
     if plan and len(plan) > 40:
         _say("🎯 Режисер: план готовий ({} пунктів)".format(
             len([l for l in plan.splitlines() if l.strip()])))
+    # ⚡ 2.2: дослідження (фоновий потік або готовий рядок) забираю ТУТ:
+    # поки режисер думав, мережа працювала паралельно — сценарист одразу
+    # пише зі свіжими фактами (на решту ходу — максимум 25 с)
+    research = research() if callable(research) else (research or "")
+    base = (research + "\n\n") if research else ""
     # 2) ✍️ СЦЕНАРИСТ — чернетка за планом
     draft = ""
     try:
@@ -1531,7 +1575,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.1"}
+                "app": "Генератор відео 2.2"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -3362,13 +3406,12 @@ def agent_web_context(query, timeout=15):
            "ключів) — обов'язково використай їх у відповіді і зазнач "
            "джерела ПОСИЛАННЯМИ (просто URL у тексті):\n"
            + "\n".join(parts))
-    for h in hits[:2]:  # 🕵️ v52: глибина — витяги ПЕРШИХ ДВОХ сторінок
-        try:
-            page = fetch_page_text(h["url"], timeout=timeout, limit=2500)
-            if page:
-                ctx += ("\n\nВитяг з " + h["url"] + ":\n" + page[:2500])
-        except Exception:
-            pass  # сторінка не далась — хітів і так вистачить (fail-open)
+    extracts = fetch_pages_fast([h.get("url") or "" for h in hits[:2]],
+                                per_page=2500, timeout=timeout, workers=2)  # ⚡ 2.2: паралельно
+    for h in hits[:2]:  # 🕵️ v52: глибина — ПЕРШІ ДВІ сторінки, тепер одночасно
+        page = extracts.get(h.get("url") or "")
+        if page:
+            ctx += ("\n\nВитяг з " + h["url"] + ":\n" + page[:2500])
     eng = (hits[0].get("engine") if hits else "") or "мережі"
     return ctx, ("знайшов " + str(len(hits)) + " свіжих джерел (" + eng
                  + ", без ключів)")
@@ -5252,22 +5295,44 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     say("📁 Робоча папка створена")
 
     text = narration_for(query)  # 🔁 база: якщо всі агенти мовчать — живе шаблон теми
-    # 🎭🌐 2.1: інтернет-дослідження + оркестр агентів — тема проходить
-    # свіжі факти (DuckDuckGo → Mojeek) і чотири ролі через драбину «Авто»
+    # 🎭🌐⚡ 2.1/2.2: інтернет-дослідження + оркестр агентів. Дослідження
+    # мережею (швидке, паралельне) біжить У ФОНІ — режисер оркестру НЕ
+    # чекає мережі: поки він планує, сторінки читаються одночасно, і лише
+    # сценарист підхоплює факти; без оркестру — дослідження до сценарію
     receipts = ["сценарій: шаблон теми"]  # 📜 Video Receipts — провенас у manifest.json
-    research = web_research(query, say) if web_on else ""
-    if research:
-        receipts.append("дослідження: 🌐 " + research.splitlines()[0][:70])
+    research_res = {}  # ⚡ 2.2: результат фонового дослідження (потік)
+    t_research = None
+
+    def _research_now():
+        """⚡ 2.2: забрати дослідження — чекаю лише решту його ходу (≤25 с)"""
+        if t_research is not None:
+            t_research.join(timeout=25)
+        return research_res.get("r", "")
+
+    if web_on:
+        def _rw():
+            try:
+                research_res["r"] = web_research(query, say)
+            except Exception:
+                research_res["r"] = ""
+        t_research = threading.Thread(target=_rw, daemon=True)  # 🔂 мережа у фоні
+        t_research.start()
     if orchestra:
-        orch = orchestra_script(query, research, say)
+        orch = orchestra_script(query, _research_now, say)  # callable ⚡: без паузи на мережу
         if orch:
             text = orch
             receipts[0] = "сценарій: 🎭 оркестр (режисер → сценарист → критик → редактор)"
-    elif web_on and research:
-        rn = research_narration(query, research, say)
-        if rn:
-            text = rn
-            receipts[0] = "сценарій: 🌐 сценарист із інтернет-дослідженням"
+        r = _research_now()  # 📜 чек-квиток дослідження — після оркестру
+        if r:
+            receipts.append("дослідження: 🌐 " + r.splitlines()[0][:70])
+    elif web_on:
+        r = _research_now()
+        if r:
+            receipts.append("дослідження: 🌐 " + r.splitlines()[0][:70])
+            rn = research_narration(query, r, say)
+            if rn:
+                text = rn
+                receipts[0] = "сценарій: 🌐 сценарист із інтернет-дослідженням"
     receipts.append("озвучка: " + voice_label)
     render_estimate(text, say)  # ⏱ «ціна перед спендом» — рахунок до старту
     voice = VOICES[voice_label]
@@ -7627,7 +7692,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.1 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek + витяги сторінок, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.2 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
