@@ -300,6 +300,23 @@ freekeys.json — llm-apipool-патерн: 429/ліміт одного ключ
 Faucet сам підбирає розумнішу модель); 📋 EDL-ЕКСПОРТ (таймлайн
 компіляції → CMX3600, відкривається у DaVinci Resolve). Усі фічі
 fail-open, гроші — нуль, ключі — лише локально.
+2.1: 🎭 ОРКЕСТР АГЕНТІВ + 🌐 ІНТЕРНЕТ У ПАЙПЛАЙНІ + новинки реверсу П20–П33.
+Свіч «🎭 Оркестр агентів» (у ⚙️ Додатково): тема проходить ЧОТИРИ ролі
+через безкоштовну драбину «Авто» (патерни ViMax Director+Screenwriter,
+crewAI-зграя, LLM-council): 🎯 РЕЖИСЕР (план: хук → тези → заклик) →
+✍️ СЦЕНАРИСТ (чернетка 150–260 слів) → 🧐 КРИТИК (адверсаріальна оцінка
+«ОЦІНКА: NN/100» + 2–3 правки) → ✨ РЕДАКТОР (фінал); кожен агент
+fail-open — ступінь мовчить, живе результат попереднього. Свіч «🌐 Свіжі
+факти з інтернету»: дослідження теми ДО сценарію — драбина DuckDuckGo →
+Mojeek + витяги перших сторінок (патерн Vane/STORM); без оркестру той самий
+дослідницький контекст йде одному сценаристу (лайт-режим). ✅ «СКАЗАНЕ =
+НАПИСАНЕ» (молекула ASR-верифікації TTS з П23): після озвучки Whisper на
+Groq розшифровує voice.mp3 і звіряє зі сценарієм — розбіг попереджує у
+журнал ДО рендера (нема ключа — тихо). ⏱ «ЦІНА ПЕРЕД СПЕНДОМ»
+(scenario-labs-молекула): рахунок генерації до старту — слова → секунди
+озвучки → фрази субтитрів. 📜 VIDEO RECEIPTS (молекула П23): провенас
+кожного кроку (хто писав сценарій, звідки факти, чи верифіковано озвучку)
+зберігається у manifest.json. Усе — нуль нових ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -435,7 +452,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.0 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.1 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -827,7 +844,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.0"}
+            d = {"app": "Генератор відео 2.1"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1309,6 +1326,204 @@ def write_edl(slots, workdir, say=None, fps=25):
         pass  # артефакт, ніколи не ламає генерацію
 
 
+def web_research(topic, say=None, max_pages=2):
+    """🌐 2.1: ІНТЕРНЕТ-ДОСЛІДЖЕННЯ теми ПЕРЕД сценарієм (нуль ключів):
+    драбина DuckDuckGo → Mojeek (v50), витяги перших сторінок через
+    міні-браузер fetch_page_text — патерн Vane/STORM: свіжі факти
+    стають контекстом сценаристу. Нема мережі/пошук мовчить — ""
+    (fail-open: генерація йде далі без дослідження)."""
+    try:
+        q = (topic or "").strip()
+        if not q:
+            return ""
+        hits = ddg_search(q) or []
+        if not hits:
+            if say:
+                say("🌐 Пошук не дав джерел — сценарій без дослідження")
+            return ""
+        top = hits[:4]
+        ctx = ["СВІЖІ ФАКТИ З ІНТЕРНЕТУ ({} джерел, DuckDuckGo → Mojeek, {})".format(
+            len(top), datetime.now().strftime("%d.%m.%Y"))]
+        pages = 0
+        for h in top:
+            ctx.append("— «{}» ({}): {}".format(
+                (h.get("title") or "").strip()[:90], h.get("url") or "",
+                (h.get("snip") or "").strip()[:280]))
+            if pages < max_pages:
+                try:
+                    body = fetch_page_text(h.get("url") or "", timeout=12, limit=6000)
+                    if body:
+                        ctx.append("  витяг: " + " ".join(body.split())[:1200])
+                        pages += 1
+                except Exception:
+                    pass  # сторінка не далась — джерело лишається з витягом пошуку
+        if say:
+            say("🌐 Дослідження: {} джерел, {} сторінок прочитано".format(len(top), pages))
+        return "\n".join(ctx)
+    except Exception:
+        return ""  # інтернет — підсилювач, не залежність
+
+
+def research_narration(query, research, say=None):
+    """🌐 2.1: один хід драбиною «Авто» — сценарій з теми ПЛЮС свіжі
+    факти дослідження (лайт-режим без оркестру). Не вийшло — ""
+    (fail-open: живе звичайний текст теми)."""
+    try:
+        ask = ((research + "\n\n") if research else "") + \
+              "Тема відео: " + (query or "").strip() + "\n\n" + \
+              "Напиши текст озвучки українською (150–260 слів, живою " \
+              "розмовною мовою, опирайся на факти з дослідження, якщо " \
+              "вони є; без заголовків, нумерації і маркдауну — тільки текст)."
+        t = llm_chat("auto", "", "", ask,
+                     system="Ти — сценарист коротких відео. Українською, "
+                            "просто і захопливо. Без води.",
+                     timeout=300)
+        t = (t or "").strip()
+        if t and len(t) >= 120:
+            if say:
+                say("🌐 Сценарист з дослідженням: текст готовий ({} слів)".format(len(t.split())))
+            return t
+    except Exception:
+        pass
+    return ""
+
+
+def orchestra_script(query, research, say=None):
+    """🎭 2.1: ОРКЕСТР АГЕНТІВ — тема проходить ЧОТИРИ ролі (патерни
+    ViMax Director+Screenwriter, crewAI-зграя і LLM-council з adversarial
+    critique): 🎯 РЕЖИСЕР (план: хук → тези → заклик) → ✍️ СЦЕНАРИСТ
+    (чернетка) → 🧐 КРИТИК (оцінка NN/100 + правки) → ✨ РЕДАКТОР (фінал).
+    Кожен агент — окремий хід безкоштовною драбиною «Авто»; ступінь
+    мовчить — живе результат попереднього агента (fail-open на КОЖНОГО,
+    оркестр ніколи не ламає генерацію). Повертає "" — тоді живе текст теми."""
+    def _say(m):
+        if say:
+            say(m)
+    _say("🎭 Оркестр агентів: 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор")
+    base = (research + "\n\n") if research else ""
+    # 1) 🎯 РЕЖИСЕР — план структури
+    plan = ""
+    try:
+        plan = llm_chat("auto", "", "",
+                        base + "Тема відео: " + (query or "").strip() + "\n\n" +
+                        "Склади ПЛАН ролика на 4–6 пунктів: хук перших 5 секунд, "
+                        "3–4 основні тези (до кожної — рядок-підказка), фінальний "
+                        "заклик (підписатись/запитання глядачу). Тільки список "
+                        "пунктів, без тексту озвучки.",
+                        system="Ти — досвідчений режисер коротких YouTube-відео. "
+                              "Українською. Стисло, по ділу, без води.",
+                        timeout=120)
+    except Exception:
+        plan = ""
+    plan = (plan or "").strip()
+    if plan and len(plan) > 40:
+        _say("🎯 Режисер: план готовий ({} пунктів)".format(
+            len([l for l in plan.splitlines() if l.strip()])))
+    # 2) ✍️ СЦЕНАРИСТ — чернетка за планом
+    draft = ""
+    try:
+        ask = base + "Тема: " + (query or "").strip() + "\n"
+        if plan:
+            ask += "\nПлан від режисера:\n" + plan + "\n"
+        ask += "\nНапиши ПОВНИЙ текст озвучки (150–260 слів, українською, " \
+               "живою розмовною мовою, без заголовків і маркдауну — тільки текст)."
+        draft = llm_chat("auto", "", "", ask,
+                         system="Ти — сценарист коротких відео. Тримайся плану "
+                                "режисера, якщо він є. Українською.",
+                         timeout=300)
+    except Exception:
+        draft = ""
+    draft = (draft or "").strip()
+    if not draft or len(draft) < 120:
+        _say("⚠️ Сценарист оркестру промовчав — лишається звичайний текст теми")
+        return ""
+    _say("✍️ Сценарист: чернетка готова ({} слів)".format(len(draft.split())))
+    # 3) 🧐 КРИТИК — адверсаріальна оцінка + правки (council-патерн)
+    critique, score = "", None
+    try:
+        critique = llm_chat("auto", "", "",
+                            "Оціни сценарій за шкалою 0–100 (хук перших секунд, "
+                            "темп, конкретність, користь глядачу, заклик).\n"
+                            "Першим рядком — «ОЦІНКА: NN/100». Далі 2–3 короткі "
+                            "ПРАВКИ (що саме дописати/перемалювати).\n\n"
+                            "СЦЕНАРІЙ:\n" + draft,
+                            system="Ти — суворий критик-редактор YouTube-відео. "
+                                   "Адверсаріально шукай слабкі місця. Українською.",
+                            timeout=120)
+    except Exception:
+        critique = ""
+    critique = (critique or "").strip()
+    m = re.search(r"ОЦІНКА[:\s]*(\d{1,3})", critique)
+    if m:
+        score = min(int(m.group(1)), 100)
+        _say("🧐 Критик: {}/100 — дивлюсь правки".format(score))
+    # 4) ✨ РЕДАКТОР — фінал з правками критика
+    final = ""
+    if critique and len(critique) > 30:
+        try:
+            final = llm_chat("auto", "", "",
+                             "Ось сценарій і зауваги критика. Внеси правки (лише ті, "
+                             "що справді роблять краще) і дай ФІНАЛЬНИЙ текст озвучки "
+                             "українською (150–260 слів, без заголовків).\n\n"
+                             "СЦЕНАРІЙ:\n" + draft + "\n\nЗАУВАГИ КРИТИКА:\n" + critique,
+                             system="Ти — редактор-полірувальник сценаріїв. Фінальний "
+                                    "текст — без води, з сильним хуком. Українською.",
+                             timeout=300)
+        except Exception:
+            final = ""
+    final = (final or "").strip()
+    if final and len(final) >= 120:
+        note = " (критик: {}/100)".format(score) if score is not None else ""
+        _say("✨ Редактор: фінальна версія ({} слів){}".format(len(final.split()), note))
+        return final
+    _say("✨ Редактор мовчить — лишається чернетка сценариста")
+    return draft
+
+
+def render_estimate(text, say):
+    """⏱ 2.1: «ЦІНА ПЕРЕД СПЕНДОМ» (scenario-labs-молекула, безкоштовна
+    форма «час і залізо»): рахунок генерації ДО старту — слова → секунди
+    озвучки, кількість фраз субтитрів. Оцінка, а не обіцянка; fail-open."""
+    try:
+        words = len((text or "").split())
+        secs = max(words / 2.2, 5.0)  # edge-tts ≈ 2.2 слова/с українською
+        srt_n = len([s for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()])
+        say("⏱ Рахунок генерації: {} слів → озвучка ~{:.0f} с · {} фраз "
+            "субтитрів · фон і рендер ~2–5 хв".format(words, secs, srt_n))
+    except Exception:
+        pass  # рахунок — підказка, ніколи не ламає генерацію
+
+
+def tts_verify(workdir, script_text, say=None):
+    """✅ 2.1: «СКАЗАНЕ = НАПИСАНЕ» (молекула ASR-верифікації TTS з реверсу
+    П23): після озвучки Whisper на Groq розшифровує готову доріжку, і я
+    звіряю її зі сценарієм. Збіг низький — попередження у журнал (діагностика,
+    щоб зловити обрізку/зависання TTS одразу, а не після рендера).
+    Нема groq-ключа або STT мовчить — тихо (fail-open, безкоштовний фрітір)."""
+    try:
+        wav = os.path.join(workdir, "voice.mp3")
+        if not os.path.isfile(wav) or os.path.getsize(wav) > 26 * 1024 * 1024:
+            return
+        said = groq_stt_text(wav)
+        if not said:
+            return  # нема ключа або STT мовчить — не турбую користувача
+        def _bag(s):
+            return set(w for w in re.findall(r"[а-яіїєґa-z]{4,}", (s or "").lower()))
+        want, got = _bag(script_text), _bag(said)
+        if not want:
+            return
+        cover = len(want & got) / float(len(want))
+        if say:
+            if cover >= 0.6:
+                say("✅ Верифікація озвучки: «сказане = написане» "
+                    "({:.0%} змістових слів збігається)".format(cover))
+            else:
+                say("⚠️ Озвучка розійшлась зі сценарієм ({:.0%} збіг) — "
+                    "перемотай voice.mp3, поки не зрендерив".format(cover))
+    except Exception:
+        pass  # верифікація — діагностика, ніколи не ламає генерацію
+
+
 def write_manifest(info, workdir, say):
     """📋 v28: manifest.json — план і результат генерації у робочій папці:
     режим, тема або частини сценарію (текст, запит, посилання, тривалість),
@@ -1316,7 +1531,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.0"}
+                "app": "Генератор відео 2.1"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -5022,7 +5237,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, orchestra=False, web_on=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -5036,7 +5251,25 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     say(f"▶️ Запит: {query}")
     say("📁 Робоча папка створена")
 
-    text = narration_for(query)
+    text = narration_for(query)  # 🔁 база: якщо всі агенти мовчать — живе шаблон теми
+    # 🎭🌐 2.1: інтернет-дослідження + оркестр агентів — тема проходить
+    # свіжі факти (DuckDuckGo → Mojeek) і чотири ролі через драбину «Авто»
+    receipts = ["сценарій: шаблон теми"]  # 📜 Video Receipts — провенас у manifest.json
+    research = web_research(query, say) if web_on else ""
+    if research:
+        receipts.append("дослідження: 🌐 " + research.splitlines()[0][:70])
+    if orchestra:
+        orch = orchestra_script(query, research, say)
+        if orch:
+            text = orch
+            receipts[0] = "сценарій: 🎭 оркестр (режисер → сценарист → критик → редактор)"
+    elif web_on and research:
+        rn = research_narration(query, research, say)
+        if rn:
+            text = rn
+            receipts[0] = "сценарій: 🌐 сценарист із інтернет-дослідженням"
+    receipts.append("озвучка: " + voice_label)
+    render_estimate(text, say)  # ⏱ «ціна перед спендом» — рахунок до старту
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
     karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct) if not trim_sil else None
@@ -5057,6 +5290,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
 
     dur = audio_duration(os.path.join(workdir, "voice.mp3"))
     say(f"⏱️ Тривалість: {dur:.1f} с")
+    tts_verify(workdir, text, say)  # ✅ 2.1: «сказане = написане» (Whisper на Groq, fail-open)
     beats = None  # 🥁 v23: битова сітка музики — фон розріжується у такт
     mpath = (music or "").strip()
     if mpath and os.path.isfile(mpath):
@@ -5306,7 +5540,8 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     try:  # 📋 v28: маніфест генерації — manifest.json (артефакт-тека)
         write_manifest({"mode": "video", "theme": query, "voice": voice_label,
                         "size": size_str, "sub_style": sub_style, "vid_style": vid_style,
-                        "transition": transition, "platform": platform}, workdir, say)
+                        "transition": transition, "platform": platform,
+                        "receipts": receipts}, workdir, say)
     except Exception:
         pass
     if master:  # 🔊 v27: two-pass EBU R128 — прозорий linear-майстеринг (−14 LUFS)
@@ -6902,6 +7137,14 @@ class App:
         self.overlays_on = ctk.BooleanVar(value=False)  # 🏷️ 2.0: оверлеї на фіналі
         ctk.CTkSwitch(self.extra_body, text="🏷️ Оверлеї (плашка, знак, прогрес)", variable=self.overlays_on,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.orchestra_on = ctk.BooleanVar(value=False)  # 🎭 2.1: оркестр агентів
+        ctk.CTkSwitch(self.extra_body, text="🎭 Оркестр агентів (режисер → сценарист → критик → редактор)",
+                      variable=self.orchestra_on,
+                      font=self._f(11), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.web_on = ctk.BooleanVar(value=False)  # 🌐 2.1: свіжі факти з інтернету
+        ctk.CTkSwitch(self.extra_body, text="🌐 Свіжі факти з інтернету (перед сценарієм)",
+                      variable=self.web_on,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
         ctk.CTkSwitch(self.extra_body, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
@@ -7384,7 +7627,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.0 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.1 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek + витяги сторінок, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -10879,6 +11122,8 @@ class App:
             up4 = bool(self.upscale4k.get()) if hasattr(self, "upscale4k") else False  # 📈 v34: 4К
             asc = bool(self.autoscrape.get()) if hasattr(self, "autoscrape") else False  # 🧹 v34: авоскраб
             ov = bool(self.overlays_on.get()) if hasattr(self, "overlays_on") else False  # 🏷️ 2.0: оверлеї
+            orch = bool(self.orchestra_on.get()) if hasattr(self, "orchestra_on") else False  # 🎭 2.1: оркестр агентів
+            webn = bool(self.web_on.get()) if hasattr(self, "web_on") else False  # 🌐 2.1: свіжі факти
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
@@ -10913,7 +11158,7 @@ class App:
                                        pin_images=pins,
                                        sub_style=sub, vid_style=vid, transition=trans,
                                        trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                       upscale4k=up4, autoscrape=asc, overlays=ov)
+                                       upscale4k=up4, autoscrape=asc, overlays=ov, orchestra=orch, web_on=webn)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
