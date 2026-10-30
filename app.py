@@ -367,6 +367,20 @@ build_bg_animated: Кен-Бернс у ЧОТИРЬОХ напрямках (н�
 Генерація кадрів — ПАРАЛЕЛЬНО (4 потоки), fail-open на кожен кадр і
 на весь двигун (не зібрався — далі звичайна драбина фону). Нуль нових
 ключів, нуль нових pip.
+2.6: 🎞 МОНТАЖ У СТИЛІ CAPCUT — «сторінка з виглядом CapCut і всім
+функціоналом, де можна монтувати відео вручну»: п'ята вкладка
+«🎞 Монтаж»: зліва медіатека (імпорт відео/фото/музики, ➕ на таймлайн),
+по центру прев'ю з плейхедом і транспортом (⏮ ▶ ⏭, 🔍 зум), справа
+інспектор кліпу (початок/тривалість/швидкість 0.25–3×/гучність 0–150%/
+10 фільтрів/обертання/перехід), знизу мультитрековий таймлайн (🎬 кліпи /
+🎵 музика / 🔤 тексти) з лінійкою часу і перетягуванням мишкою.
+✂️ нарізка на плейхеді, 🗑 видалення, ↶↷ історія (50 кроків), 💾 проєкт
+у файл (.mtproj). Експорт «📦 Експорт MP4» — ffmpeg-паси: нормалізація
+кліпів (обрізка/швидкість/масштаб/фільтр/обертання) → чорні паузи на
+пропуски → xfade-переходи (Різко=concat) → drawtext-титри → amix звуку
+кліпів і музики (adelay по позиціях) → Videos/Generated/Монтаж_*.mp4.
+Прев'ю — кадри ffmpeg без звуку; статус — через q/_poll (mt_msg).
+Нуль нових ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -535,7 +549,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.5 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.6 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -927,7 +941,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.5"}
+            d = {"app": "Генератор відео 2.6"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1726,7 +1740,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.5"}
+                "app": "Генератор відео 2.6"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -7080,7 +7094,7 @@ class App:
         ctk.CTkLabel(head, text="v14", font=self._f(11, "bold"),
                      text_color=self.ACCENT_H).pack(side="left", padx=(8, 0))
         self.tabs = ctk.CTkSegmentedButton(
-            head, values=["🎬 Генерація", "💬 Чат", "🗂 Історія", "⚙️ Налаштування"],
+            head, values=["🎬 Генерація", "🎞 Монтаж", "💬 Чат", "🗂 Історія", "⚙️ Налаштування"],
             font=self._f(12), fg_color=self.INSET, unselected_color=self.INSET,
             unselected_hover_color=self.HOVER, selected_color=self.ACCENT,
             selected_hover_color=self.ACCENT_H, command=self._show_tab)
@@ -7097,9 +7111,11 @@ class App:
         self.tab_chat = ctk.CTkFrame(self.root, fg_color="transparent")
         self.tab_hist = ctk.CTkFrame(self.root, fg_color="transparent")
         self.tab_set = ctk.CTkFrame(self.root, fg_color="transparent")
+        self.tab_edit = ctk.CTkFrame(self.root, fg_color="transparent")  # 🎞 2.6: сторінка монтажу
         self._build_gen_tab()
         self._build_hist_tab()
         self._build_set_tab()
+        self._build_edit_tab()  # 🎞 2.6: CapCut-сторінка
         self._show_tab("🎬 Генерація")
         # v13: меню правого кліку («📋 Вставити / 📄 Копіювати») для всіх текстових полів
         # v43: + поле Асистента і URL джерела; журнал — лише «📄 Копіювати»
@@ -7108,18 +7124,918 @@ class App:
         self.attach_paste_menu(self.log, can_paste=False, can_clear=False)
 
     def _show_tab(self, val):
-        for t in (self.tab_gen, self.tab_chat, self.tab_hist, self.tab_set):
+        for t in (self.tab_gen, self.tab_edit, self.tab_chat, self.tab_hist, self.tab_set):
             t.pack_forget()
         if "Чат" in val:
             self.tab_chat.pack(side="top", fill="both", expand=True)
         elif "Історія" in val:
             self.tab_hist.pack(side="top", fill="both", expand=True)
             self._refresh_history()
+        elif "Монтаж" in val:  # 🎞 2.6: сторінка монтажу
+            self.tab_edit.pack(side="top", fill="both", expand=True)
         elif "Налаштування" in val:
             self.tab_set.pack(side="top", fill="both", expand=True)
             self._refresh_tools_status()
         else:
             self.tab_gen.pack(side="top", fill="both", expand=True)
+
+    def _build_edit_tab(self):
+        """🎞 2.6: СТОРІНКА МОНТАЖУ В СТИЛІ CAPCUT — зліва медіатека, по центру
+        прев'ю з плейхедом, справа інспектор кліпу, знизу мультитрековий
+        таймлайн (🎬 кліпи / 🎵 музика / 🔤 тексти). Ручний монтаж: ✂️ нарізка
+        на плейхеді, перетягування мишкою, швидкість, гучність, фільтри,
+        обертання, переходи, титри, музика, 💾 проєкт у файл — і «📦 Експорт
+        MP4» збирає фінальне відео (ffmpeg-паси, нуль ключів, нуль pip)."""
+        self.mt_clips = []   # 🎬 [{path, kind, start, dur, tl, speed, vol, fx, rot, trans}]
+        self.mt_music = []   # 🎵 [{path, start, dur, tl, vol}]
+        self.mt_texts = []   # 🔤 [{text, tl, dur, pos, color, size}]
+        self.mt_lib = []     # 📁 [{path, kind, dur}]
+        self.mt_sel = None   # ("v"|"m"|"t", індекс) — вибір на таймлайні
+        self.mt_time = 0.0
+        self.mt_pps = 40.0   # пікселів на секунду (зум таймлайну)
+        self.mt_playing = False
+        self.mt_undo, self.mt_redo = [], []
+        self.mt_w, self.mt_h = 1920, 1080
+        self.mt_drag = None
+        self.mt_prev_key = (None, -1.0)
+        self.mt_last_tick = 0.0
+        self.mt_dir = os.path.join(os.path.expanduser("~"), "Videos", "Generated", "montage")
+        os.makedirs(self.mt_dir, exist_ok=True)
+
+        # --- ВЕРХНІЙ ТУЛБАР (як у CapCut: дії над проєктом) ---
+        bar = ctk.CTkFrame(self.tab_edit, fg_color=self.CARD)
+        bar.pack(side="top", fill="x")
+        bar.configure(height=54)
+        bar.pack_propagate(False)
+        def _mtb(txt, cmd, accent=False, width=None):
+            ctk.CTkButton(bar, text=txt, command=cmd, width=width or 0,
+                          font=self._f(12, "bold"),
+                          fg_color=self.ACCENT if accent else self.INSET,
+                          hover_color=self.ACCENT_H if accent else self.HOVER,
+                          text_color="#FFFFFF").pack(side="left", padx=(10, 4), pady=9)
+        _mtb("📂 Відео/Фото", self._mt_import_media)
+        _mtb("🎵 Музика", self._mt_import_music)
+        _mtb("🔤 Текст", self._mt_add_text)
+        ctk.CTkFrame(bar, width=1, fg_color=self.HOVER).pack(side="left", fill="y", padx=8, pady=8)
+        _mtb("✂️ Розділити", self._mt_split)
+        _mtb("🗑", self._mt_delete, width=44)
+        _mtb("↶", self._mt_undo, width=44)
+        _mtb("↷", self._mt_redo, width=44)
+        ctk.CTkFrame(bar, width=1, fg_color=self.HOVER).pack(side="left", fill="y", padx=8, pady=8)
+        _mtb("💾 Зберегти", self._mt_project_save)
+        _mtb("📂 Відкрити", self._mt_project_open)
+        _mtb("📦 Експорт MP4", self._mt_export_thread, accent=True)
+
+        # --- РЯДОК СТАТУСУ (самий низ) ---
+        self.mt_status = ctk.CTkLabel(self.tab_edit, text="● Монтаж: імпортуй файли і клацай «➕» у медіатеці",
+                                      font=self._f(11, "bold"), text_color=self.MUTED, anchor="w")
+        self.mt_status.pack(side="bottom", fill="x", padx=14, pady=(2, 6))
+
+        # --- ТАЙМЛАЙН (над статусом) ---
+        self.mt_tl = tkinter.Canvas(self.tab_edit, height=150, bg="#101018",
+                                    highlightthickness=0, bd=0)
+        self.mt_tl.pack(side="bottom", fill="x", padx=10, pady=(4, 2))
+        self.mt_tl.bind("<Button-1>", self._mt_tl_down)
+        self.mt_tl.bind("<B1-Motion>", self._mt_tl_move)
+        self.mt_tl.bind("<ButtonRelease-1>", self._mt_tl_up)
+
+        # --- ТІЛО: медіатека | прев'ю | інспектор ---
+        body = ctk.CTkFrame(self.tab_edit, fg_color="transparent")
+        body.pack(side="top", fill="both", expand=True)
+
+        lib = ctk.CTkFrame(body, width=250, fg_color=self.CARD)
+        lib.pack(side="left", fill="y", padx=(10, 6), pady=(8, 4))
+        lib.pack_propagate(False)
+        ctk.CTkLabel(lib, text="📁 Медіатека", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+        ctk.CTkLabel(lib, text="Імпортуй файли — «➕» покладе їх на таймлайн",
+                     font=self._f(11), text_color=self.MUTED, anchor="w",
+                     justify="left").pack(fill="x", padx=10, pady=(0, 4))
+        self.mt_lib_frame = ctk.CTkScrollableFrame(lib, fg_color="transparent")
+        self.mt_lib_frame.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+
+        ins = ctk.CTkFrame(body, width=290, fg_color=self.CARD)
+        ins.pack(side="right", fill="y", padx=(6, 10), pady=(8, 4))
+        ins.pack_propagate(False)
+        ctk.CTkLabel(ins, text="🎛 Параметри", font=self._f(13, "bold"),
+                     anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+        self.mt_sel_lbl = ctk.CTkLabel(ins, text="Нічого не вибрано", font=self._f(11, "bold"),
+                                       text_color=self.ACCENT_H, anchor="w", wraplength=260)
+        self.mt_sel_lbl.pack(fill="x", padx=10, pady=(0, 4))
+        def _mtrow(label, widget):
+            r = ctk.CTkFrame(ins, fg_color="transparent")
+            r.pack(fill="x", padx=10, pady=2)
+            ctk.CTkLabel(r, text=label, font=self._f(11), text_color=self.MUTED,
+                         width=90, anchor="w").pack(side="left")
+            widget.pack(side="left", fill="x", expand=True)
+        self.mt_e_text = ctk.CTkEntry(ins, font=self._f(11), placeholder_text="текст титру")
+        self.mt_e_start = ctk.CTkEntry(ins, font=self._f(11))
+        self.mt_e_dur = ctk.CTkEntry(ins, font=self._f(11))
+        _mtrow("Титр", self.mt_e_text)
+        _mtrow("Початок,с", self.mt_e_start)
+        _mtrow("Тривал.,с", self.mt_e_dur)
+        self.mt_om_speed = ctk.CTkOptionMenu(ins, values=["0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "3.0"],
+                                             fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Швидкість", self.mt_om_speed)
+        self.mt_om_vol = ctk.CTkOptionMenu(ins, values=["0", "25", "50", "75", "100", "125", "150"],
+                                           fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Гучність,%", self.mt_om_vol)
+        self.mt_om_fx = ctk.CTkOptionMenu(ins, values=["Без фільтра", "Ч-Б", "Сепія", "Яскраво", "Контраст",
+                                                       "М'яко", "Тепло", "Холод", "Зерно", "VHS"],
+                                          fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Фільтр", self.mt_om_fx)
+        self.mt_om_rot = ctk.CTkOptionMenu(ins, values=["0", "90", "180", "270"],
+                                           fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Обертання", self.mt_om_rot)
+        self.mt_om_trans = ctk.CTkOptionMenu(ins, values=["Різко", "Наплив", "Затемнення"],
+                                             fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Перехід", self.mt_om_trans)
+        self.mt_om_pos = ctk.CTkOptionMenu(ins, values=["Низ", "Центр", "Верх"],
+                                           fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Позиція", self.mt_om_pos)
+        self.mt_om_color = ctk.CTkOptionMenu(ins, values=["Білий", "Жовтий", "Чорний", "Червоний"],
+                                             fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Колір", self.mt_om_color)
+        self.mt_om_size = ctk.CTkOptionMenu(ins, values=["4", "5", "6", "8", "10", "12"],
+                                            fg_color=self.INSET, button_color=self.HOVER, font=self._f(11))
+        _mtrow("Розмір,%", self.mt_om_size)
+        ctk.CTkButton(ins, text="✅ Застосувати", command=self._mt_apply, font=self._f(12, "bold"),
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H).pack(fill="x", padx=10, pady=(8, 12))
+
+        mid = ctk.CTkFrame(body, fg_color="transparent")
+        mid.pack(side="left", fill="both", expand=True, pady=(8, 4))
+        self.mt_cv = tkinter.Canvas(mid, bg="#0B0B12", highlightthickness=0, bd=0)
+        self.mt_cv.pack(fill="both", expand=True, padx=6, pady=(6, 4))
+        self.mt_img_ref = None
+        tr = ctk.CTkFrame(mid, fg_color="transparent")
+        tr.pack(side="top", fill="x", padx=6, pady=(2, 6))
+        ctk.CTkButton(tr, text="⏮", width=44, command=self._mt_home).pack(side="left", padx=3)
+        self.mt_play_btn = ctk.CTkButton(tr, text="▶", width=44, command=self._mt_play_toggle)
+        self.mt_play_btn.pack(side="left", padx=3)
+        ctk.CTkButton(tr, text="⏭", width=44, command=self._mt_end).pack(side="left", padx=3)
+        self.mt_pos = ctk.DoubleVar(value=0.0)
+        self.mt_slider = ctk.CTkSlider(tr, from_=0.0, to=1.0, command=self._mt_slider_seek)
+        self.mt_slider.pack(side="left", fill="x", expand=True, padx=10)
+        self.mt_tlbl = ctk.CTkLabel(tr, text="00:00 / 00:00", font=self._f(11, "bold"))
+        self.mt_tlbl.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(tr, text="🔍+", width=44, command=lambda: self._mt_zoom(1.3)).pack(side="left", padx=3)
+        ctk.CTkButton(tr, text="🔍-", width=44, command=lambda: self._mt_zoom(1 / 1.3)).pack(side="left", padx=3)
+        self._mt_draw_tl()
+        self._mt_preview()
+
+    def _mt_status_set(self, txt):
+        """Статус сторінки монтажу (безпечно і з потоку — через _poll)."""
+        try:
+            self.mt_status.configure(text="● " + txt)
+        except Exception:
+            pass
+
+    def _mt_total(self):
+        ends = [c["tl"] + c["dur"] for c in self.mt_clips]
+        ends += [m["tl"] + m["dur"] for m in self.mt_music]
+        ends += [t["tl"] + t["dur"] for t in self.mt_texts]
+        return max(ends + [1.0])
+
+    def _mt_snap(self):
+        return json.dumps({"clips": self.mt_clips, "music": self.mt_music,
+                           "texts": self.mt_texts}, ensure_ascii=False)
+
+    def _mt_restore(self, s):
+        d = json.loads(s)
+        self.mt_clips = d.get("clips", [])
+        self.mt_music = d.get("music", [])
+        self.mt_texts = d.get("texts", [])
+        self.mt_sel = None
+        self._mt_refresh_all()
+
+    def _mt_push(self, pre):
+        """Снапшот ДО зміни — у стек undo, redo знищується (як у CapCut)."""
+        self.mt_undo.append(pre)
+        if len(self.mt_undo) > 50:
+            self.mt_undo.pop(0)
+        self.mt_redo = []
+
+    def _mt_undo(self):
+        if not self.mt_undo:
+            self._mt_status_set("Немає що відміняти")
+            return
+        self.mt_redo.append(self._mt_snap())
+        self._mt_restore(self.mt_undo.pop())
+
+    def _mt_redo(self):
+        if not self.mt_redo:
+            self._mt_status_set("Немає що повторити")
+            return
+        self.mt_undo.append(self._mt_snap())
+        self._mt_restore(self.mt_redo.pop())
+
+    def _mt_refresh_all(self):
+        self._mt_draw_tl()
+        self._mt_preview()
+        self._mt_ins_fill()
+
+    # --- МЕДІАТЕКА ---
+
+    def _mt_import_media(self):
+        paths = filedialog.askopenfilenames(filetypes=[
+            ("Медіа", "*.mp4 *.mov *.mkv *.webm *.avi *.jpg *.jpeg *.png *.webp"),
+            ("Усі файли", "*.*")])
+        for p in paths:
+            self._mt_lib_add(p, "image" if os.path.splitext(p)[1].lower()
+                              in (".jpg", ".jpeg", ".png", ".webp") else "video")
+
+    def _mt_import_music(self):
+        paths = filedialog.askopenfilenames(filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg *.aac")])
+        for p in paths:
+            self._mt_lib_add(p, "audio")
+
+    def _mt_lib_add(self, path, kind):
+        try:
+            dur = 4.0 if kind == "image" else audio_duration(path)
+        except Exception:
+            self._mt_status_set("Не вдалося прочитати: " + os.path.basename(path))
+            return
+        self.mt_lib.append({"path": path, "kind": kind, "dur": dur})
+        self._mt_lib_refresh()
+        self._mt_status_set("У медіатеці: {} файлів".format(len(self.mt_lib)))
+
+    def _mt_lib_refresh(self):
+        for w in self.mt_lib_frame.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        for it in self.mt_lib:
+            row = ctk.CTkFrame(self.mt_lib_frame, fg_color=self.INSET)
+            row.pack(fill="x", pady=2)
+            icon = {"video": "🎬", "image": "🖼", "audio": "🎵"}.get(it["kind"], "📄")
+            ctk.CTkLabel(row, text="{} {} · {:.1f}с".format(icon, os.path.basename(it["path"])[:34], it["dur"]),
+                         font=self._f(11), anchor="w").pack(side="left", fill="x", expand=True, padx=8, pady=4)
+            ctk.CTkButton(row, text="➕", width=34, command=lambda p=it["path"]: self._mt_from_lib(p),
+                          fg_color=self.ACCENT, hover_color=self.ACCENT_H).pack(side="right", padx=4, pady=4)
+
+    def _mt_next_tl(self):
+        return max([c["tl"] + c["dur"] for c in self.mt_clips] + [0.0])
+
+    def _mt_from_lib(self, path):
+        it = next((x for x in self.mt_lib if x["path"] == path), None)
+        if not it:
+            return
+        pre = self._mt_snap()
+        if it["kind"] == "audio":
+            self.mt_music.append({"path": it["path"], "start": 0.0, "dur": it["dur"],
+                                  "tl": 0.0, "vol": 100})
+            self.mt_sel = ("m", len(self.mt_music) - 1)
+            self._mt_status_set("🎵 Музика на таймлайні — перетягни мишкою")
+        else:
+            self.mt_clips.append({"path": it["path"], "kind": it["kind"], "start": 0.0,
+                                  "dur": 4.0 if it["kind"] == "image" else it["dur"],
+                                  "tl": self._mt_next_tl(), "speed": 1.0, "vol": 100,
+                                  "fx": "Без фільтра", "rot": 0, "trans": "Різко"})
+            self.mt_sel = ("v", len(self.mt_clips) - 1)
+            self._mt_status_set("🎬 Кліп на таймлайні — ✂️ ріж, 🎛 прав параметри")
+        self._mt_push(pre)
+        self._mt_refresh_all()
+
+    def _mt_add_text(self):
+        txt = simpledialog.askstring("🔤 Титр", "Текст на екрані:", parent=self.root)
+        if not txt or not txt.strip():
+            return
+        pre = self._mt_snap()
+        self.mt_texts.append({"text": txt.strip(), "tl": self.mt_time, "dur": 3.0,
+                              "pos": "Низ", "color": "Білий", "size": "6"})
+        self.mt_sel = ("t", len(self.mt_texts) - 1)
+        self._mt_push(pre)
+        self._mt_status_set("🔤 Титр на таймлайні — рухай і прав у 🎛")
+        self._mt_refresh_all()
+
+    # --- ТАЙМЛАЙН ---
+
+    def _mt_draw_tl(self):
+        cv = self.mt_tl
+        cv.delete("all")
+        pps = self.mt_pps
+        X0 = 8.0
+        w = max(int(cv.winfo_width()), 400)
+        total = self._mt_total()
+        cv.create_rectangle(0, 0, w, 16, fill="#14141E", outline="")
+        for s in range(int(total) + 2):
+            x = X0 + s * pps
+            if x > w:
+                break
+            cv.create_line(x, 2, x, 11, fill="#3A3A4E")
+            if s % 5 == 0:
+                cv.create_text(x + 3, 7, text="{:02d}:{:02d}".format(s // 60, s % 60),
+                               fill="#8E8E9C", font=("Segoe UI", 8), anchor="w")
+        cv.create_text(2, 36, text="🎬", anchor="w", font=("Segoe UI", 10))
+        cv.create_text(2, 74, text="🎵", anchor="w", font=("Segoe UI", 10))
+        cv.create_text(2, 110, text="🔤", anchor="w", font=("Segoe UI", 10))
+        def _box(x, y0, y1, label, fill, sel):
+            x2 = x + 26
+            cv.create_rectangle(x, y0, x2, y1, fill=fill,
+                                outline="#FFFFFF" if sel else "#00000000", width=2)
+            cv.create_text(x + 4, (y0 + y1) / 2, text=label[:max(int((x2 - x) / 7), 1)],
+                           fill="#FFFFFF", font=("Segoe UI", 8), anchor="w")
+        for i, c in enumerate(self.mt_clips):
+            x = X0 + c["tl"] * pps
+            _box(x, 22, 54, os.path.basename(c["path"]), "#5B3AA8",
+                 self.mt_sel == ("v", i))
+        for i, m in enumerate(self.mt_music):
+            x = X0 + m["tl"] * pps
+            _box(x, 60, 90, os.path.basename(m["path"]), "#1F7A4D",
+                 self.mt_sel == ("m", i))
+        for i, t in enumerate(self.mt_texts):
+            x = X0 + t["tl"] * pps
+            _box(x, 96, 126, t["text"], "#8A6D00", self.mt_sel == ("t", i))
+        ph = X0 + self.mt_time * pps
+        cv.create_line(ph, 0, ph, 150, fill="#FF5A5A", width=2)
+        cv.create_polygon(ph - 5, 0, ph + 5, 0, ph, 9, fill="#FF5A5A", outline="")
+
+    def _mt_hit(self, t, y):
+        """Що під курсором: (kind, i) або None. Треки: V 22–54, M 60–90, T 96–126."""
+        if 22 <= y <= 54:
+            for i in range(len(self.mt_clips) - 1, -1, -1):
+                c = self.mt_clips[i]
+                if c["tl"] <= t < c["tl"] + c["dur"]:
+                    return ("v", i)
+        elif 60 <= y <= 90:
+            for i in range(len(self.mt_music) - 1, -1, -1):
+                m = self.mt_music[i]
+                if m["tl"] <= t < m["tl"] + m["dur"]:
+                    return ("m", i)
+        elif 96 <= y <= 126:
+            for i in range(len(self.mt_texts) - 1, -1, -1):
+                x = self.mt_texts[i]
+                if x["tl"] <= t < x["tl"] + x["dur"]:
+                    return ("t", i)
+        return None
+
+    def _mt_tl_down(self, ev):
+        t = (ev.x - 8.0) / self.mt_pps
+        hit = self._mt_hit(t, ev.y)
+        pre = self._mt_snap()
+        if hit:
+            kind, i = hit
+            lst = {"v": self.mt_clips, "m": self.mt_music, "t": self.mt_texts}[kind]
+            self.mt_sel = (kind, i)
+            self.mt_drag = {"kind": kind, "i": i, "off": t - lst[i]["tl"],
+                            "pre": pre, "moved": False}
+            self._mt_ins_fill()
+            self._mt_draw_tl()
+        else:
+            self.mt_drag = {"kind": "seek", "pre": None, "moved": False}
+            self._mt_seek(max(0.0, t))
+
+    def _mt_tl_move(self, ev):
+        if not self.mt_drag:
+            return
+        t = (ev.x - 8.0) / self.mt_pps
+        if self.mt_drag["kind"] == "seek":
+            self._mt_seek(max(0.0, t))
+            return
+        kind, i = self.mt_drag["kind"], self.mt_drag["i"]
+        lst = {"v": self.mt_clips, "m": self.mt_music, "t": self.mt_texts}[kind]
+        if 0 <= i < len(lst):
+            new_tl = max(0.0, t - self.mt_drag["off"])
+            if abs(new_tl - lst[i]["tl"]) > 0.001:
+                lst[i]["tl"] = new_tl
+                self.mt_drag["moved"] = True
+                self._mt_draw_tl()
+                self._mt_preview()
+
+    def _mt_tl_up(self, ev):
+        if self.mt_drag and self.mt_drag.get("moved") and self.mt_drag.get("pre"):
+            self._mt_push(self.mt_drag["pre"])
+            self._mt_status_set("Перетягнуто — ↶ відмінить")
+        self.mt_drag = None
+
+    # --- ПЛЕЇХЕД / ПЕРЕГЛЯД ---
+
+    def _mt_seek(self, t):
+        self.mt_time = min(max(0.0, t), self._mt_total())
+        self.mt_slider.configure(command=None)
+        self.mt_slider.set(self.mt_time / self._mt_total())
+        self.mt_slider.configure(command=self._mt_slider_seek)
+        self._mt_tlbl_upd()
+        self._mt_preview()
+        self._mt_draw_tl()
+
+    def _mt_slider_seek(self, val):
+        self._mt_seek(float(val) * self._mt_total())
+
+    def _mt_tlbl_upd(self):
+        total = self._mt_total()
+        self.mt_tlbl.configure(text="{:02d}:{:02d} / {:02d}:{:02d}".format(
+            int(self.mt_time) // 60, int(self.mt_time) % 60,
+            int(total) // 60, int(total) % 60))
+
+    def _mt_home(self):
+        self._mt_seek(0.0)
+
+    def _mt_end(self):
+        self._mt_seek(self._mt_total())
+
+    def _mt_zoom(self, k):
+        self.mt_pps = min(200.0, max(8.0, self.mt_pps * k))
+        self._mt_draw_tl()
+
+    def _mt_play_toggle(self):
+        if self.mt_playing:
+            self.mt_playing = False
+            self.mt_play_btn.configure(text="▶")
+            return
+        self.mt_playing = True
+        self.mt_play_btn.configure(text="⏸")
+        self.mt_last_tick = time.monotonic()
+        self.root.after(50, self._mt_tick)
+
+    def _mt_tick(self):
+        if not self.mt_playing:
+            return
+        now = time.monotonic()
+        self.mt_time += now - self.mt_last_tick
+        self.mt_last_tick = now
+        if self.mt_time >= self._mt_total():
+            self.mt_time = self._mt_total()
+            self.mt_playing = False
+            self.mt_play_btn.configure(text="▶")
+        self.mt_slider.configure(command=None)
+        self.mt_slider.set(self.mt_time / self._mt_total())
+        self.mt_slider.configure(command=self._mt_slider_seek)
+        self._mt_tlbl_upd()
+        self._mt_preview()
+        self._mt_draw_tl()
+        if self.mt_playing:
+            self.root.after(50, self._mt_tick)
+
+    def _mt_clip_at(self, t):
+        for c in self.mt_clips:
+            if c["tl"] <= t < c["tl"] + c["dur"]:
+                return c
+        return None
+
+    def _mt_preview(self):
+        """Кадр під плейхедом (ffmpeg-витяг) + титри поверх. Без звуку."""
+        cv = self.mt_cv
+        cv.delete("all")
+        cw = int(cv.winfo_width()) or 640
+        ch = int(cv.winfo_height()) or 360
+        if cw < 40 or ch < 40:
+            return
+        c = self._mt_clip_at(self.mt_time)
+        img = None
+        if c is not None:
+            try:
+                if c["kind"] == "image":
+                    key = ("img", c["path"])
+                    if key != self.mt_prev_key:
+                        src = PILImage.open(c["path"]).convert("RGB")
+                        src.thumbnail((640, 360))
+                        src.save(os.path.join(self.mt_dir, "prev.jpg"), quality=88)
+                        self.mt_prev_key = key
+                else:
+                    src_t = max(0.0, c["start"] + (self.mt_time - c["tl"]) * c["speed"])
+                    key = (c["path"], round(src_t, 1))
+                    if key != self.mt_prev_key:
+                        run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
+                             "-ss", "{:.2f}".format(src_t), "-i", c["path"],
+                             "-frames:v", "1", "-vf",
+                             "scale=640:360:force_original_aspect_ratio=decrease,"
+                             "pad=640:360:(ow-iw)/2:(oh-ih)/2:color=0x0B0B12",
+                             os.path.join(self.mt_dir, "prev.jpg")])
+                        self.mt_prev_key = key
+                img = PILImage.open(os.path.join(self.mt_dir, "prev.jpg")).convert("RGB")
+            except Exception:
+                img = None
+        if img is not None:
+            try:
+                from PIL import ImageTk
+                k = min(cw / img.width, ch / img.height)
+                img = img.resize((max(int(img.width * k), 2), max(int(img.height * k), 2)),
+                                 PILImage.LANCZOS)
+                self.mt_img_ref = ImageTk.PhotoImage(img)
+                cv.create_image((cw - img.width) / 2, (ch - img.height) / 2,
+                                anchor="nw", image=self.mt_img_ref)
+            except Exception:
+                self.mt_img_ref = None
+        else:
+            cv.create_rectangle(0, 0, cw, ch, fill="#0B0B12", outline="")
+            cv.create_text(cw / 2, ch / 2, text="➕ Додай кліп на таймлайн — прев'ю оживе тут",
+                           fill="#8E8E9C", font=("Segoe UI", 13))
+        colors = {"Білий": "#FFFFFF", "Жовтий": "#FFD34D", "Чорний": "#111111", "Червоний": "#FF5A5A"}
+        for tx in self.mt_texts:
+            if tx["tl"] <= self.mt_time < tx["tl"] + tx["dur"]:
+                fs = max(12, int(ch * float(tx["size"]) / 100.0))
+                y = ch - 40 if tx["pos"] == "Низ" else (40 if tx["pos"] == "Верх" else ch / 2)
+                cv.create_text(cw / 2, y, text=tx["text"], fill=colors.get(tx["color"], "#FFFFFF"),
+                               font=("Segoe UI", fs, "bold"))
+
+    # --- ІНСПЕКТОР ---
+
+    def _mt_ins_fill(self):
+        self.mt_e_text.delete(0, "end")
+        self.mt_e_start.delete(0, "end")
+        self.mt_e_dur.delete(0, "end")
+        if not self.mt_sel:
+            self.mt_sel_lbl.configure(text="Нічого не вибрано")
+            return
+        kind, i = self.mt_sel
+        if kind == "v":
+            c = self.mt_clips[i]
+            self.mt_sel_lbl.configure(text="🎬 " + os.path.basename(c["path"]))
+            self.mt_e_start.insert(0, "{:.2f}".format(c["start"]))
+            self.mt_e_dur.insert(0, "{:.2f}".format(c["dur"]))
+            self.mt_om_speed.set(str(c["speed"]))
+            self.mt_om_vol.set(str(int(c["vol"])))
+            self.mt_om_fx.set(c["fx"])
+            self.mt_om_rot.set(str(int(c["rot"])))
+            self.mt_om_trans.set(c["trans"])
+        elif kind == "m":
+            m = self.mt_music[i]
+            self.mt_sel_lbl.configure(text="🎵 " + os.path.basename(m["path"]))
+            self.mt_e_start.insert(0, "{:.2f}".format(m["start"]))
+            self.mt_e_dur.insert(0, "{:.2f}".format(m["dur"]))
+            self.mt_om_vol.set(str(int(m["vol"])))
+        else:
+            t = self.mt_texts[i]
+            self.mt_sel_lbl.configure(text="🔤 " + t["text"][:36])
+            self.mt_e_text.insert(0, t["text"])
+            self.mt_e_dur.insert(0, "{:.2f}".format(t["dur"]))
+            self.mt_om_pos.set(t["pos"])
+            self.mt_om_color.set(t["color"])
+            self.mt_om_size.set(str(t["size"]))
+
+    def _mt_apply(self):
+        if not self.mt_sel:
+            self._mt_status_set("Спершу вибери кліп на таймлайні")
+            return
+        kind, i = self.mt_sel
+        pre = self._mt_snap()
+        try:
+            if kind == "v":
+                c = self.mt_clips[i]
+                c["start"] = max(0.0, float(self.mt_e_start.get().replace(",", ".")))
+                c["dur"] = max(0.3, float(self.mt_e_dur.get().replace(",", ".")))
+                c["speed"] = max(0.25, min(3.0, float(self.mt_om_speed.get())))
+                c["vol"] = max(0, min(150, int(self.mt_om_vol.get())))
+                c["fx"] = self.mt_om_fx.get()
+                c["rot"] = int(self.mt_om_rot.get())
+                c["trans"] = self.mt_om_trans.get()
+            elif kind == "m":
+                m = self.mt_music[i]
+                m["start"] = max(0.0, float(self.mt_e_start.get().replace(",", ".")))
+                m["dur"] = max(0.3, float(self.mt_e_dur.get().replace(",", ".")))
+                m["vol"] = max(0, min(150, int(self.mt_om_vol.get())))
+            else:
+                t = self.mt_texts[i]
+                t["text"] = self.mt_e_text.get().strip() or t["text"]
+                t["dur"] = max(0.3, float(self.mt_e_dur.get().replace(",", ".")))
+                t["pos"] = self.mt_om_pos.get()
+                t["color"] = self.mt_om_color.get()
+                t["size"] = self.mt_om_size.get()
+            self._mt_push(pre)
+            self._mt_refresh_all()
+            self._mt_status_set("Параметри застосовано")
+        except Exception as e:
+            self._mt_status_set("Не зрозумів значення ({})".format(str(e)[:80]))
+
+    def _mt_split(self):
+        """✂️ CapCut-ножиці: розрізати вибране на позиції плейхеда."""
+        if not self.mt_sel or self.mt_sel[0] not in ("v", "m"):
+            self._mt_status_set("Вибери кліп (🎬 або 🎵) і постав плейхед у місце розрізу")
+            return
+        kind, i = self.mt_sel
+        lst = self.mt_clips if kind == "v" else self.mt_music
+        if not (0 <= i < len(lst)):
+            return
+        c = lst[i]
+        local = self.mt_time - c["tl"]
+        if local < 0.4 or local > c["dur"] - 0.4:
+            self._mt_status_set("Плейхед усередині кліпа — тоді розріжу")
+            return
+        pre = self._mt_snap()
+        right = dict(c)
+        right["tl"] = c["tl"] + local
+        right["dur"] = c["dur"] - local
+        if kind == "v":
+            right["start"] = c["start"] + local * c.get("speed", 1.0)
+        else:
+            right["start"] = c["start"] + local
+        c["dur"] = local
+        lst.insert(i + 1, right)
+        self.mt_sel = (kind, i + 1)
+        self._mt_push(pre)
+        self._mt_refresh_all()
+        self._mt_status_set("✂️ Розрізано — дві частини на таймлайні")
+
+    def _mt_delete(self):
+        if not self.mt_sel:
+            self._mt_status_set("Нічого не вибрано")
+            return
+        kind, i = self.mt_sel
+        lst = {"v": self.mt_clips, "m": self.mt_music, "t": self.mt_texts}[kind]
+        if not (0 <= i < len(lst)):
+            return
+        pre = self._mt_snap()
+        del lst[i]
+        self.mt_sel = None
+        self._mt_push(pre)
+        self._mt_refresh_all()
+        self._mt_status_set("Видалено")
+
+    def _mt_project_save(self):
+        path = filedialog.asksaveasfilename(defaultextension=".mtproj",
+                                            filetypes=[("Проєкт монтажу", "*.mtproj")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"w": self.mt_w, "h": self.mt_h, "clips": self.mt_clips,
+                          "music": self.mt_music, "texts": self.mt_texts},
+                         f, ensure_ascii=False, indent=1)
+            self._mt_status_set("💾 Проєкт збережено")
+        except Exception as e:
+            self._mt_status_set("Не вдалось зберегти: " + str(e)[:80])
+
+    def _mt_project_open(self):
+        path = filedialog.askopenfilename(filetypes=[("Проєкт монтажу", "*.mtproj")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            pre = self._mt_snap()
+            self.mt_w, self.mt_h = int(d.get("w", 1920)), int(d.get("h", 1080))
+            self.mt_clips = d.get("clips", [])
+            self.mt_music = d.get("music", [])
+            self.mt_texts = d.get("texts", [])
+            self.mt_sel = None
+            self._mt_push(pre)
+            self._mt_refresh_all()
+            self._mt_status_set("📂 Проєкт відкрито: {} кліпів".format(len(self.mt_clips)))
+        except Exception as e:
+            self._mt_status_set("Не вдалось відкрити: " + str(e)[:80])
+
+    # --- ЕКСПОРТ (ffmpeg-паси) ---
+
+    def _mt_fx(self, name):
+        return {"Без фільтра": "",
+                "Ч-Б": "hue=s=0",
+                "Сепія": "colorchannelmixer=rr=0.393:rg=0.349:rb=0.272:"
+                         "gr=0.769:gg=0.686:gb=0.534:br=0.189:bg=0.168:bb=0.131",
+                "Яскраво": "eq=brightness=0.06:saturation=1.2",
+                "Контраст": "eq=contrast=1.25",
+                "М'яко": "gblur=sigma=0.6,eq=brightness=0.02",
+                "Тепло": "colorbalance=rs=0.06:gs=0.01:bs=-0.06",
+                "Холод": "colorbalance=rs=-0.06:gs=0.01:bs=0.06",
+                "Зерно": "noise=alls=8:allf=t",
+                "VHS": "noise=alls=12:allf=t,eq=saturation=1.3:contrast=1.1"}.get(name, "")
+
+    def _mt_rot_vf(self, deg):
+        return {0: "", 90: "transpose=1", 180: "transpose=1,transpose=1",
+                270: "transpose=2"}.get(int(deg), "")
+
+    def _mt_atempo(self, s):
+        parts = []
+        v = float(s)
+        while v > 2.0:
+            parts.append("atempo=2.0")
+            v /= 2.0
+        while v < 0.5:
+            parts.append("atempo=0.5")
+            v /= 0.5
+        parts.append("atempo={:.4g}".format(v))
+        return ",".join(parts)
+
+    def _mt_dt_esc(self, s):
+        s = s.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
+        s = s.replace("'", "\u2019").replace("%", "\\%")
+        return s
+
+    def _mt_font(self):
+        for fp in ("C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeui.ttf",
+                   "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"):
+            if os.path.exists(fp):
+                return fp.replace(":", "\\:")
+        return None
+
+    def _mt_norm(self, c, seg, w, h):
+        """Нормалізую кліп під проєкт: обрізка (start/dur), швидкість, масштаб,
+        фільтр, обертання. Відео — БЕЗ звуку (звук іде окремим wav-пасом)."""
+        ff = ffmpeg_path()
+        vf = []
+        r = self._mt_rot_vf(c.get("rot", 0))
+        if r:
+            vf.append(r)
+        vf.append("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}".format(w, h, w, h))
+        fx = self._mt_fx(c.get("fx", "Без фільтра"))
+        if fx:
+            vf.append(fx)
+        if c["kind"] == "image":
+            vf.append("format=yuv420p")
+            cmd = [ff, "-y", "-hide_banner", "-nostdin", "-loop", "1",
+                   "-t", "{:.3f}".format(c["dur"]), "-i", c["path"],
+                   "-vf", ",".join(vf), "-r", "25",
+                   "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg]
+        else:
+            sp = float(c.get("speed", 1.0))
+            if abs(sp - 1.0) > 0.001:
+                vf.append("setpts=PTS/{:.4g}".format(sp))
+            vf.append("format=yuv420p")
+            cmd = [ff, "-y", "-hide_banner", "-nostdin",
+                   "-ss", "{:.3f}".format(max(0.0, c["start"])),
+                   "-t", "{:.3f}".format(max(0.1, c["dur"] * sp)),
+                   "-i", c["path"], "-vf", ",".join(vf), "-r", "25",
+                   "-t", "{:.3f}".format(c["dur"]),
+                   "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", "-an", seg]
+        run(cmd)
+
+    def _mt_black(self, path, dur, w, h):
+        run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-f", "lavfi",
+             "-t", "{:.3f}".format(dur), "-i", "color=c=black:s={}x{}:r=25".format(w, h),
+             "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
+             "-pix_fmt", "yuv420p", "-an", path])
+
+    def _mt_join(self, segs, durs, transs, workdir):
+        """Склейка: усі «Різко» — concat (миттєво); інакше xfade-ланцюг,
+        перехід пари (i-1, i) = transs[i] («Різко» усередині ланцюга — стик 0.08с)."""
+        if len(segs) == 1:
+            return segs[0]
+        ff = ffmpeg_path()
+        out = os.path.join(workdir, "joined.mp4")
+        if all(t == "Різко" for t in transs[1:]):
+            lst = os.path.join(workdir, "jlist.txt")
+            with open(lst, "w", encoding="utf-8") as f:
+                for s in segs:
+                    f.write("file '{}'\n".format(s))
+            run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+                 "-i", lst, "-c:v", "copy", out])
+            return out
+        inputs = []
+        for s in segs:
+            inputs += ["-i", s]
+        parts = []
+        prev = "[0:v]"
+        total = float(durs[0])
+        for i in range(1, len(segs)):
+            tr = TRANSITIONS.get(transs[i], "fade") or "fade"
+            cross = 0.08 if transs[i] == "Різко" else 0.5
+            cross = min(cross, float(durs[i - 1]) * 0.4, float(durs[i]) * 0.4)
+            off = max(total - cross, 0.0)
+            last = (i == len(segs) - 1)
+            tag = "[vout]" if last else "[vx{}]".format(i)
+            parts.append("{}[{}:v]xfade=transition={}:duration={:.2f}:offset={:.3f}{}".format(
+                prev, i, tr, cross, off, tag))
+            prev = tag
+            total = off + float(durs[i])
+        run([ff, "-y", "-hide_banner", "-nostdin", *inputs,
+             "-filter_complex", ";".join(parts), "-map", "[vout]",
+             "-c:v", "libx264", "-crf", "22", "-preset", "veryfast",
+             "-pix_fmt", "yuv420p", "-an", out])
+        return out
+
+    def _mt_export_thread(self):
+        if not self.mt_clips:
+            self._mt_status_set("Таймлайн порожній — імпортуй відео/фото і клацни «➕»")
+            return
+        threading.Thread(target=self._mt_export, daemon=True).start()
+
+    def _mt_export(self):
+        try:
+            self.q.put(("mt_msg", "📦 Монтаж: нормалізую кліпи ({} шт.)…".format(len(self.mt_clips))))
+            stamp = datetime.now().strftime("%d%m_%H%M%S")
+            workdir = os.path.join(self.mt_dir, "render_" + stamp)
+            os.makedirs(workdir, exist_ok=True)
+            w, h = self.mt_w, self.mt_h
+            clips = sorted(self.mt_clips, key=lambda c: max(0.0, float(c["tl"])))
+            segs, durs, transs = [], [], []
+            cursor = 0.0
+            placed = []  # (кліп, позиція) для звуку
+            for c in clips:
+                tl = max(0.0, float(c["tl"]))
+                c2 = dict(c)
+                if tl < cursor - 0.01:  # наплнив — підрізаю початок
+                    over = cursor - tl
+                    c2["start"] = float(c["start"]) + over * float(c.get("speed", 1.0))
+                    c2["dur"] = max(0.4, float(c["dur"]) - over)
+                    tl = cursor
+                if tl > cursor + 0.05:  # пропуск — чорна пауза
+                    gap = tl - cursor
+                    black = os.path.join(workdir, "gap{}.mp4".format(len(segs)))
+                    self._mt_black(black, gap, w, h)
+                    segs.append(black)
+                    durs.append(gap)
+                    transs.append("Різко")
+                    cursor = tl
+                if float(c2["dur"]) <= 0.2:
+                    continue
+                seg = os.path.join(workdir, "seg{:03d}.mp4".format(len(segs)))
+                self._mt_norm(c2, seg, w, h)
+                segs.append(seg)
+                durs.append(float(c2["dur"]))
+                transs.append(str(c2.get("trans", "Різко")))
+                placed.append((c2, cursor))
+                cursor += float(c2["dur"])
+            if not segs:
+                self.q.put(("mt_msg", "Не зібралося жодного кліпа"))
+                return
+            self.q.put(("mt_msg", "🎞 Склеюю (переходи, паузи)…"))
+            joined = self._mt_join(segs, durs, transs, workdir)
+            vtotal = audio_duration(joined)
+            # титри drawtext (fail-open: шрифт не знайшовся — без титрів, але з попередженням)
+            if self.mt_texts:
+                font = self._mt_font()
+                if font:
+                    try:
+                        self.q.put(("mt_msg", "🔤 Титри…"))
+                        dts = []
+                        colors = {"Білий": "white", "Жовтий": "0xFFD34D",
+                                  "Чорний": "black", "Червоний": "0xFF5A5A"}
+                        for tx in self.mt_texts:
+                            fs = max(18, int(h * float(tx["size"]) / 100.0))
+                            if tx["pos"] == "Низ":
+                                y = "h-{:.0f}".format(h * 0.12)
+                            elif tx["pos"] == "Верх":
+                                y = "{:.0f}".format(h * 0.08)
+                            else:
+                                y = "(h-text_h)/2"
+                            bc = "black" if tx["color"] != "Чорний" else "white"
+                            dts.append("drawtext=fontfile='{}':text='{}':fontsize={}:"
+                                       "fontcolor={}:borderw=3:bordercolor={}:"
+                                       "x=(w-text_w)/2:y={}:"
+                                       "enable='between(t,{:.2f},{:.2f})'".format(
+                                           font, self._mt_dt_esc(tx["text"]), fs,
+                                           colors.get(tx["color"], "white"), bc, y,
+                                           float(tx["tl"]), float(tx["tl"]) + float(tx["dur"])))
+                        texted = os.path.join(workdir, "texted.mp4")
+                        run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-i", joined,
+                             "-vf", ",".join(dts), "-c:v", "libx264", "-crf", "22",
+                             "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", texted])
+                        joined = texted
+                    except Exception as e:
+                        self.q.put(("mt_msg", "⚠️ Титри не лягли ({}) — без них".format(str(e)[:60])))
+                else:
+                    self.q.put(("mt_msg", "⚠️ Системний шрифт не знайшовся — без титрів"))
+            # звук: свої аудіодоріжки кліпів + музика → amix (adelay по позиціях)
+            wavs = []
+            for c2, pos in placed:
+                if c2["kind"] == "image":
+                    continue
+                wav = os.path.join(workdir, "aud{:03d}.wav".format(len(wavs)))
+                sp = float(c2.get("speed", 1.0))
+                af = []
+                if abs(sp - 1.0) > 0.001:
+                    af.append(self._mt_atempo(sp))
+                af.append("volume={:.2g}".format(max(0.0, float(c2.get("vol", 100)) / 100.0)))
+                try:
+                    run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
+                         "-ss", "{:.3f}".format(max(0.0, float(c2["start"]))),
+                         "-t", "{:.3f}".format(max(0.1, float(c2["dur"]) * sp)),
+                         "-i", c2["path"], "-vn", "-af", ",".join(af),
+                         "-ac", "2", "-ar", "44100", wav])
+                    wavs.append((wav, pos))
+                except Exception:
+                    pass  # фото/без звуку — тихо
+            for m in self.mt_music:
+                wav = os.path.join(workdir, "mus{:03d}.wav".format(len(wavs)))
+                try:
+                    run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
+                         "-ss", "{:.3f}".format(max(0.0, float(m["start"]))),
+                         "-t", "{:.3f}".format(float(m["dur"])),
+                         "-i", m["path"], "-vn",
+                         "-af", "volume={:.2g}".format(float(m.get("vol", 100)) / 100.0),
+                         "-ac", "2", "-ar", "44100", wav])
+                    wavs.append((wav, max(0.0, float(m["tl"]))))
+                except Exception:
+                    pass
+            final = os.path.join(os.path.expanduser("~"), "Videos", "Generated",
+                                 "Монтаж_{}.mp4".format(stamp))
+            if not wavs:
+                shutil.copyfile(joined, final)
+            else:
+                self.q.put(("mt_msg", "🎵 Змішую звук ({} доріжок)…".format(len(wavs))))
+                inputs = ["-i", joined, "-f", "lavfi", "-t", "{:.3f}".format(vtotal),
+                          "-i", "anullsrc=r=44100:cl=stereo"]
+                for wav, _pos in wavs:
+                    inputs += ["-i", wav]
+                fc = ["[1:a]aformat=sample_rates=44100:channel_layouts=stereo[b]"]
+                tags = ["[b]"]
+                for j, (wav, pos) in enumerate(wavs):
+                    ms = int(round(pos * 1000))
+                    fc.append("[{}:a]aformat=sample_rates=44100:channel_layouts=stereo,"
+                              "adelay={}|{}[d{}]".format(2 + j, ms, ms, j))
+                    tags.append("[d{}]".format(j))
+                fc.append("{}amix=inputs={}:duration=first:normalize=0[aout]".format(
+                    "".join(tags), len(tags)))
+                run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", *inputs,
+                     "-filter_complex", ";".join(fc),
+                     "-map", "0:v", "-map", "[aout]",
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", final])
+            mb = os.path.getsize(final) / (1024 * 1024)
+            self.q.put(("mt_msg", "📦 Готово! Монтаж_{}.mp4 · {:.1f} МБ — у теці Videos/Generated".format(stamp, mb)))
+        except Exception as e:
+            self.q.put(("mt_msg", "⚠️ Експорт не зібрався: {}".format(str(e)[:160])))
+
 
     def _build_gen_tab(self):
         # === ПРАВА КОЛОНКА: журнал (фіксована ширина) ===
@@ -8069,7 +8985,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.5 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.6 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і «📦 Експорт MP4», 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -9662,7 +10578,9 @@ class App:
                 break
             if isinstance(msg, tuple):
                 kind = msg[0]
-                if kind == "yt_search_results":
+                if kind == "mt_msg":  # 🎞 2.6: статус монтажу з потоку експорту
+                    self._mt_status_set(msg[1])
+                elif kind == "yt_search_results":
                     self._show_yt_results(msg[1], msg[2])
                 elif kind == "px_results":  # 🎵 v16: результати пошуку Pixabay
                     self._show_px_results(msg[1], msg[2])
