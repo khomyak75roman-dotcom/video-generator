@@ -396,6 +396,46 @@ yt-dlp без ключів, бюджет 12), mix — чергування video
 (-c:v copy + aac, -shortest) → Videos/Generated/Озвучка_візуал_*.mp4.
 Статус — q/_poll (av_msg). Паралельність 4 потоки з порядком сцен
 (словник future→індекс). Нуль нових ключів, нуль нових pip.
+2.8: 🎞 МОНТАЖ — ВИПРАВЛЕННЯ (аудит за зразком OpenCut, open-source
+CapCut-альтернатива): (1) кліпи на таймлайні тепер мають РЕАЛЬНУ
+ширину за тривалістю (wd*pps, мін. 12px) — раніше всі були фіксовані
+26px і таймлайн виглядав зламаним; текст кліпів обрізається по ширині.
+(2) фризи прев'ю прибрано: кадр для відео-кліпів витягується не частіше
+4р/с (кеш-ключ з кроком 0.5с + ліміт часу 0.25с між витягами), під час ▶ плей
+прев'ю оновлюється кожен третій тік (~150мс) замість кожного (50мс) —
+ffmpeg не блокує головний потік і UI не зависає; перетягування
+кліпів показує останній кешований кадр без фантомних витягів.
+2.9: ⚡ ШВИДКІСТЬ — чат/пошук/підбір візуала не тупить (аудит трьох
+механізмів): (1) КРИТИЧНИЙ баг чату — _sse_stream_chat дописував
+"/chat/completions" до УЖЕ повного шляху від викликача → подвійний
+шлях → 404 → стрімінг токенів був мертвий на всіх шлюзах, драбина
+повільно сповзала у не-SSE фолбеки. Виправлено: пост на шлях, який
+дає викликач. Стрім знову живий: токени малюються одразу. (2) Ступінь
+драбини: таймаут 90→60с — мовчазний шлюз не тримає чергу. (3) Чат-агент:
+сторінки з URL у повідомленні читаються ПАРАЛЕЛЬНО (бюджет 16с, раніше
+послідовно до 30с до першого токена). (4) Пошук: DDG-ступені по 7с,
+Mojeek 10с (гірший випадок 24с замість 45с), сторінки агента — 14с.
+(5) Підбір візуала: фото Openverse качаються ПАРАЛЕЛЬНО по 15с (раніше
+послідовно по 30с = до 145с на запит); yt_search 90→45с; yt-dlp
+--socket-timeout 20 --retries 2 + hard-cap 5 хв на скачування — потік
+не висне назавжди; SponsorBlock-probe один раз за сесію; генерація
+Pollinations 60→45с на спробу. Нуль нових ключів, нуль нових pip.
+2.10: 🛠 ПОВНИЙ АУДИТ КОДУ (усі 13К рядків, зони: run/ffmpeg, LLM-драбина,
+чат, пошук, озвучка→візуал, генерація, пресети, YouTube, обкладинка,
+оверлеї, паузи, QC/EDL, монтаж, конвеєри UI) + автоматичні перевірки
+(невизначені self-атрибути/функції, подвоєння URL, дублікати def,
+зіпсовані символи). Виправлено: (1) self.yt_q ВИКОРИСТОВУВАВСЯ
+(збереження пресетів, застосування пресетів, завантаження з YouTube),
+але НІДЕ не створювався = AttributeError: пресети не зберігалися,
+«⬇️ Завантажити все» падало на кожному посиланні — тепер у панелі
+YouTube є вибір якості (720p/1080p/Максимальна, YT_QUALITY), і збір
+полів пресета обгорнуто у try (одне поле більше ніколи не ламає
+збереження); (2) докстрінг стрімінгу містив зіпсований ієрогліф
+(артефакт редагування) — текст відновлено. Перевірено
+і чисто: драбини шлюзів, шляхи URL, дужки 0/0/0, дублікати def,
+всі змінні, музичний sidechain, xfade-математика, EDL-таймкоди,
+караоке-мітки, _poll/_show_tab конвеєр, pipeline/pipeline_mix.
+Нуль нових ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -564,7 +604,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.7 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.10 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -956,7 +996,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.7"}
+            d = {"app": "Генератор відео 2.10"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1755,7 +1795,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.7"}
+                "app": "Генератор відео 2.10"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1924,19 +1964,33 @@ def fetch_openverse_images(query, workdir, count=3):
         items = [it for it in r.json().get("results", []) if it.get("url")][:count]
         if not items:
             return None, "Openverse: нічого не знайшов за запитом"
-        paths = []
-        for i, it in enumerate(items):
-            u = it["url"]
+        # ⚡ 2.9: раніше фото качалися ПОСЛІДОВНО по 30с кожне (4 фото
+        # повільного CDN = до 145с на запит) — тепер ПАРАЛЕЛЬНО по 15с
+        def _dl(i_it):
+            i, it = i_it
             p = os.path.join(workdir, "img{}.jpg".format(i))
-            with requests.get(u, timeout=30, headers={"User-Agent": "VideoGenerator/1.0"}) as d:
-                d.raise_for_status()
-                with open(p, "wb") as out:
-                    for chunk in d.iter_content(65536):
-                        out.write(chunk)
-            paths.append(p)
-            append_credit(workdir, "🖼️ {} — {} — {} — {}".format(
-                (it.get("title") or "?")[:60], it.get("license") or "?",
-                it.get("creator") or "?", it.get("foreign_landing_url") or ""))
+            try:
+                with requests.get(it["url"], timeout=15,
+                                  headers={"User-Agent": "VideoGenerator/1.0"}) as d:
+                    d.raise_for_status()
+                    with open(p, "wb") as out:
+                        for chunk in d.iter_content(65536):
+                            out.write(chunk)
+                return (i, it, p)
+            except Exception:
+                return (i, it, None)
+        paths = []
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(3, len(items))) as ex:
+                for i, it, p in ex.map(_dl, list(enumerate(items))):
+                    if p:
+                        paths.append(p)
+                        append_credit(workdir, "🖼️ {} — {} — {} — {}".format(
+                            (it.get("title") or "?")[:60], it.get("license") or "?",
+                            it.get("creator") or "?", it.get("foreign_landing_url") or ""))
+        except Exception:
+            paths = []
         return (paths, None) if paths else (None, "Openverse: зображення не завантажились")
     except Exception as e:
         return None, "Openverse: {}".format(e)
@@ -2446,7 +2500,7 @@ def build_bg_from_images(images, dur, w, h, workdir):
     return bg
 
 
-def pollinations_image(prompt, out_path, w=1280, h=720, seed=1, timeout=60):
+def pollinations_image(prompt, out_path, w=1280, h=720, seed=1, timeout=45):  # ⚡ 2.9: 60→45
     """🎨 2.5: AI-ГЕНЕРАЦІЯ ВІЗУАЛУ БЕЗ КЛЮЧІВ — image.pollinations.ai:
     GET /prompt/{промпт}?width&height&nologo=true&seed — nologo прибирає
     водяний знак сервісу одразу. Не вдалось — raise (вища ступінь підхопить)."""
@@ -2923,7 +2977,7 @@ def yt_search(query, limit, say):
                                "--flat-playlist", "--dump-json",
                                "--ignore-config", "--no-warnings"],
                               capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=90)
+                              errors="replace", timeout=45)  # ⚡ 2.9: 90с → 45с
     except Exception as e:
         return [], "yt-dlp не запустився: " + str(e)[:150]
     results = []
@@ -2949,6 +3003,9 @@ def yt_search(query, limit, say):
     return results, ""
 
 
+_SB_OK = None  # ⚡ 2.9: кеш probe SponsorBlock — перевіряю один раз за сесію
+
+
 def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
     """Завантажує відео з YouTube через yt-dlp. Повертає шлях до готового файлу."""
     os.makedirs(outdir, exist_ok=True)
@@ -2958,16 +3015,20 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
     else:
         out_tmpl = os.path.join(outdir, "%(title).100B.%(ext)s")
     sb = []  # ⏭️ v27: SponsorBlock — вирізаю спонсорські вставки з фону, якщо yt-dlp уміє
-    try:
-        r = subprocess.run([exe, "--sponsorblock-remove", "sponsor", "--version"],
-                           capture_output=True, text=True, timeout=20)
-        if r.returncode == 0:
-            sb = ["--sponsorblock-remove", "sponsor,selfpromo"]
-        else:
+    global _SB_OK
+    if _SB_OK is None:  # ⚡ 2.9: probe ОДИН РАЗ за сесію (раніше — перед КОЖНИМ скачуванням)
+        try:
+            r = subprocess.run([exe, "--sponsorblock-remove", "sponsor", "--version"],
+                               capture_output=True, text=True, timeout=20)
+            _SB_OK = (r.returncode == 0)
+        except Exception:
+            _SB_OK = False
+        if not _SB_OK:
             say("ℹ️ SponsorBlock не підтримується збіркою yt-dlp — фон без вирізання")
-    except Exception:
-        sb = []
+    if _SB_OK:
+        sb = ["--sponsorblock-remove", "sponsor,selfpromo"]
     cmd = [exe, "--no-playlist", "--no-warnings", "--newline",
+           "--socket-timeout", "20", "--retries", "2",  # ⚡ 2.9: не висне на мертвих з'єднаннях
            "-f", "bv*[ext=mp4][height<={0}]+ba[ext=m4a]/b[ext=mp4][height<={0}]/b[height<={0}]".format(height),
            "--merge-output-format", "mp4",
            "--ffmpeg-location", os.path.dirname(os.path.abspath(ffmpeg_path())),
@@ -2980,7 +3041,11 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
     final_path = None
     err = None
     last_pct = -100.0
+    deadline = time.time() + 300  # ⚡ 2.9: hard-cap 5 хв — yt-dlp не тягне збірку вічність
     for line in proc.stdout:
+        if time.time() > deadline:
+            proc.terminate()
+            raise RuntimeError("yt-dlp затягнув скачування (5 хв) — обриваю")
         line = line.strip()
         if not line:
             continue
@@ -3957,10 +4022,14 @@ def ddg_search(query, timeout=15, max_hits=5):
     hit = PAGE_CACHE.get("ddg:" + q)
     if hit and now - hit[1] < 600:
         return hit[0]
+    # ⚡ 2.9: раніше ВСІ три ступені чекали по 15с (гірше — 45с до пустки);
+    # тепер DDG-ступені по 7с, Mojeek 10с — гірший випадок 24с, типовий 1-3с
+    t_fast = max(4, min(int(timeout or 15), 7))
+    t_slow = max(5, min(int(timeout or 15), 10))
     hits = []
     try:  # 1) DuckDuckGo html — стабільна розмітка, браузерний UA
         r = requests.get("https://html.duckduckgo.com/html/?q="
-                         + quote_plus(q), timeout=timeout,
+                         + quote_plus(q), timeout=t_fast,
                          headers={"User-Agent": WEB_UA,
                                   "Accept-Language": "uk,en;q=0.8"})
         if r.status_code == 200:
@@ -3970,7 +4039,7 @@ def ddg_search(query, timeout=15, max_hits=5):
     if not hits:  # 2) DuckDuckGo Lite — старий POST, раптом оживе
         try:
             r = requests.post("https://lite.duckduckgo.com/lite/",
-                              data={"q": q}, timeout=timeout,
+                              data={"q": q}, timeout=t_fast,
                               headers={"User-Agent": WEB_UA})
             if r.status_code == 200:
                 hits = _ddg_parse(r.text, max_hits)
@@ -3979,7 +4048,7 @@ def ddg_search(query, timeout=15, max_hits=5):
     if not hits:  # 3) Mojeek — запасний рушій, без ключів (не мовчимо)
         try:
             r = requests.get("https://www.mojeek.com/search?q="
-                             + quote_plus(q), timeout=timeout,
+                             + quote_plus(q), timeout=t_slow,
                              headers={"User-Agent": WEB_UA,
                                       "Accept-Language": "uk,en;q=0.8"})
             if r.status_code == 200:
@@ -4039,7 +4108,8 @@ def agent_web_context(query, timeout=15):
            "джерела ПОСИЛАННЯМИ (просто URL у тексті):\n"
            + "\n".join(parts))
     extracts = fetch_pages_fast([h.get("url") or "" for h in hits[:2]],
-                                per_page=2500, timeout=timeout, workers=2)  # ⚡ 2.2: паралельно
+                                per_page=2500, timeout=max(5, min(int(timeout), 8)),
+                                workers=2)  # ⚡ 2.9: бюджет сторінок 14с замість 21с
     for h in hits[:2]:  # 🕵️ v52: глибина — ПЕРШІ ДВІ сторінки, тепер одночасно
         page = extracts.get(h.get("url") or "")
         if page:
@@ -4436,7 +4506,7 @@ def auto_llm_chat(prompt, system=None, timeout=120, history=None):
     ступені з кількома ключами (через кому у freekeys.json) — спершу
     всі його ключі по черзі, і лише потім наступний шлюз. Дефолтних
     моделей — не обираю вручну: драбина сама знає. Гроші — нуль."""
-    step_t = min(int(timeout or 120), 90)  # щедро для одного джерела, але не вічно
+    step_t = min(int(timeout or 120), 60)  # ⚡ 2.9: 90→60 — мовчазний шлюз не тримає чергу
     for st in auto_chain_steps(prompt):
         keys_for_step = st.get("pool") or ([st["key"]] if st.get("key") else [])
         if st["kind"] in ("faucet", "horde", "kilo", "llm7",
@@ -5088,7 +5158,7 @@ def llm_chat(provider, url, model, prompt, system=None, timeout=90, history=None
 
 def _sse_stream_chat(url, key, model, messages, on_delta, stop=None, timeout=180):
     """⚡ v42: справжній СТРІМІНГ (stream=True, SSE-рядки "data: …") — як у
-    Claude: токени малюються одразу, а не «в效екти» друку після відповіді.
+    Claude: токени малюються одразу, а не одним шматком після відповіді.
     Обрив/ліміт — повертаю те, що встигло прилетіти (fail-open)."""
     body = {"model": (model or "").strip(), "messages": messages, "stream": True}
     headers = {"User-Agent": UA_STRING}
@@ -5096,7 +5166,10 @@ def _sse_stream_chat(url, key, model, messages, on_delta, stop=None, timeout=180
         headers["Authorization"] = "Bearer " + (key or "")
     got = []
     try:
-        with requests.post((url or "").rstrip("/") + "/chat/completions",
+        # ⚡ 2.9: БАГ — тут дописувався "/chat/completions", а всі викликачі
+        # вже дають ПОВНИЙ шлях → ".../chat/completions/chat/completions" = 404
+        # = мертвий стрімінг, драбина сповзала у повільні фолбеки. Фіксую.
+        with requests.post((url or "").rstrip("/"),
                            json=body, stream=True, timeout=timeout,
                            headers=headers) as r:
             if r.status_code != 200:
@@ -5180,7 +5253,7 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
     Fail-open всюди."""
     msgs = ([{"role": "system", "content": system}] if system else []) \
         + (history or []) + [{"role": "user", "content": prompt}]
-    step_t = min(int(timeout or 180), 90)
+    step_t = min(int(timeout or 180), 60)  # ⚡ 2.9: 90→60
     if provider == "auto":
         for st in auto_chain_steps():
             t0 = time.time()
@@ -5257,7 +5330,7 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
             order = [n for n in ([eng] + [x for x in FREEKEY_ORDER if x != eng])
                      if n in FREEKEY_ENGINES
                      and key_pool(keys.get(n))]
-            step_t2 = min(int(timeout or 180), 90)
+            step_t2 = min(int(timeout or 180), 60)  # ⚡ 2.9: 90→60
             for name in order:  # 🪜 v46: обраний шлюз першим, за ним — жива драбина
                 conf = FREEKEY_ENGINES[name]
                 mm = m if (name == eng and m and m != "модель не обрана") \
@@ -5282,7 +5355,7 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
             steps, hint = chat_pick_steps(provider[5:].strip())
             if hint:
                 return hint
-            step_t2 = min(int(timeout or 180), 90)
+            step_t2 = min(int(timeout or 180), 60)  # ⚡ 2.9: 90→60
             for st in steps:
                 t0 = time.time()
                 mm = st["model"]  # 🧠 v49: модель з перемикача чату — якщо вона з цього шлюзу
@@ -7538,6 +7611,8 @@ class App:
         self.mt_w, self.mt_h = 1920, 1080
         self.mt_drag = None
         self.mt_prev_key = (None, -1.0)
+        self.mt_prev_at = 0.0   # 2.8: коли останній раз витягали кадр (захист від фризів)
+        self.mt_tick_n = 0
         self.mt_last_tick = 0.0
         self.mt_dir = os.path.join(os.path.expanduser("~"), "Videos", "Generated", "montage")
         os.makedirs(self.mt_dir, exist_ok=True)
@@ -7810,23 +7885,25 @@ class App:
         cv.create_text(2, 36, text="🎬", anchor="w", font=("Segoe UI", 10))
         cv.create_text(2, 74, text="🎵", anchor="w", font=("Segoe UI", 10))
         cv.create_text(2, 110, text="🔤", anchor="w", font=("Segoe UI", 10))
-        def _box(x, y0, y1, label, fill, sel):
-            x2 = x + 26
+        def _box(x, y0, y1, label, fill, sel, wd):
+            # 2.8: ширина кліпу = тривалість (як у OpenCut/CapCut) — не фіксовані 26px
+            x2 = x + max(wd * pps, 12)
             cv.create_rectangle(x, y0, x2, y1, fill=fill,
                                 outline="#FFFFFF" if sel else "#00000000", width=2)
-            cv.create_text(x + 4, (y0 + y1) / 2, text=label[:max(int((x2 - x) / 7), 1)],
-                           fill="#FFFFFF", font=("Segoe UI", 8), anchor="w")
+            if x2 - x >= 14:
+                cv.create_text(x + 4, (y0 + y1) / 2, text=label[:max(int((x2 - x) / 7), 3)],
+                               fill="#FFFFFF", font=("Segoe UI", 8), anchor="w")
         for i, c in enumerate(self.mt_clips):
             x = X0 + c["tl"] * pps
             _box(x, 22, 54, os.path.basename(c["path"]), "#5B3AA8",
-                 self.mt_sel == ("v", i))
+                 self.mt_sel == ("v", i), c["dur"])
         for i, m in enumerate(self.mt_music):
             x = X0 + m["tl"] * pps
             _box(x, 60, 90, os.path.basename(m["path"]), "#1F7A4D",
-                 self.mt_sel == ("m", i))
+                 self.mt_sel == ("m", i), m["dur"])
         for i, t in enumerate(self.mt_texts):
             x = X0 + t["tl"] * pps
-            _box(x, 96, 126, t["text"], "#8A6D00", self.mt_sel == ("t", i))
+            _box(x, 96, 126, t["text"], "#8A6D00", self.mt_sel == ("t", i), t["dur"])
         ph = X0 + self.mt_time * pps
         cv.create_line(ph, 0, ph, 150, fill="#FF5A5A", width=2)
         cv.create_polygon(ph - 5, 0, ph + 5, 0, ph, 9, fill="#FF5A5A", outline="")
@@ -7943,7 +8020,11 @@ class App:
         self.mt_slider.set(self.mt_time / self._mt_total())
         self.mt_slider.configure(command=self._mt_slider_seek)
         self._mt_tlbl_upd()
-        self._mt_preview()
+        # 2.8: прев'ю не кожен тік (50мс), а кожен третій (~150мс) — плейхед
+        # рухається плавно, кадри оновлюються рідше і без фризів
+        self.mt_tick_n = getattr(self, "mt_tick_n", 0) + 1
+        if self.mt_tick_n % 3 == 0:
+            self._mt_preview()
         self._mt_draw_tl()
         if self.mt_playing:
             self.root.after(50, self._mt_tick)
@@ -7975,8 +8056,11 @@ class App:
                         self.mt_prev_key = key
                 else:
                     src_t = max(0.0, c["start"] + (self.mt_time - c["tl"]) * c["speed"])
-                    key = (c["path"], round(src_t, 1))
-                    if key != self.mt_prev_key:
+                    # 2.8: крок 0.5с + ліміт часу 0.25с — витяг кадру не частіше 4р/с,
+                    # поки кадр «під плеєр» не змінився; UI не гальмує (патерн OpenCut)
+                    key = (c["path"], round(src_t * 2) / 2.0)
+                    if key != self.mt_prev_key and \
+                            time.monotonic() - getattr(self, "mt_prev_at", 0.0) >= 0.25:
                         run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin",
                              "-ss", "{:.2f}".format(src_t), "-i", c["path"],
                              "-frames:v", "1", "-vf",
@@ -7984,6 +8068,7 @@ class App:
                              "pad=640:360:(ow-iw)/2:(oh-ih)/2:color=0x0B0B12",
                              os.path.join(self.mt_dir, "prev.jpg")])
                         self.mt_prev_key = key
+                        self.mt_prev_at = time.monotonic()
                 img = PILImage.open(os.path.join(self.mt_dir, "prev.jpg")).convert("RGB")
             except Exception:
                 img = None
@@ -8945,6 +9030,13 @@ class App:
         ctk.CTkButton(yrow, text="⬇️ Завантажити все", height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.download_yt_many).pack(side="left", padx=(8, 0))
+        # 🛠 2.10: БАГ — self.yt_q використовувався (пресети, завантаження),
+        # але ніде не створювався = AttributeError: збереження пресетів падало,
+        # а «⬇️ Завантажити все» ламалось на кожному посиланні. Лікую: вибір якості.
+        self.yt_q = ctk.StringVar(value="720p")
+        ctk.CTkOptionMenu(yrow, values=list(YT_QUALITY), variable=self.yt_q,
+                          width=120, height=32, corner_radius=16, fg_color=self.INSET,
+                          button_color=self.HOVER, font=self._f(11)).pack(side="left", padx=(8, 0))
         self.yt_many_bg = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(self.tools_body, text="✂️ Нарізати фрагменти у фон", variable=self.yt_many_bg,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 4))
@@ -9365,7 +9457,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.7 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і «📦 Експорт MP4», 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.10 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і «📦 Експорт MP4» (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -9883,22 +9975,26 @@ class App:
         if not name or not name.strip():
             return
         name = re.sub(r"[^\w\- ]", "_", name.strip())
-        data = {
-            "voice": self.voice.get(),
-            "size": self.size.get(),
-            "sub_style": self.sub_style.get(),
-            "vid_style": self.vid_style.get(),
-            "transition": self.transition.get(),
-            "trim": bool(self.trim_sil.get()),
-            "cover": bool(self.cover_on.get()),
-            "no_faces": bool(self.no_faces.get()),
-            "seo": bool(self.seo.get()),
-            "loudnorm": bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False,  # 🔊 v27
-            "pack": (self.pack_size.get() if hasattr(self, "pack_size") else "Не стискати"),  # 📦 v27
-            "platform": ((self.pub_platform.get() or "") if hasattr(self, "pub_platform") else ""),  # 📺 v32
-            "tts_rate": int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0,  # 🎚 v28
-            "yt_q": self.yt_q.get(),
-        }
+        data = {}  # 🛠 2.10: збір полів у try — одне бите поле не ламає збереження
+        try:
+            data = {
+                "voice": self.voice.get(),
+                "size": self.size.get(),
+                "sub_style": self.sub_style.get(),
+                "vid_style": self.vid_style.get(),
+                "transition": self.transition.get(),
+                "trim": bool(self.trim_sil.get()),
+                "cover": bool(self.cover_on.get()),
+                "no_faces": bool(self.no_faces.get()),
+                "seo": bool(self.seo.get()),
+                "loudnorm": bool(self.loudnorm.get()) if hasattr(self, "loudnorm") else False,  # 🔊 v27
+                "pack": (self.pack_size.get() if hasattr(self, "pack_size") else "Не стискати"),  # 📦 v27
+                "platform": ((self.pub_platform.get() or "") if hasattr(self, "pub_platform") else ""),  # 📺 v32
+                "tts_rate": int(self.tts_rate.get()) if hasattr(self, "tts_rate") else 0,  # 🎚 v28
+                "yt_q": self.yt_q.get(),
+            }
+        except Exception as e:
+            self.say("⚠️ Не зібрав усі поля пресету: " + str(e)[:120])
         try:
             with open(os.path.join(self._preset_dir(), name + ".json"), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -11969,9 +12065,12 @@ class App:
         history = self._chat_history_for_llm()
         try:  # 🔗 v48: URL у повідомленні — агент читає сторінки у фоні
             urls = re.findall(r"https?://[^\s\)\]\">]+", text or "")[:2]
+            # ⚡ 2.9: ПАРАЛЕЛЬНО з бюджетом 16с (раніше — послідовно до 30с
+            # до першого токена: 2 сторінки × timeout=15)
+            got_pages = fetch_pages_fast(urls, per_page=4000, timeout=10, workers=2)
             pages = []
             for u in urls:
-                pg = fetch_page_text(u, timeout=15, limit=4000)
+                pg = got_pages.get(u) or ""
                 if pg:
                     pages.append("Вміст сторінки " + u + " (витяг):\n" + pg[:4000])
             if pages:
