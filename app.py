@@ -327,6 +327,26 @@ Groq розшифровує voice.mp3 і звіряє зі сценарієм �
 решту (join ≤25 с) — оркестр + інтернет ≈ час одного оркестру; агент
 чату (🕵️ «знайди…») читає свої 2 сторінки одночасно — відповідь прудша.
 Нуль нових ключів, нуль нових pip.
+2.3: 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ, керовані агентами («додати комбайни, які
+керуються агентами»): ЧОТИРИ виробничі лінії — Універсальний 🎬,
+Новинний 📰, Shorts 📱, Подкаст 🎧; кожною керує АГЕНТ-МАШИНІСТ
+(combine_plan, один хід драбиною «Авто»): сам обирає голос, розмір,
+стиль субтитрів і картинки, перехід, темп озвучки, оверлеї, SEO,
+обкладинку — і вирішує, ЧИ ЗАПУСКАТИ оркестр агентів та інтернет-
+дослідження; відповідь парситься з «КЛЮЧ: значення» і валідується за
+словниками (вигадав неіснуючий голос — живе заводське налаштування,
+fail-open). Свіч «🚜 Комбайн генерації» + меню вибору лінії у ⚙️
+Додатково; працює в режимі 🎬, у батчі — окремий план на КОЖНУ тему.
+Нуль нових ключів, нуль нових pip.
+2.4: 🎬 ЗАПИТ У ЧАТ → КНОПКА → ВІДЕО («вставляю запит в чат, натискаю
+кнопку згенерувати, отримую відео»): у чаті з'явилась кнопка «🎬
+Згенерувати відео» — текст із поля чату стає темою, двигун стартує як
+із кнопки ▶ (усі свічі ⚙️ Додатково чинні: 🚜 комбайн, 🎭 оркестр, 🌐
+інтернет), користувач ЛИШАЄТЬСЯ у чаті; хід збірки — у журналі
+вкладки 🎬 Генерація, а результат (готове відео: шлях + розмір, або
+чесна пояснена помилка) прилітає відповіддю ПРЯМО У ЧАТ (gen_end →
+_chat_gen_result). Попередження — теж у чат (порожнє поле, коротка
+тема, «вже генерується»). Нуль нових ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -433,6 +453,39 @@ TRANSITIONS = {
     "Наплив": "fade",
     "Затемнення": "fadeblack",
 }
+# 🚜 2.3: КОМБАЙНИ ГЕНЕРАЦІЇ — виробничі лінії, кожною керує АГЕНТ-МАШИНІСТ
+# (combine_plan): None = машиніст вирішує сам під тему, інше — заводський дефолт
+COMBINES = {
+    "Універсальний 🎬": {
+        "brief": "універсальне YouTube-відео — підбери все під тему сам",
+        "size": None, "voice": None, "sub": None, "vid": None, "trans": None,
+        "rate": 0, "overlays": False, "seo": False, "cover": True,
+        "orchestra": True, "web": True,
+        "system": "Ти — досвідчений машиніст універсального відео-комбайна. "
+                  "Підбери налаштування, які найкраще пасують темі."},
+    "Новинний 📰": {
+        "brief": "новини й події — бодрий темп, обов'язково свіжі факти, заголовкова плашка",
+        "size": "1080p", "voice": None, "sub": "Жовті з тінню (CapCut)", "vid": None,
+        "trans": "Різко", "rate": 5, "overlays": True, "seo": False, "cover": True,
+        "orchestra": True, "web": True,
+        "system": "Ти — машиніст новинного відео-комбайна: динамічно, чітко, "
+                  "з азартом диктора — і щоб без вигаданих фактів."},
+    "Shorts 📱": {
+        "brief": "вертикальний Shorts — швидко, яскраво, великі субтитри, хук з перших секунд",
+        "size": "Shorts", "voice": None, "sub": "Неонові великі", "vid": "Яскраво",
+        "trans": "Різко", "rate": 10, "overlays": False, "seo": True, "cover": True,
+        "orchestra": True, "web": True,
+        "system": "Ти — машиніст Shorts-комбайна: максимальний темп, хук, енергія — "
+                  "глядач не має відірватись."},
+    "Подкаст 🎧": {
+        "brief": "спокійна розповідь — м'який темп, караоке-субтитри, плавні переходи",
+        "size": "1080p", "voice": None, "sub": "Караоке 🎤", "vid": None,
+        "trans": "Наплив", "rate": -5, "overlays": False, "seo": False, "cover": True,
+        "orchestra": False, "web": False,
+        "system": "Ти — машиніст подкаст-комбайна: спокійно, тепло, вдумливо — "
+                  "розповідь на вечір."},
+}
+
 # v14 💾: папка пресетів налаштувань (JSON, поруч із результатами генерації)
 PRESET_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Generated", "presets")
 YT_QUALITY = {"720p": 720, "1080p": 1080, "Максимальна": 2160}
@@ -462,7 +515,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.2 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.4 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -854,7 +907,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.2"}
+            d = {"app": "Генератор відео 2.4"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1402,6 +1455,84 @@ def web_research(topic, say=None, max_pages=2):
         return ""  # інтернет — підсилювач, не залежність
 
 
+def combine_plan(query, say=None, kind=""):
+    """🚜 2.3: КОМБАЙН ГЕНЕРАЦІЇ під керуванням АГЕНТА-МАШИНІСТА —
+    агент одним ходом драбини «Авто» сам вирішує налаштування під тему:
+    голос, розмір, стиль субтитрів і картинки, перехід, темп озвучки,
+    оверлеї, SEO, обкладинку — і ЧИ ЗАПУСКАТИ оркестр агентів та
+    інтернет-дослідження (машиніст керує комбайном від теми до рендера).
+    Відповідь парситься з рядків «КЛЮЧ: значення» і валідується за
+    словниками; ступінь мовчить або вигадує — живуть заводські
+    налаштування комбайна (fail-open). Повертає словник параметрів."""
+    preset = dict(COMBINES.get(kind) or next(iter(COMBINES.values())))
+    out = {"voice": preset.get("voice"), "size": preset.get("size"),
+           "sub": preset.get("sub"), "vid": preset.get("vid"),
+           "trans": preset.get("trans"), "rate": preset.get("rate", 0),
+           "overlays": bool(preset.get("overlays")), "seo": bool(preset.get("seo")),
+           "cover": bool(preset.get("cover")), "orchestra": bool(preset.get("orchestra")),
+           "web": bool(preset.get("web"))}
+    if say:
+        say("🚜 Комбайн «{}»: машиніст налаштовує збір…".format(kind or list(COMBINES)[0]))
+    try:
+        ask = ("Тема відео: " + (query or "").strip() + "\n\n"
+               "Вибери налаштування і дай КОЖНЕ окремим рядком «КЛЮЧ: значення»:\n"
+               "ГОЛОС: " + " / ".join(VOICES) + "\n"
+               "РОЗМІР: " + " / ".join(SIZES) + "\n"
+               "СУБТИТРИ: " + " / ".join(SUBTITLE_STYLES) + "\n"
+               "СТИЛЬ: " + " / ".join(VIDEO_STYLES) + "\n"
+               "ПЕРЕХІД: " + " / ".join(TRANSITIONS) + "\n"
+               "ТЕМП: ціле число від -20 до 20 (відсотки темпу озвучки)\n"
+               "ОВЕРЛЕЇ: так / ні\n"
+               "SEO: так / ні\n"
+               "ОБКЛАДИНКА: так / ні\n"
+               "ОРКЕСТР: так / ні\n"
+               "ІНТЕРНЕТ: так / ні\n\n"
+               "Профіль комбайна: " + (preset.get("brief") or "") + "\n"
+               "Нічого не пояснюй — лише рядки «КЛЮЧ: значення».")
+        t = llm_chat("auto", "", "", ask, system=(preset.get("system") or
+                     "Ти — машиніст відео-комбайна."), timeout=90)
+        for ln in (t or "").splitlines():
+            if ":" not in ln:
+                continue
+            k, v = ln.split(":", 1)
+            k = k.strip().upper()
+            v = v.strip()
+            if not v:
+                continue
+            if k == "ГОЛОС" and v in VOICES:
+                out["voice"] = v
+            elif k == "РОЗМІР" and v in SIZES:
+                out["size"] = v
+            elif k == "СУБТИТРИ" and v in SUBTITLE_STYLES:
+                out["sub"] = v
+            elif k == "СТИЛЬ" and v in VIDEO_STYLES:
+                out["vid"] = v
+            elif k == "ПЕРЕХІД" and v in TRANSITIONS:
+                out["trans"] = v
+            elif k == "ТЕМП":
+                try:
+                    out["rate"] = max(-20, min(20, int(float(v.replace("%", "").strip()))))
+                except Exception:
+                    pass
+            elif k in ("ОВЕРЛЕЇ", "SEO", "ОБКЛАДИНКА", "ОРКЕСТР", "ІНТЕРНЕТ"):
+                out[{"ОВЕРЛЕЇ": "overlays", "SEO": "seo", "ОБКЛАДИНКА": "cover",
+                     "ОРКЕСТР": "orchestra", "ІНТЕРНЕТ": "web"}[k]] = \
+                    v.lower().startswith(("так", "yes", "true", "+", "1"))
+        if say:
+            say("🚜 Машиніст вирішив: {} | {} | {} | {} | перехід {} | темп {}% | "
+                "оверлеї {} | SEO {} | обкладинка {} | оркестр {} | інтернет {}".format(
+                    out.get("size") or "як в інтерфейсі", out.get("voice") or "як в інтерфейсі",
+                    out.get("sub") or "як в інтерфейсі", out.get("vid") or "як в інтерфейсі",
+                    out.get("trans") or "як в інтерфейсі", out.get("rate", 0),
+                    "так" if out.get("overlays") else "ні", "так" if out.get("seo") else "ні",
+                    "так" if out.get("cover") else "ні", "так" if out.get("orchestra") else "ні",
+                    "так" if out.get("web") else "ні"))
+    except Exception:
+        if say:
+            say("🚜 Машиніст мовчить — комбайн їде на заводських налаштуваннях")
+    return out
+
+
 def research_narration(query, research, say=None):
     """🌐 2.1: один хід драбиною «Авто» — сценарій з теми ПЛЮС свіжі
     факти дослідження (лайт-режим без оркестру). Не вийшло — ""
@@ -1575,7 +1706,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.2"}
+                "app": "Генератор відео 2.4"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -7210,6 +7341,15 @@ class App:
         ctk.CTkSwitch(self.extra_body, text="🌐 Свіжі факти з інтернету (перед сценарієм)",
                       variable=self.web_on,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.combine_on = ctk.BooleanVar(value=False)  # 🚜 2.3: комбайн під керуванням агента-машиніста
+        ctk.CTkSwitch(self.extra_body, text="🚜 Комбайн генерації (агент-машиніст керує налаштуваннями)",
+                      variable=self.combine_on,
+                      font=self._f(11), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.combine_kind = ctk.CTkOptionMenu(self.extra_body, values=list(COMBINES), height=30,
+                                             fg_color=self.INSET, button_color=self.HOVER,
+                                             button_hover_color=self.HOVER, font=self._f(12))
+        self.combine_kind.set("Універсальний 🎬")
+        self.combine_kind.pack(fill="x", padx=14, pady=(0, 4))
         self.cover_on = ctk.BooleanVar(value=True)  # 📷 v14: обкладинка YouTube
         ctk.CTkSwitch(self.extra_body, text="📷 Обкладинка YouTube (cover.jpg)", variable=self.cover_on,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
@@ -7692,7 +7832,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.2 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.4 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 З ЧАТУ НАПРЯМУ (2.4): запит у чаті + кнопка «Згенерувати відео» = готове відео відповіддю у чат, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -9326,6 +9466,9 @@ class App:
                         self.status_lbl.configure(text="● Готово", text_color=self.GREEN)
                     else:
                         self.status_lbl.configure(text="● Спробуй ще", text_color="#F59E0B")
+                    if getattr(self, "_chat_gen_active", False):  # 🎬 2.4: результат — назад у чат
+                        self._chat_gen_active = False
+                        self._chat_gen_result(ok)
                 continue
             if msg is None:  # завантаження / пошук / компіляція завершені
                 self.bar.stop()
@@ -9871,6 +10014,10 @@ class App:
                       fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
                       command=self._chat_web_send).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(row, text="🎬 Згенерувати відео", height=34, corner_radius=17,  # 🎬 2.4: чат → відео
+                      fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
+                      text_color=self.CLAUDE_TEXT, font=self._f(12),
+                      command=self._chat_generate).pack(side="left", padx=(8, 0))
         ctk.CTkButton(row, text="⚙️ у поля генератора", height=34, corner_radius=17,
                       fg_color=self.CLAUDE_CARD, hover_color=self.CLAUDE_HOVER,
                       text_color=self.CLAUDE_TEXT, font=self._f(12),
@@ -9883,7 +10030,7 @@ class App:
         self.chat_send_btn.pack(side="right")
         ctk.CTkLabel(win, text="Enter — надіслати • Shift+Enter — новий рядок • "
                      "📎 Файл — додати txt/srt/… у контекст • 🌐 Пошук — агент "
-                     "знайде свіже в мережі • 🔗 кинь URL у повідомлення — агент "
+                     "знайде свіже в мережі • 🎬 Згенерувати відео — запит із поля чату стає готовим відео • 🔗 кинь URL у повідомлення — агент "
                      "прочитає сторінку • ✏️ під своїм повідомленням — "
                      "редагувати • Ctrl+K — нова розмова • 🖱 ПКМ — як у всіх "
                      "програмах • 🎯 джерело думання — меню у шапці • 🧠 Модель "
@@ -10574,6 +10721,64 @@ class App:
         self._chat_chips()
         self.say("💬 Чат: нова розмова")
 
+    def _chat_generate(self):
+        """🎬 2.4: ЗАПИТ У ЧАТ → КНОПКА → ВІДЕО: текст із поля чату стає
+        темою, двигун (усі свічі ⚙️ Додатково: 🚜 комбайн, 🎭 оркестр, 🌐
+        інтернет) стартує як із кнопки ▶ — користувач лишається у чаті;
+        хід збірки біжить у журналі вкладки 🎬 Генерація, а РЕЗУЛЬТАТ
+        прилітає назад у чат (gen_end → _chat_gen_result)."""
+        if getattr(self, "_gen_running", False):
+            self._chat_gen_note("🎬 Відео вже генерується — зачекай, результат прилетить у чат.")
+            return
+        text = " ".join(self.chat_input.get("1.0", "end").split())
+        if not text:
+            self._chat_gen_note("🎬 Поле чату порожнє — встав спершу запит (тему відео) 🙂")
+            return
+        if len(text) < 3:
+            self._chat_gen_note("🎬 Тема надто коротка — напиши хоча б кілька слів 🙂")
+            return
+        self.chat_input.delete("1.0", "end")
+        self.chat_messages.append({"role": "user", "text": "🎬 " + text, "src": ""})
+        self._chat_render_user("🎬 " + text, len(self.chat_messages) - 1)
+        self._chat_save()
+        self._set_mode("video")  # тема іде у картку «🎬 Генерація» (журнал збірки там)
+        self.query.delete("1.0", "end")
+        self.query.insert("1.0", text)
+        self._chat_gen_note("🎬 Генерую відео за темою: «" + text[:120] +
+                            "».\nНалаштування — як у ⚙️ Додатково і картці 🎬 Генерація "
+                            "(голос, розмір, 🚜 комбайн, 🎭 оркестр, 🌐 інтернет). "
+                            "Хід збірки — у журналі вкладки 🎬 Генерація; сюди прилетить готове відео.")
+        self._chat_gen_active = True  # 🎬 gen_end у _poll поверне результат у чат
+        self.start()
+
+    def _chat_gen_result(self, ok):
+        """🎬 2.4: gen_end → відповідь у чат: готове відео (шлях + розмір)
+        або чесне пояснення, що збірка не вдалась."""
+        try:
+            if ok and getattr(self, "final_path", ""):
+                f = self.final_path
+                try:
+                    mb = os.path.getsize(f) / (1024 * 1024) if os.path.isfile(f) else 0
+                except Exception:
+                    mb = 0
+                self._chat_gen_note("🎬 Готово! Відео зібране:\n" + f +
+                                    (" ({:.1f} МБ)".format(mb) if mb else "") +
+                                    "\nОбкладинка і субтитри — поруч, у тій самій папці.")
+            elif ok:
+                self._chat_gen_note("🎬 Збірка завершилась — дивись вкладку 🎬 Генерація.")
+            else:
+                self._chat_gen_note("🎬 Не зібралось — останні рядки журналу у вкладці 🎬 "
+                                    "Генерація кажуть, що сталося. Спробуй ще раз 🙂")
+        except Exception:
+            pass  # чат — підсилювач, не залежність
+
+    def _chat_gen_note(self, text):
+        """🎬 2.4: коротка службова відповідь у чат (миттєво, без стріму)."""
+        self.chat_messages.append({"role": "assistant", "text": text, "src": "🎬 Генератор"})
+        self._chat_save()
+        self._chat_render_assistant(text, "🎬 Генератор")
+
+
     def _chat_to_fields(self):
         """💬 v42: ⚙️ у поля генератора — фраза з поля чату стає командою
         головного вікна (мостина між розмовою і генерацією відео)."""
@@ -11216,14 +11421,32 @@ class App:
                         self.say("▶️ Батч {}/{}: «{}»".format(idx, len(themes), th[:60]))
                         self.q.put(("batch_reset", None))
                     try:
-                        generate_video(th, self.voice.get(), SIZES[self.size.get()],
+                        g_voice, g_size = self.voice.get(), SIZES[self.size.get()]
+                        g_sub, g_vid, g_trans, g_rate = sub, vid, trans, rt
+                        g_se, g_cov, g_ov, g_orch, g_web = se, cov, ov, orch, webn
+                        if getattr(self, "combine_on", None) and self.combine_on.get():  # 🚜 2.3
+                            ck = (self.combine_kind.get() if getattr(self, "combine_kind", None)
+                                  and self.combine_kind.get() in COMBINES else list(COMBINES)[0])
+                            cp = combine_plan(th, self.say, ck) or {}
+                            g_voice = cp.get("voice") or g_voice
+                            g_size = SIZES.get(cp.get("size")) or g_size
+                            g_sub = cp.get("sub") or g_sub
+                            g_vid = cp.get("vid") or g_vid
+                            g_trans = cp.get("trans") or g_trans
+                            g_rate = cp.get("rate", g_rate)
+                            g_se = bool(cp.get("seo", g_se))
+                            g_cov = bool(cp.get("cover", g_cov))
+                            g_ov = bool(cp.get("overlays", g_ov))
+                            g_orch = bool(cp.get("orchestra", g_orch))
+                            g_web = bool(cp.get("web", g_web))
+                        generate_video(th, g_voice, g_size,
                                        getattr(self, "music_path", "").strip(), self.say,
                                        on_workdir=lambda wd: setattr(self, "workdir", wd),
                                        bg_files=files, yt_search_urls=sel, yt_many=many,
                                        pin_images=pins,
-                                       sub_style=sub, vid_style=vid, transition=trans,
-                                       trim_sil=trim, cover=cov, no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                       upscale4k=up4, autoscrape=asc, overlays=ov, orchestra=orch, web_on=webn)
+                                       sub_style=g_sub, vid_style=g_vid, transition=g_trans,
+                                       trim_sil=trim, cover=g_cov, no_faces=nf, seo=g_se, master=ln, pack_mb=pk, rate_pct=g_rate, platform=pv,
+                                       upscale4k=up4, autoscrape=asc, overlays=g_ov, orchestra=g_orch, web_on=g_web)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
