@@ -351,6 +351,22 @@ fail-open сирим текстом) і далі стандартний шлях
 коротка — перетворюється на тему. Старт через start() — усі свічі
 (комбайн/оркестр/інтернет) працюють як у головному вікні; захист від
 подвійного запуску (_gen_running). Нуль нових ключів, нуль нових pip.
+2.5: 🪄 AI-ВІЗУАЛ-ДВИГУН — «самостійно генерувати візуал, скачувати
+картинки в інтернеті, покращувати якість, прибирати водяні знаки і
+анімувати для відеоряду, 15–30 анімованих кадрів на хвилину»: нове
+джерело фону «🪄 AI-візуал» (п'ятий сегмент поруч з YouTube/Openverse/
+Pixabay/Pinterest). Двигун build_bg_ai_visual: темп 20 кадрів/хв (кожен
+~3 с, у діапазоні 15–30/хв; довгі відео — чесний кап 48 кадрів), на
+КОЖЕН кадр драбина: 🎨 pollinations_image (image.pollinations.ai, БЕЗ
+ключів, nologo прибирає знак сервісу, 3 сіди) → 🌐 запаска-пул
+Openverse по темі; далі 💎 enhance_image (апскейл LANCZOS до ширини
+кадра + різкість ×1.35 + контраст) → 🧹 strip_watermark (світла
+текстова смуга внизу — обрізається; невпевнений — не чіпаю) → 🎬
+build_bg_animated: Кен-Бернс у ЧОТИРЬОХ напрямках (наближення /
+віддалення / панорама уліво / управо) — кадри дихають, а не стоять.
+Генерація кадрів — ПАРАЛЕЛЬНО (4 потоки), fail-open на кожен кадр і
+на весь двигун (не зібрався — далі звичайна драбина фону). Нуль нових
+ключів, нуль нових pip.
 """
 import array
 import asyncio
@@ -519,7 +535,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.4 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.5 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -911,7 +927,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.4"}
+            d = {"app": "Генератор відео 2.5"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1710,7 +1726,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.4"}
+                "app": "Генератор відео 2.5"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2399,6 +2415,207 @@ def build_bg_from_images(images, dur, w, h, workdir):
     bg = os.path.join(workdir, "bg.mp4")
     run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", bg])
     return bg
+
+
+def pollinations_image(prompt, out_path, w=1280, h=720, seed=1, timeout=60):
+    """🎨 2.5: AI-ГЕНЕРАЦІЯ ВІЗУАЛУ БЕЗ КЛЮЧІВ — image.pollinations.ai:
+    GET /prompt/{промпт}?width&height&nologo=true&seed — nologo прибирає
+    водяний знак сервісу одразу. Не вдалось — raise (вища ступінь підхопить)."""
+    from urllib.parse import quote
+    url = ("https://image.pollinations.ai/prompt/" + quote((prompt or "")[:400])
+           + "?width={}&height={}&nologo=true&seed={}".format(w, h, seed))
+    with requests.get(url, stream=True, timeout=timeout,
+                     headers={"User-Agent": UA_STRING}) as r:
+        r.raise_for_status()
+        with open(out_path + ".part", "wb") as f:
+            for chunk in r.iter_content(8192):
+                f.write(chunk)
+    if os.path.getsize(out_path + ".part") < 15000:
+        try:
+            os.remove(out_path + ".part")
+        except Exception:
+            pass
+        raise RuntimeError("картинка порожня")
+    os.replace(out_path + ".part", out_path)
+    return out_path
+
+
+def enhance_image(path, target_w=1920, say=None):
+    """💎 2.5: ПОКРАЩЕННЯ ЯКОСТІ — апскейл до ширини кадра (LANCZOS) +
+    різкість ×1.35 + легкий контраст. Нема PIL — тихо пропускаю (fail-open)."""
+    try:
+        from PIL import Image, ImageEnhance
+        im = Image.open(path).convert("RGB")
+        if im.width < target_w:
+            k = target_w / im.width
+            im = im.resize((target_w, int(im.height * k)), Image.LANCZOS)
+        im = ImageEnhance.Sharpness(im).enhance(1.35)
+        im = ImageEnhance.Contrast(im).enhance(1.06)
+        im.save(path, quality=92)
+        return True
+    except Exception:
+        return False
+
+
+def strip_watermark(path, say=None):
+    """🧹 2.5: ВОДЯНІ ЗНАКИ ГЕТЬ — типова прев'юшка стоку несе світлу
+    текстову смугу внизу: шукаю її в нижніх 14% (рядки з багатьма
+    світлими пікселями) і обрізаю. Не впевнений — не чіпаю (fail-open)."""
+    try:
+        from PIL import Image
+        im = Image.open(path)
+        w, h = im.size
+        strip = im.convert("L").crop((0, int(h * 0.86), w, h))
+        px = list(strip.getdata())
+        sw, sh = strip.size
+        cut_row = None
+        for row in range(sh):
+            row_px = px[row * sw:(row + 1) * sw]
+            if sum(1 for v in row_px if v > 232) > sw * 0.12:
+                cut_row = row
+                break
+        if cut_row is not None and cut_row > 4:
+            new_h = max(10, min(int(h * 0.86) + cut_row - 6, h - 2))
+            im.crop((0, 0, w, new_h)).save(path, quality=92)
+            if say:
+                say("🧹 Водяний знак прибрано: " + os.path.basename(path))
+        return True
+    except Exception:
+        return False
+
+
+def build_bg_animated(images, dur, w, h, workdir):
+    """🎬 2.5: АНІМОВАНИЙ ВІДЕОРЯД — Кен-Бернс у ЧОТИРЬОХ напрямках:
+    кадр №0 наближається, №1 віддаляється, №2 панорамить управо, №3
+    уліво — зображення дихають, а не стоять. Тривалість кадру задає
+    виклик (15–30 кадрів на хвилину), конкатенація concat'ом — швидко."""
+    ff = ffmpeg_path()
+    n = max(len(images), 1)
+    per = max(dur / n, 1.0)
+    segs = []
+    for i, img in enumerate(images):
+        seg = os.path.join(workdir, "aseg{}.mp4".format(i))
+        frames = int(per * 25) + 1
+        mode = i % 4
+        if mode == 0:  # наближення
+            z = "min(zoom+0.0008,1.28)"
+            x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        elif mode == 1:  # віддалення
+            z = "if(lte(zoom,1.0),1.30,max(zoom-0.0008,1.0))"
+            x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        elif mode == 2:  # панорама уліво
+            z = "1.15"
+            x, y = "(iw-iw/zoom)*(1-on/{})".format(frames), "ih/2-(ih/zoom/2)"
+        else:  # панорама управо
+            z = "1.15"
+            x, y = "(iw-iw/zoom)*on/{}".format(frames), "ih/2-(ih/zoom/2)"
+        run([ff, "-y", "-hide_banner", "-nostdin", "-i", img,
+             "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+                     "zoompan=z='{}':x='{}':y='{}':d={}:s={}x{}:fps=25,"
+                     "format=yuv420p").format(w, h, w, h, z, x, y, frames, w, h),
+             "-t", "{:.2f}".format(per),
+             "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
+        segs.append(seg)
+    lst = os.path.join(workdir, "alist.txt")
+    with open(lst, "w", encoding="utf-8") as f:
+        for s in segs:
+            f.write("file '{}'\n".format(s))
+    bg = os.path.join(workdir, "bg.mp4")
+    run([ff, "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
+         "-i", lst, "-c:v", "copy", bg])
+    return bg
+
+
+def build_bg_ai_visual(query, text, dur, w, h, workdir, say=None):
+    """🪄 2.5: AI-ВІЗУАЛ-ДВИГУН (VideoGen-стиль) — ВІДЕОРЯД ЗБИРАЄТЬСЯ
+    САМ: 15–30 анімованих кадрів на хвилину (кожен 2–4 с, темп 20/хв).
+    Драбина на КОЖЕН кадр: 🎨 генерую Pollinations (без ключів, nologo,
+    3 сіди) → 🌐 запаска з мережі (Openverse-пул по темі). Далі кожен
+    кадр: 💎 апскейл+різкість (enhance_image) → 🧹 водяні знаки
+    (strip_watermark) → 🎬 анімація Кен-Бернс у чотирьох напрямках
+    (build_bg_animated). Генерація біжить ПАРАЛЕЛЬНО (4 потоки). Fail-open
+    на кожен кадр: скільки зібралось — стільки і буде, решта довше."""
+    n = int(min(48, max(8, round((dur or 60) * 20 / 60.0))))
+    per = max(1.0, (dur or 60) / n)
+    if say:
+        say("🪄 AI-візуал: {} анімованих кадрів (≈{:.1f} с/кадр)".format(n, per))
+    frags = [s.strip() for s in re.split(r"(?<=[.!?…])\s+", (text or query or "").strip())
+             if len(s.strip()) >= 12]
+    if not frags:
+        frags = [(query or "відео").strip() or "відео"]
+    if w >= h:  # генерую в правильних пропорціях, довша сторона ≤1280
+        gw = min(w, 1280)
+        gh = max(2, gw * h // w)
+    else:
+        gh = min(h, 1280)
+        gw = max(2, gh * w // h)
+    imgdir = os.path.join(workdir, "ai_visual")
+    os.makedirs(imgdir, exist_ok=True)
+    reserve = []  # 🌐 запаска: відкриті фото мережі по темі
+    try:
+        reserve, _reason = fetch_openverse_images(query, imgdir, count=6)
+    except Exception:
+        reserve = []
+    if say and reserve:
+        say("🌐 Запаска з мережі: {} фото за темою".format(len(reserve)))
+
+    def _one(i):
+        p = os.path.join(imgdir, "frame{:03d}.jpg".format(i))
+        frag = frags[i % len(frags)]
+        prompt = (query + ". " + frag)[:300] if frag != frags[0] else (query or frag)[:200]
+        prompt += ", cinematic lighting, high detail, photorealistic, no text, no watermark"
+        okk = False
+        for seed in (i * 7 + 1, i * 13 + 5, i * 29 + 11):
+            try:
+                pollinations_image(prompt, p, w=gw, h=gh, seed=seed)
+                okk = True
+                break
+            except Exception:
+                continue
+        if not okk and reserve:
+            try:
+                shutil.copy(reserve[i % len(reserve)], p)
+                okk = True
+            except Exception:
+                pass
+        if not okk:
+            return None
+        try:
+            enhance_image(p, target_w=max(1280, w), say=say)
+        except Exception:
+            pass
+        try:
+            strip_watermark(p, say=say)
+        except Exception:
+            pass
+        return p
+
+    imgs = []
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futs = [ex.submit(_one, i) for i in range(n)]
+            for f in as_completed(futs, timeout=n * 45):
+                try:
+                    r = f.result()
+                    if r:
+                        imgs.append(r)
+                except Exception:
+                    pass
+    except Exception:
+        for i in range(n):  # послідовний фолбек — двигун не здається
+            try:
+                r = _one(i)
+                if r:
+                    imgs.append(r)
+            except Exception:
+                pass
+    imgs.sort()
+    if not imgs:
+        raise RuntimeError("жодного кадру не зібралось")
+    if say and len(imgs) < n:
+        say("🪄 Зібрав кадрів: {}/{} — анімую зібране".format(len(imgs), n))
+    return build_bg_animated(imgs, dur, w, h, workdir)
 
 
 def ensure_ytdlp(say):
@@ -5415,7 +5632,7 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, orchestra=False, web_on=False):
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, orchestra=False, web_on=False, ai_visual=False):
     """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
     workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
@@ -5577,6 +5794,14 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
             say("🎬 Фон: твоя компіляція з кількох відео")
         except Exception as e:
             say("⚠️ Твої відео не зібралися ({}), шукаю фон сам…".format(str(e)[:200]))
+            bg = None
+    if not bg and ai_visual:  # 🪄 2.5: двигун сам збирає відеоряд
+        try:
+            say("🪄 AI-візуал: генерую і скачую кадри, покращую, анімую…")
+            bg = build_bg_ai_visual(query, text, dur, w, h, workdir, say=say)
+            say("🪄 Фон: AI-візуал — анімовані кадри (Кен-Бернс)")
+        except Exception as e:
+            say("⚠️ AI-візуал не зібрався ({}) — далі за звичайним планом…".format(str(e)[:200]))
             bg = None
     if not bg and pin_images:  # 🖼 v18: зображення, обрані у пошуку (Openverse / Pixabay / Pinterest)
         try:
@@ -7049,7 +7274,7 @@ class App:
         bc = self._card(self.frame_video, fill="x", pady=(0, 8))  # 🔍 Свій фон
         ctk.CTkLabel(bc, text="🔍 Свій фон (не обов'язково)", font=self._f(13, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        self.bg_src = ctk.CTkSegmentedButton(bc, values=["🎬 Відео YouTube", "🌍 Openverse", "🖼 Pixabay", "📌 Pinterest"],
+        self.bg_src = ctk.CTkSegmentedButton(bc, values=["🎬 Відео YouTube", "🪄 AI-візуал", "🌍 Openverse", "🖼 Pixabay", "📌 Pinterest"],
                                               font=self._f(12), height=32,
                                               fg_color=self.INSET, selected_color=self.ACCENT,
                                               selected_hover_color=self.ACCENT_H,
@@ -7698,6 +7923,14 @@ class App:
 
     def _switch_bg_src(self, val):
         """🔍: перемикання джерела фону — Відео YouTube / Openverse / Pixabay / Pinterest."""
+        if "AI-візуал" in val:  # 🪄 2.5: двигун усе робить сам під час рендера
+            self.bg_kind = "ai"
+            self.yt_bg_row.pack_forget()
+            self.yt_results_frame.pack_forget()
+            self.pins_row.pack_forget()
+            self.pins_results_frame.pack_forget()
+            self.say("🪄 AI-візуал: кадри згенерую і скачаю сам — просто натисни «Згенерувати»")
+            return
         if "YouTube" in val:
             self.bg_kind = "yt"
             self.pins_row.pack_forget()
@@ -7836,7 +8069,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.4 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.5 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 21 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 16 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -11413,6 +11646,7 @@ class App:
             ov = bool(self.overlays_on.get()) if hasattr(self, "overlays_on") else False  # 🏷️ 2.0: оверлеї
             orch = bool(self.orchestra_on.get()) if hasattr(self, "orchestra_on") else False  # 🎭 2.1: оркестр агентів
             webn = bool(self.web_on.get()) if hasattr(self, "web_on") else False  # 🌐 2.1: свіжі факти
+            aiv = getattr(self, "bg_kind", "") == "ai"  # 🪄 2.5: AI-візуал-двигун
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
@@ -11465,7 +11699,7 @@ class App:
                                        pin_images=pins,
                                        sub_style=g_sub, vid_style=g_vid, transition=g_trans,
                                        trim_sil=trim, cover=g_cov, no_faces=nf, seo=g_se, master=ln, pack_mb=pk, rate_pct=g_rate, platform=pv,
-                                       upscale4k=up4, autoscrape=asc, overlays=g_ov, orchestra=g_orch, web_on=g_web)
+                                       upscale4k=up4, autoscrape=asc, overlays=g_ov, orchestra=g_orch, web_on=g_web, ai_visual=aiv)
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
