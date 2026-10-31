@@ -270,7 +270,7 @@ v52: 🧹 БРАУЗЕР ПРИБРАНО (за запитом) — агент �
 (Bearer "free", селектори auto/auto:fast/auto:smart/auto:coding)
 ступенем у драбині «Авто» і окремим джерелом чату; 🐎 AI HORDE —
 краудсорс-сітка волонтерів (без реєстрації, до хвилини черги)
-останнім ступенем драбини: драбина «Авто» — 26 джерел; 🧩 COHRE —
+останнім ступенем драбини: драбина «Авто» — 40 джерел; 🧩 COHRE —
 16-й безкоштовний шлюз з ключем (trial 1000 зап/міс, без картки);
 🧭 OpenRouter — СВІЖІ :free-моделі (Nemotron 3.5-lightning:free
 дефолт, gemma-4, dots-3, north-mini-code, inkling, flint); 🕵️
@@ -283,7 +283,7 @@ v52: 🧹 БРАУЗЕР ПРИБРАНО (за запитом) — агент �
 ЗАПИТ → edge-tts/HF-озвучка → фон (YouTube/Openverse/Wikimedia/Pixabay/
 Pinterest/кеш-банк) → монтаж (xfade/beat-sync) → субтитри (libass
 фолбек drawtext) → оверлеї → QC → рендер (BT.709, апаратний кодек);
-АСИСТЕНТ → драбина 26 джерел + агент DDG→Mojeek ×2 раунди →
+АСИСТЕНТ → драбина 40 джерел + агент DDG→Mojeek ×2 раунди →
 стрімінг → кеш RAM+диск → чат Claude-стилю). Нове у 2.0: 🏷️ ВЕРХНІ
 ОВЕРЛЕЇ ffmpeg (плашка-заголовок, водяний знак, смуга прогресу —
 патерн kajisho5/claude-motion: моушн-графіка без After Effects);
@@ -451,7 +451,7 @@ platform.openai.com — API платний, тому ступінь ОСТАНН
 coding-router-preview, ключі platform.arena.ai — прев'ю; у
 безкоштовних router-ключів 403 поза Claude Code, тоді драбина
 просто пропускає ступінь); Клод уже йшов першим (Puter/Anthropic).
-_oai_chat вміє kind="anth". Драбина «Авто»: до 26 ступенів.
+_oai_chat вміє kind="anth". Драбина «Авто»: до 40 ступенів.
 Нуль нових ключів, нуль нових pip.
 2.12: 🔎 НОВІ МОЗКИ — у драбину «Авто» і вікно «🔑 Ключі» додано три шлюзи:
       • Perplexity (api.perplexity.ai, модель sonar) — пошук+відповідь з цитатами;
@@ -464,6 +464,31 @@ _oai_chat вміє kind="anth". Драбина «Авто»: до 26 ступе�
       Разом у драбині 21 шлюз, до 26 ступенів. NotebookLM НЕ підключено:
       публічного API не існує (лише Enterprise у Google Cloud, $9/ліцензія,
       прев'ю) — фейкових шлюзів не робимо. Нуль нових pip-залежностей.
+2.13: 🤖 MANUS + 🇪🇺 МІСТРАЛЬ-ОНОВЛЕННЯ. У драбині 22-й шлюз — Manus:
+      не chat-модель, а АГЕНТ (api.manus.ai API v2): POST /v2/task.create →
+      poll /v2/task.listMessages → відповідь agent-а одним шматком (до 3 хв).
+      Кредитний (кредити плану), тому ступінь — сама остання, після Perplexity.
+      _oai_chat вміє kind="manus"; llm_stream — 3 гілки, як у Арени.
+      Mistral (шлюз №5 з v43) — оновлено підказку: experiment-план досі
+      безкоштовний (2026; телефон + згода на навчання), моделі
+      small/medium/large-latest і magistral — без змін у коді.
+      Разом у драбині 22 шлюзи, до 27 ступенів. Нуль нових pip.
+2.14: ☁️ ТРИНАДЦЯТЬ НОВИХ ШЛЮЗІВ — «тисяча проходів по Ґітхабу»:
+      канонічні awesome-списки (mnfst/awesome-free-llm-apis 11.6k★,
+      open-free-llm-api/freellm — 513+ API, свіжий 10.2026) дали
+      провайдерів із ПОСТІЙНИМИ безкоштовними тірами, яких у нас ще нема:
+      • aion (Aion Labs, 15 RPM/20K токенів/день, без картки),
+      • opencode (OpenCode Zen, 34 free-моделі),
+      • ovh (OVHcloud AI Endpoints, Qwen 397B),
+      • agnes (agnes-2.0-flash, 30 RPM), glhf (Llama 70B),
+      • chutes (Bittensor), nscale, nebius (Qwen3-235B),
+      • ollama (Ollama Cloud /v1), ai21 (Jamba, 200 RPM),
+      • cloudflare (Workers AI, 10K нейронів/день; ключ ACCOUNT_ID:API_TOKEN,
+        гілка kind="cf" у _oai_chat + llm_stream),
+      • кредитні: xai (Grok), gonka (децентралізований GPU).
+      Драбина: 35 шлюзів, до 40 ступенів; нові — між Cohere і
+      кредитами Qwen/DeepSeek (кредитні — перед платними).
+      Нуль нових pip.
 """
 import array
 import asyncio
@@ -632,7 +657,7 @@ FFMPEG_SOURCES = [
 YT_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "YouTube")
 MERGE_OUT_DIR = os.path.join(os.path.expanduser("~"), "Videos", "Compiled")
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-UA_STRING = "VideoGenerator/2.12 (https://github.com/khomyak75roman-dotcom/video-generator)"
+UA_STRING = "VideoGenerator/2.14 (https://github.com/khomyak75roman-dotcom/video-generator)"
 WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")  # 🔎 v50: пошуковики блокують «не-браузерні» UA
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
@@ -674,13 +699,30 @@ FREEKEY_ENGINES = {
     "openai": {"url": "https://api.openai.com/v1", "model": "gpt-5.5"},  # 💬 2.11: ChatGPT — свій ключ OpenAI (API платний; кредити — у ChatGPT Pro/Business підписках)
     "arena": {"url": "https://api.arena.ai", "model": "coding-router-preview", "kind": "anth"},  # 🏟 2.11: Арена (arena.ai) — Anthropic-протокол /v1/messages, ключі platform.arena.ai (прев'ю)
     "perplexity": {"url": "https://api.perplexity.ai", "model": "sonar"},  # 🔎 2.12: Perplexity Sonar — пошук+відповідь з цитатами (API платний: $1/$1М токенів + плата за пошук-запит)
+    "manus": {"url": "https://api.manus.ai", "model": "manus", "kind": "manus"},  # 🤖 2.13: Manus — агентний API v2 (task.create → poll listMessages), не chat/completions; кредити
+    "aion": {"url": "https://api.aionlabs.ai/v1", "model": "aion-labs/aion-3.0"},  # 🧬 2.14: Aion Labs — постійний free-тір, 15 RPM/20K токенів/день, без картки (mnfst 10.2026)
+    "opencode": {"url": "https://opencode.ai/zen/v1", "model": "deepseek-v4-flash-free"},  # 🌀 2.14: OpenCode Zen — 34 безкоштовні моделі (freellm 10.2026)
+    "ovh": {"url": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1", "model": "qwen3.5-397b-a17b"},  # 🇪🇺 2.14: OVHcloud AI Endpoints — Qwen 397B, скромні RPM
+    "agnes": {"url": "https://apihub.agnes-ai.com/v1", "model": "agnes-2.0-flash"},  # ✨ 2.14: Agnes AI — agnes-flash, 30 RPM
+    "glhf": {"url": "https://glhf.chat/api/openai/v1", "model": "meta-llama/Meta-Llama-3.1-70B-Instruct"},  # 🎮 2.14: glhf.chat — Llama 70B, unlimited free-моделі
+    "chutes": {"url": "https://api.chutes.ai/v1", "model": "deepseek-ai/DeepSeek-R1"},  # 🕳 2.14: Chutes.ai — Bittensor-інференс, спільнота, можливі 429
+    "nscale": {"url": "https://inference.api.nscale.com/v1", "model": "llama-3.3-70b-instruct"},  # 🖼 2.14: Nscale — європейський інференс, fair-use
+    "nebius": {"url": "https://api.studio.nebius.com/v1", "model": "qwen3-235b-a22b"},  # 🛰 2.14: Nebius AI Studio — Qwen3-235B у free-тірі
+    "ollama": {"url": "https://ollama.com/v1", "model": "deepseek-v4-flash"},  # 🦙 2.14: Ollama Cloud — офіційний OpenAI-сумісний /v1
+    "ai21": {"url": "https://api.ai21.com/studio/v1", "model": "jamba-large-1-7"},  # 🧱 2.14: AI21 Jamba — 200 RPM
+    "cloudflare": {"url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1", "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "kind": "cf"},  # ☁️ 2.14: Workers AI — 10K нейронів/день; ключ ACCOUNT_ID:API_TOKEN
+    "xai": {"url": "https://api.x.ai/v1", "model": "grok-4-1-fast"},  # 🦾 2.14: xAI Grok — частка моделей у free-тірі + тріал-кредити
+    "gonka": {"url": "https://api.gonka.broker/v1", "model": "deepseek-ai/DeepSeek-V3.1"},  # 🕸 2.14: Gonka Broker — децентралізований GPU, OpenAI-сумісний, старт безкоштовний
     "qwen": {"url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus"},  # 🟠 2.12: Qwen напряму (Alibaba Model Studio/DashScope) — OpenAI-сумісний, новим акаунтам безкоштовна квота
     "deepseek": {"url": "https://api.deepseek.com/v1", "model": "deepseek-flash"},  # 🐋 2.12: DeepSeek V4.1-Flash — новим акаунтам ~5 млн токенів БЕЗ картки, потім дуже дешево
 }
 FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
                  "gemini", "openrouter", "nvidia", "sambanova", "huggingface",
                  "zhipu", "zai", "siliconflow", "modelscope", "cohere",
-                 "qwen", "deepseek", "openai", "arena", "perplexity")  # 🪜 v43–2.12: драбина «Авто» (21 шлюз; з кредитами Qwen/DeepSeek — перед платними OpenAI/Арена/Perplexity)
+                 "aion", "opencode", "ovh", "agnes", "glhf", "chutes",
+                 "nscale", "nebius", "ollama", "ai21", "cloudflare",
+                 "qwen", "deepseek", "xai", "gonka",
+                 "openai", "arena", "perplexity", "manus")  # 🪜 v43–2.14: драбина «Авто» (35 шлюзів; 13 нових 2.14 — 11 безкоштовних тірів + Grok/Gonka з кредитами; платні OpenAI/Арена/Perplexity/Manus — наприкінці)
 # 🌐 v44: де взяти безкоштовний ключ — сторінка відкривається у Chrome
 KEY_SIGNUP = {
     "puter": "https://puter.com/dashboard#account",  # Create token
@@ -704,6 +746,20 @@ KEY_SIGNUP = {
     "perplexity": "https://www.perplexity.ai/settings/api",  # 🔎 2.12: Perplexity — Settings → API
     "qwen": "https://modelstudio.alibabacloud.com/",  # 🟠 2.12: Qwen — Alibaba Model Studio
     "deepseek": "https://platform.deepseek.com/api_keys",  # 🐋 2.12: DeepSeek — API keys
+    "manus": "https://manus.im/app?show_settings=integrations&app_name=api",  # 🤖 2.13: Manus — API Integration settings
+    "aion": "https://www.aionlabs.ai/app/api-keys/",
+    "opencode": "https://opencode.ai/auth",
+    "ovh": "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/",
+    "agnes": "https://platform.agnes-ai.com/settings/apiKeys",
+    "glhf": "https://glhf.chat/",
+    "chutes": "https://chutes.ai/",
+    "nscale": "https://console.nscale.com/",
+    "nebius": "https://studio.nebius.com/settings/api-keys",
+    "ollama": "https://ollama.com/settings/keys",
+    "ai21": "https://studio.ai21.com/account/api-key",
+    "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
+    "xai": "https://console.x.ai",
+    "gonka": "https://app.gonkabroker.com/signup",
 }
 # 🔑 v44: коротка інструкція для кожного шлюзу (показується у вікні ключів)
 KEY_HINTS = {
@@ -711,7 +767,7 @@ KEY_HINTS = {
     "anthropic": "🤖 Claude напряму: console.anthropic.com → API Keys — безкоштовні $5-кредити новим акаунтам.",
     "cerebras": "⚡ Cerebras: реєстрація на cloud.cerebras.ai (Google-акаунт) → API Keys — 1 млн токенів/день.",
     "groq": "🔑 Groq: console.groq.com (Google-акаунт) → API Keys → Create API Key — картка не потрібна.",
-    "mistral": "🇪🇺 Mistral: console.mistral.ai → API Keys — experiment-план: безкоштовні запити.",
+    "mistral": "🇪🇺 Mistral: console.mistral.ai → API Keys — experiment-план досі безкоштовний (2.13, перевірено 10.2026): потрібні телефон і згода на навчання на даних; моделі small/medium/large-latest і magistral.",
     "github": "🐙 GitHub Models: github.com → Settings → Developer settings → Personal access tokens (Fine-grained).",
     "gemini": "🤖 Google AI Studio: aistudio.google.com/apikey — увійди акаунтом Google → «Create API key».",
     "openrouter": "🧭 OpenRouter: openrouter.ai → Keys → Create Key — у каталозі шукай моделі з суфіксом :free.",
@@ -728,6 +784,20 @@ KEY_HINTS = {
     "perplexity": "🔎 Perplexity: perplexity.ai → Settings → API → Generate API Key. УВАГА: API платний (~$1/1М токенів + плата за кожен пошук-запит), безкоштовного тієру нема — ступінь драбини останній.",
     "qwen": "🟠 Qwen: modelstudio.alibabacloud.com → створи акаунт Alibaba Cloud → API-KEY (DashScope, група intl). Новим акаунтам — безкоштовна квота токенів, потім pay-per-token. OAuth chat.qwen.ai закрили 15.04.2026 — лишився тільки цей шлях.",
     "deepseek": "🐋 DeepSeek: platform.deepseek.com → API keys. Новим акаунтам ~5 млн токенів БЕЗ картки. Модель deepseek-flash (стару deepseek-chat видалили 24.07.2026). Потім найдешевший з платних (~$0.15/1М вхід).",
+    "manus": "🤖 Manus: manus.im → Settings → Integrations → API → Create API Key. Це АГЕНТ: задачі повільні (від 1-2 хв), їдять кредити плану (безкоштовний план — щоденні кредити, складні задачі дуже голодні). Ступінь драбини останній, для найважчих випадків.",
+    "aion": "🧬 Aion Labs: aionlabs.ai → App → API Keys. Без картки: 15 RPM, 20К токенів/день. Сильні в сторітелінгу (aion-3.0, 128К).",
+    "opencode": "🌀 OpenCode Zen: opencode.ai/auth → увійди → ключ. 34 безкоштовні моделі (deepseek-v4-flash-free, mimo-v2.5-free), без картки.",
+    "ovh": "🇪🇺 OVHcloud AI Endpoints: акаунт OVH (безкоштовний) → Public Cloud → AI Endpoints → токен. Qwen 397B і Llama 70B, RPM скромні (2 без ключа — з ключем краще).",
+    "agnes": "✨ Agnes AI: platform.agnes-ai.com → Settings → API Keys. agnes-1.5/2.0-flash — 30 RPM, реєстрація без картки.",
+    "glhf": "🎮 glhf.chat: glhf.chat → акаунт → ключ. Безкоштовні моделі (Llama 70B, Mixtral) — без обмежень для free-моделей.",
+    "chutes": "🕳 Chutes.ai: chutes.ai → акаунт → API Key. Децентралізований Bittensor: сильні моделі безкоштовно, тримає спільнота — можливі 429 у години пік.",
+    "nscale": "🖼 Nscale: console.nscale.com → API Keys. Європейський інференс: Llama-3.3-70B безкоштовно (fair-use).",
+    "nebius": "🛰 Nebius: studio.nebius.com → API keys. Qwen3-235B у безкоштовному тірі, реєстрація без картки.",
+    "ollama": "🦙 Ollama Cloud: ollama.com → Settings → Keys. Хмарний Ollama: DeepSeek V4 і MiniMax M3, сесійні/тижневі ліміти.",
+    "ai21": "🧱 AI21: studio.ai21.com → API Key. Гібридні Jamba (256К контекст): 200 RPM безкоштовно.",
+    "cloudflare": "☁️ Cloudflare Workers AI: dash.cloudflare.com → My Profile → API Tokens → Workers AI. ВСТАВ КЛЮЧ У ФОРМАТІ ACCOUNT_ID:API_TOKEN (Account ID — на головній панелі Cloudflare). 10 000 нейронів/день без картки.",
+    "xai": "🦾 xAI Grok: console.x.ai → API Keys. Частка моделей у безкоштовному тірі (grok-4-1-fast, grok-3-mini) + тріал-кредити новим акаунтам. Ступінь — перед платними.",
+    "gonka": "🕸 Gonka Broker: app.gonkabroker.com → signup → API Keys. Децентралізований GPU (OpenAI-сумісний): старт безкоштовний (перки), потім дешевий pay-per-token у USD.",
 }
 # 🧠 v44: вибір моделей для кожного шлюзу (у т.ч. трійка Claude — як Sonnet/Haiku/Opus)
 FREEKEY_MODELS = {
@@ -767,6 +837,19 @@ FREEKEY_MODELS = {
     "perplexity": ["sonar", "sonar-pro"],  # 🔎 2.12: Sonar (пошук з цитатами)
     "qwen": ["qwen-plus", "qwen-max", "qwen-flash"],  # 🟠 2.12: сім'я Qwen 3.5
     "deepseek": ["deepseek-flash", "deepseek-v4-pro"],  # 🐋 2.12: V4.1-Flash і V4-Pro
+    "aion": ["aion-labs/aion-2.0", "aion-labs/aion-3.0", "aion-labs/aion-rp-llama-3.1-8b"],  # 🧬 2.14
+    "opencode": ["deepseek-v4-flash-free", "mimo-v2.5-free", "big-pickle"],  # 🌀 2.14: free-лінійка Zen
+    "ovh": ["qwen3.5-397b-a17b", "meta-llama-3_3-70b-instruct", "qwen3.8-27b"],  # 🇪🇺 2.14
+    "agnes": ["agnes-1.5-flash", "agnes-2.0-flash"],  # ✨ 2.14
+    "glhf": ["meta-llama/Meta-Llama-3.1-70B-Instruct", "mistralai/Mixtral-8x7B-Instruct-v0.1"],  # 🎮 2.14
+    "chutes": ["deepseek-ai/DeepSeek-R1", "meta-llama/Meta-Llama-3.1-70B-Instruct"],  # 🕳 2.14
+    "nscale": ["llama-3.3-70b-instruct", "deepseek-r1-distill-llama-70b"],  # 🖼 2.14
+    "nebius": ["qwen3-235b-a22b"],  # 🛰 2.14
+    "ollama": ["deepseek-v4-flash", "deepseek-v4-pro", "minimax-m3"],  # 🦙 2.14
+    "ai21": ["jamba-large-1-7", "jamba-mini-2"],  # 🧱 2.14
+    "cloudflare": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistral/mistral-7b-instruct-v0.1"],  # ☁️ 2.14
+    "xai": ["grok-4-1-fast", "grok-3-mini", "grok-4-3"],  # 🦾 2.14
+    "gonka": ["deepseek-ai/DeepSeek-V3.1", "meta-llama/Meta-Llama-3.1-70B-Instruct"],  # 🕸 2.14
 }
 # 🧭 v52: дефолт OpenRouter — свіжа :free-модель (стара зникла з каталогу)
 FREEKEY_ENGINES["openrouter"]["model"] = "nvidia/nemotron-3.5-lightning:free"
@@ -1046,7 +1129,7 @@ def compress_to_size(video, mb, say, workdir):
             with open(mp, encoding="utf-8") as f:
                 d = json.load(f) or {}
         except Exception:
-            d = {"app": "Генератор відео 2.12"}
+            d = {"app": "Генератор відео 2.14"}
         d["pack"] = {"mb": int(mb), "file": os.path.basename(out)}
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
@@ -1845,7 +1928,7 @@ def write_manifest(info, workdir, say):
     повторити той самий запуск. Fail-open: не вийшло — не важливо."""
     try:
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "app": "Генератор відео 2.12"}
+                "app": "Генератор відео 2.14"}
         data.update(info or {})
         with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -4489,6 +4572,71 @@ def _oai_chat(url, key, model, prompt, system=None, timeout=120, history=None,
             return "".join(parts).strip()
         except Exception:
             return ""
+    if kind == "manus":  # 🤖 2.13: Manus — агентний протокол (api.manus.ai API v2)
+        try:
+            base = (url or "https://api.manus.ai").rstrip("/")
+            hdrs = {"x-manus-api-key": key or "", "User-Agent": UA_STRING}
+            msg = ((system + "\n\n") if system else "") + (prompt or "")
+            r = requests.post(base + "/v2/task.create",
+                              json={"message": {"content": msg}},
+                              timeout=timeout, headers=hdrs)
+            if r.status_code != 200:
+                return ""
+            j = r.json()
+            tid = str(j.get("task_id") or "")
+            if not (j.get("ok") and tid):
+                return ""
+            deadline = time.time() + max(180, int(timeout))  # агент повільний — до 3 хв
+            last = ""
+            while time.time() < deadline:
+                time.sleep(5)
+                try:
+                    rr = requests.get(base + "/v2/task.listMessages",
+                                      params={"task_id": tid, "limit": 50},
+                                      timeout=timeout, headers=hdrs)
+                    if rr.status_code != 200:
+                        continue
+                    jj = rr.json()
+                    status = ""
+                    for ev in (jj.get("messages") or []):
+                        et = str(ev.get("type") or "")
+                        if et == "assistant_message":
+                            last = str((ev.get("assistant_message") or {})
+                                       .get("content") or last)
+                        elif et == "status_update":
+                            status = str((ev.get("status_update") or {})
+                                         .get("agent_status") or status)
+                        elif et == "error_message":
+                            return ""
+                    if status == "stopped" and last:
+                        return last.strip()
+                    if status == "error":
+                        return ""
+                except Exception:
+                    pass
+            return ""
+        except Exception:
+            return ""
+    if kind == "cf":  # ☁️ 2.14: Cloudflare Workers AI — ключ ACCOUNT_ID:API_TOKEN
+        try:
+            aid, _, tok = (key or "").partition(":")
+            if not (aid.strip() and tok.strip()):
+                return ""
+            u = (url or "https://api.cloudflare.com/client/v4/accounts/"
+                 "{account_id}/ai/v1").replace("{account_id}", aid.strip())
+            r = requests.post(u.rstrip("/") + "/chat/completions",
+                              json={"model": (model or "").strip(),
+                                    "messages": ([{"role": "system", "content": system}] if system else [])
+                                    + (history or []) + [{"role": "user", "content": prompt}]},
+                              timeout=timeout,
+                              headers={"Authorization": "Bearer " + tok.strip(),
+                                       "User-Agent": UA_STRING})
+            if r.status_code != 200:
+                return ""
+            ch = (r.json().get("choices") or [{}])[0]
+            return (((ch.get("message") or {}).get("content") or "")).strip()
+        except Exception:
+            return ""
     body = {"model": (model or "").strip(),
             "messages": ([{"role": "system", "content": system}] if system else [])
             + (history or []) + [{"role": "user", "content": prompt}]}  # 💬 v41
@@ -4586,7 +4734,7 @@ def horde_chat(prompt, system=None, timeout=90, history=None):
 def auto_chain_steps(prompt=None):
     """🔄 v40–v52: драбина джерел «Авто»: усі шлюзи з живими ключами
     (freekeys.json) → ⚡ Kilo → 🌐 LLM7 → 🚰 LLMFaucet → 🌐 Pollinations
-    → 🐎 AI Horde — всього до 26 ступенів; кожен fail-open. 🎯 2.0:
+    → 🐎 AI Horde — всього до 40 ступенів; кожен fail-open. 🎯 2.0:
     важке питання (prompt) — Faucet-ступінь іде з селектором auto:smart
     (сам підбирає розумнішу модель); просте — auto (швидка)."""
     keys = load_freekeys()
@@ -5381,7 +5529,7 @@ GATEWAY_PRETTY = {  # 📡 v49: гарні імена шлюзів для нот
     "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
     "cohere": "🧩 Cohere",
     "openai": "💬 ChatGPT (OpenAI)", "arena": "🏟 Арена (arena.ai)",
-    "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek",
+    "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka",
     "kilo": "⚡ Kilo", "llm7": "🌐 LLM7", "faucet": "🚰 LLMFaucet",
     "pollinations": "🌐 Pollinations", "horde": "🐎 AI Horde"}
 
@@ -5434,6 +5582,18 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                     txt = _oai_chat(st["url"], st.get("key"), st["model"], prompt,
                                     system=system, timeout=step_t,
                                     history=history, kind="anth")
+                    if txt and on_delta:
+                        on_delta(txt)
+                elif st.get("kind") == "manus":  # 🤖 2.13: Manus-агент — задачами, одним шматком
+                    txt = _oai_chat(st["url"], st.get("key"), st["model"], prompt,
+                                    system=system, timeout=step_t,
+                                    history=history, kind="manus")
+                    if txt and on_delta:
+                        on_delta(txt)
+                elif st.get("kind") == "cf":  # ☁️ 2.14: Cloudflare — account_id:token, одним шматком
+                    txt = _oai_chat(st["url"], st.get("key"), st["model"], prompt,
+                                    system=system, timeout=step_t,
+                                    history=history, kind="cf")
                     if txt and on_delta:
                         on_delta(txt)
                 else:
@@ -5491,6 +5651,16 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                     if conf.get("kind") == "anth":  # 🏟 2.11: Арена — Anthropic-протокол (не SSE)
                         txt = _oai_chat(conf["url"], kk, mm, prompt, system=system,
                                         timeout=step_t2, history=history, kind="anth")
+                        if txt and on_delta:
+                            on_delta(txt)
+                    elif conf.get("kind") == "manus":  # 🤖 2.13: Manus-агент (не SSE, задачами)
+                        txt = _oai_chat(conf["url"], kk, mm, prompt, system=system,
+                                        timeout=step_t2, history=history, kind="manus")
+                        if txt and on_delta:
+                            on_delta(txt)
+                    elif conf.get("kind") == "cf":  # ☁️ 2.14: Cloudflare (не SSE, одним шматком)
+                        txt = _oai_chat(conf["url"], kk, mm, prompt, system=system,
+                                        timeout=step_t2, history=history, kind="cf")
                         if txt and on_delta:
                             on_delta(txt)
                     else:
@@ -5561,6 +5731,26 @@ def llm_stream(provider, url, model, prompt, system=None, history=None,
                         for k2 in pool2:
                             txt = _oai_chat(st["url"], k2, mm, prompt, system=system,
                                             timeout=step_t2, history=history, kind="anth")
+                            if txt:
+                                if on_delta:
+                                    on_delta(txt)
+                                break
+                    elif st.get("kind") == "manus":  # 🤖 2.13: Manus-агент, одним шматком
+                        pool2 = key_pool(st.get("key")) or [st.get("key") or ""]
+                        txt = ""
+                        for k2 in pool2:
+                            txt = _oai_chat(st["url"], k2, mm, prompt, system=system,
+                                            timeout=step_t2, history=history, kind="manus")
+                            if txt:
+                                if on_delta:
+                                    on_delta(txt)
+                                break
+                    elif st.get("kind") == "cf":  # ☁️ 2.14: Cloudflare, одним шматком
+                        pool2 = key_pool(st.get("key")) or [st.get("key") or ""]
+                        txt = ""
+                        for k2 in pool2:
+                            txt = _oai_chat(st["url"], k2, mm, prompt, system=system,
+                                            timeout=step_t2, history=history, kind="cf")
                             if txt:
                                 if on_delta:
                                     on_delta(txt)
@@ -9625,7 +9815,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.12 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і «📦 Експорт MP4» (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні «🔑 Ключі», 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 26 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 21 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.14 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною «Авто»), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка «Згенерувати відео» у чаті — запит стає готовим відео, а «🎬 З цього — відео» під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і «📦 Експорт MP4» (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні «🔑 Ключі», 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 35 ШЛЮЗІВ (2.14): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні «🔑 Ключі», 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки «сказане = написане» (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно «🔑 Ключі»: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 40 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 35 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), «🔑 Ключ» іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): «знайди/новини…» або кнопка «🌐 Пошук» — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use «🔍ПОШУК:» — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці ×4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -11410,7 +11600,7 @@ class App:
                    "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
                    "cohere": "🧩 Cohere",
                    "openai": "💬 ChatGPT (OpenAI)", "arena": "🏟 Арена (arena.ai)",
-                   "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek",
+                   "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
