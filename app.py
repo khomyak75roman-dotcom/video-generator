@@ -501,6 +501,19 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
         YouTube не гає секунд на старт;
       • STT мова 'uk' явно (шар 24): Whisper-автодетектор плутає
         українську з російською — тепер мова зафіксована.
+      Хвиля 2:
+      • ⏸ паузи сценарію: «...»/«…» тепер 700 мс справжньої тиші
+        в озвучці (edge-tts і Piper), а не «дальшетекст» одним духом;
+      • ⬇️ Piper самотяг: перший раз, коли хмара мовчить, а Piper
+        нема — генератор витягує piper.exe + укр-голос tetiana
+        high (~135 МБ, реліз rhasspy + HuggingFace), далі офлайн
+        назавжди;
+      • 🔤 fontsdir: шрифти з tools/fonts підтягуються у капчени
+        без встановлення в Windows (двокрапка диску екранована);
+      • 🚧 бюджет-гейт: озвучка довша за 3 хв — чесне попередження
+        про втрату утримання ще ДО генерації;
+      • 🧭 state machine: stage/stages у manifest.json — видно,
+        ДЕ впала генерація і хронологію останніх 50 стадій.
 """
 import array
 import asyncio
@@ -595,6 +608,22 @@ SUBTITLE_STYLES = {
 }
 # v2.15: TikTok-стиль капченів — Montserrat ExtraBold тримає ~60% TikTok-топу (шар 24);
 # лібасс сам підставить фолбек-шрифт, якщо Montserrat у системі нема — стиль ніколи не ламається
+
+
+def _fontsdir_arg():
+    """🔤 2.15: користувач кидає шрифти (.ttf/.otf) у TOOLS_DIR/fonts —
+    лібасс бере їх звідти навіть не встановленими в Windows (Montserrat для
+    TikTok-стилю або будь-який свій). Двокрапку диску C: екраную '\\:' для
+    filtergraph. Теки чи шрифтів нема — порожній рядок (fail-open)."""
+    try:
+        fd = os.path.join(TOOLS_DIR, "fonts")
+        if os.path.isdir(fd) and any(
+                f.lower().endswith((".ttf", ".otf")) for f in os.listdir(fd)):
+            return ":fontsdir='{}'".format(
+                fd.replace("\\", "/").replace(":", "\\:"))
+    except Exception:
+        pass
+    return ""
 # v14 🎨: стилістика картинки — фільтри ffmpeg (як Filters у модних редакторах)
 VIDEO_STYLES = {
     "Без стилю": "",
@@ -1916,6 +1945,11 @@ def render_estimate(text, say):
         srt_n = len([s for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()])
         say("⏱ Рахунок генерації: {} слів → озвучка ~{:.0f} с  {} фраз "
             "субтитрів  фон і рендер ~2–5 хв".format(words, secs, srt_n))
+        # 🚧 2.15: бюджет-гейт (молекула delivery-гейту, шари 26/28): утримання
+        # YouTube найкраще до 3 хв — довше чесно попереджаю, а не мовчу
+        if secs > 180:
+            say("🚧 Довгувато: ~{:.0f} хв озвучки — YouTube-утримання м'яке після 3 хв; "
+                "подумай нарізати на 2–3 Shortси".format(secs / 60))
     except Exception:
         pass  # рахунок — підказка, ніколи не ламає генерацію
 
@@ -1959,11 +1993,48 @@ def write_manifest(info, workdir, say):
         data = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "app": "Генератор відео 2.15"}
         data.update(info or {})
-        with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
+        # 🧭 2.15: state machine — при перепису маніфесту не втрачаю
+        # хронологію стадій, яку зібрав stage_set
+        mfp = os.path.join(workdir, "manifest.json")
+        if os.path.isfile(mfp):
+            try:
+                with open(mfp, encoding="utf-8") as f:
+                    old = json.load(f)
+                for k in ("stage", "stages"):
+                    if old.get(k) and k not in data:
+                        data[k] = old[k]
+            except Exception:
+                pass
+        with open(mfp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         say("📋 Маніфест генерації — manifest.json")
     except Exception:
         pass  # 📋 v28: маніфест — артефакт, ніколи не ламає генерацію
+
+
+def stage_set(workdir, stage, say=None):
+    """🧭 2.15: state machine у manifest.json — яка стадія генерації триває
+    зараз (research / script / voice / subtitles / background / render / done).
+    Впала генерація — у manifest.json видно, ДЕ саме зупинилась, і в історії
+    запусків видно хронологію (stage_at). Діагностика, без автоматичних
+    ретраїв: fail-open — нічого не ламає і нічого не блокує."""
+    try:
+        mfp = os.path.join(workdir, "manifest.json")
+        data = {}
+        if os.path.isfile(mfp):
+            try:
+                with open(mfp, encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        hist = data.get("stages") or []
+        hist.append([stage, datetime.now().strftime("%H:%M:%S")])
+        data["stages"] = hist[-50:]  # останні 50 — щоб не росло безмежно
+        data["stage"] = stage
+        with open(mfp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # 🧭 state machine — діагностика, ніколи не ламає генерацію
 
 
 def make_chapters(scenes, durs, workdir, say):
@@ -3505,6 +3576,26 @@ def merge_videos(files, say):
     return out
 
 
+_TTS_PAUSE = "\u2063\u2063\u2063"  # ⏸ невидимий розділювач U+2063 ×3: жоден TTS його не вимовляє
+
+
+def _expand_tts_pauses(lst):
+    """⏸ 2.15: «...»/«…» у сценарії — інтонаційні паузи автора. Ріжу шматки
+    по них і ставлю маркер _TTS_PAUSE як ОКРЕМИЙ шматок: tts_save (edge-tts
+    і Piper) перетворює його на 700 мс справжньої тиші. Хвостову паузу
+    не озвучуємо. Fail-open: маркер невимовний — десь проскочить, то мовчить."""
+    out = []
+    for ch in lst:
+        for j, piece in enumerate(re.split(r"(\.{3,}|…+)", ch)):
+            if j % 2:  # непарний елемент = захоплений розділювач-пауза
+                out.append(_TTS_PAUSE)
+            elif piece.strip():
+                out.append(piece.strip())
+    while out and out[-1] == _TTS_PAUSE:  # тиша в самому кінці не потрібна
+        out.pop()
+    return out
+
+
 def _tts_chunks(text, limit=500):
     """🎚 v30: edge-tts обриває довгі тексти — ріжу на шматки по реченнях
     (до limit символів), наддовге речення — по словах. Список шматків."""
@@ -3512,7 +3603,7 @@ def _tts_chunks(text, limit=500):
     if not text:
         return []
     if len(text) <= limit:
-        return [text]
+        return _expand_tts_pauses([text])
     parts, cur = [], ""
     for sent in re.split(r"(?<=[.!?…])\s+", text):
         if len(sent) > limit:  # наддовге речення — по словах
@@ -3532,7 +3623,7 @@ def _tts_chunks(text, limit=500):
             cur = (cur + " " + sent).strip()
     if cur:
         parts.append(cur)
-    return [p.strip() for p in parts if p.strip()]
+    return _expand_tts_pauses([p.strip() for p in parts if p.strip()])
 
 
 def _rm_parts(files):
@@ -3573,6 +3664,60 @@ def _tts_words(chunk, voice, out_mp3, rate_pct=0):
     return words
 
 
+_piper_dl_attempted = False  # ⬇️ 2.15: авто-завантаження Piper — один раз за запуск
+
+
+def piper_autodownload(say=None):
+    """⬇️ 2.15: перший раз, коли хмара мовчить, а Piper ще нема — тягну його
+    сам (Windows): piper.exe з релізу rhasspy 2023.11.14-2 (~21 МБ) +
+    укр-голос tetiana high з HuggingFace (~114 МБ) у TOOLS_DIR/piper/.
+    Далі озвучка назавжди офлайн-українська. Один раз за запуск, CI/Linux
+    не чіпаю (fail-open: не вийшло — тихо, драбина йде далі як раніше)."""
+    global _piper_dl_attempted
+    if _piper_dl_attempted:
+        return False
+    _piper_dl_attempted = True
+    try:
+        if os.name != "nt":  # CI-ранер і не-Windows — не тягну 85 МБ задарма
+            return False
+        piper_dir = os.path.join(TOOLS_DIR, "piper")
+        os.makedirs(piper_dir, exist_ok=True)
+        exe = os.path.join(piper_dir, "piper.exe")
+        if not (os.path.isfile(exe) and os.path.getsize(exe) > 100000):
+            if say:
+                say("⬇️ Хмара мовчить: завантажую офлайн-голос Piper (один раз, ~135 МБ)…")
+            z = os.path.join(TOOLS_DIR, "piper_setup.zip")
+            r = requests.get(
+                "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip",
+                stream=True, timeout=90)
+            r.raise_for_status()
+            with open(z, "wb") as f:
+                for blk in r.iter_content(1 << 16):
+                    f.write(blk)
+            shutil.unpack_archive(z, piper_dir)
+            os.remove(z)
+        have_model = any(f.lower().endswith(".onnx") and f.lower().startswith("uk_ua")
+                        for f in os.listdir(piper_dir))
+        if not have_model:
+            for fn in ("uk_UA-tetiana-high.onnx", "uk_UA-tetiana-high.onnx.json"):
+                rr = requests.get(
+                    "https://huggingface.co/rhasspy/piper-voices/resolve/main/uk/uk_UA/tetiana/high/" + fn,
+                    stream=True, timeout=180)
+                rr.raise_for_status()
+                with open(os.path.join(piper_dir, fn), "wb") as f:
+                    for blk in rr.iter_content(1 << 16):
+                        f.write(blk)
+        if os.path.isfile(exe):
+            if say:
+                say("🎙 Piper готовий: тепер укр-озвучка живе і без хмари")
+            return True
+        return False
+    except Exception as e:
+        if say:
+            say("ℹ️ Piper не вдалося завантажити ({}): драбина йде далі".format(str(e)[:80]))
+        return False
+
+
 def tts_save(text, voice, out_mp3, say, rate_pct=0):
     """Озвучка з запасними планами: edge-tts (довгий текст — шматками, 🎚 v30)
     → системний голос Windows → тиха пауза.
@@ -3602,6 +3747,12 @@ def tts_save(text, voice, out_mp3, say, rate_pct=0):
         parts, ok = [], bool(chunks)
         for i, ch in enumerate(chunks):
             p = "{}.part{:03d}".format(out_mp3, i)
+            if ch == _TTS_PAUSE:  # ⏸ 2.15: пауза сценарію → 700 мс тиші
+                run([ff, "-y", "-hide_banner", "-nostdin", "-f", "lavfi",
+                     "-i", "anullsrc=r=24000:cl=mono", "-t", "0.7",
+                     "-c:a", "libmp3lame", "-q:a", "4", p])
+                parts.append(p)
+                continue
             try:
                 asyncio.run(edge_tts.Communicate(ch, voice, rate="{:+d}%".format(int(rate_pct or 0))).save(p))
                 if os.path.exists(p) and os.path.getsize(p) > 500:
@@ -3640,6 +3791,8 @@ def tts_save(text, voice, out_mp3, say, rate_pct=0):
     try:
         piper_dir = os.path.join(TOOLS_DIR, "piper")
         piper_exe = os.path.join(piper_dir, "piper.exe" if os.name == "nt" else "piper")
+        if not os.path.isfile(piper_exe):  # ⬇️ 2.15: Piper нема — спробую витягнути сам
+            piper_autodownload(say)
         if os.path.isfile(piper_exe):
             models = sorted(f for f in os.listdir(piper_dir)
                             if f.lower().endswith(".onnx") and f.lower().startswith("uk_ua"))
@@ -3651,6 +3804,11 @@ def tts_save(text, voice, out_mp3, say, rate_pct=0):
                 parts, ok = [], bool(chunks)
                 for i, ch in enumerate(chunks):
                     w = "{}.pp{:03d}.wav".format(out_mp3, i)
+                    if ch == _TTS_PAUSE:  # ⏸ 2.15: пауза → 700 мс тиші (22050 = укр-моделі Piper)
+                        run([ff, "-y", "-hide_banner", "-nostdin", "-f", "lavfi",
+                             "-i", "anullsrc=r=22050:cl=mono", "-t", "0.7", w])
+                        parts.append(w)
+                        continue
                     pr = subprocess.run([piper_exe, "--model", os.path.join(piper_dir, models[0]),
                                          "--length_scale", "{:.3f}".format(ls),
                                          "--output_file", w],
@@ -3734,6 +3892,8 @@ def tts_save_karaoke(text, voice, out_mp3, say, rate_pct=0):
         return None
     words, parts, base = [], [], 0.0
     for i, ch in enumerate(chunks):
+        if ch == _TTS_PAUSE:  # ⏸ 2.15: караоке-метрик для тиші нема — просто пропускаю
+            continue
         p = "{}.kpart{:03d}".format(out_mp3, i)
         got = _tts_words(ch, voice, p, rate_pct)
         if got is None:
@@ -6430,6 +6590,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     w, h = size_str.split(" ")[0].split("x")
     say(f"▶️ Запит: {query}")
     say("📁 Робоча папка створена")
+    stage_set(workdir, "start", say)  # 🧭 2.15: state machine — впаде, видно ДЕ
 
     text = narration_for(query)  # 🔁 база: якщо всі агенти мовчать — живе шаблон теми
     # 🎭🌐⚡ 2.1/2.2: інтернет-дослідження + оркестр агентів. Дослідження
@@ -6474,6 +6635,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     render_estimate(text, say)  # ⏱ ціна перед спендом — рахунок до старту
     voice = VOICES[voice_label]
     say(f"🎙️ Озвучую голосом {voice_label}…")
+    stage_set(workdir, "voice", say)
     karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct) if not trim_sil else None
     if karaoke_words is None:
         tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct)
@@ -6510,8 +6672,10 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     else:
         make_srt([s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()], dur, workdir)
     say("💬 Субтитри готові")
+    stage_set(workdir, "subtitles", say)
 
     bg = None
+    stage_set(workdir, "background", say)
     if (yt_url or "").strip():
         try:
             say("▶️ Завантажую твоє відео з YouTube як фон")
@@ -6696,7 +6860,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     if music:
         cmd += ["-filter_complex",
                 f"[0:v]{vf_base},"
-                f"subtitles=sub.srt:force_style='{stl}'[v];"
+                f"subtitles=sub.srt:force_style='{stl}'{_fontsdir_arg()}[v];"
                 f"[2:a]volume=0.5[duck];"
                 f"[duck][1:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[duck2];"
                 f"[1:a][duck2]amix=inputs=2:duration=first:weights='1 1',loudnorm=I=-14:TP=-1.5:LRA=11[a]",
@@ -6705,13 +6869,14 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest",
                 "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-vf",
                 f"{vf_base},"
-                f"subtitles=sub.srt:force_style='{stl}'"]
+                f"subtitles=sub.srt:force_style='{stl}'{_fontsdir_arg()}"]
 
     enc = best_video_encoder_args()
     if enc[1] != "libx264":
         say("⚡ Апаратний кодек: " + enc[1])
     cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
 
+    stage_set(workdir, "render", say)
     say("🚀 Рендерю відео…")
     try:
         run(cmd, cwd=workdir)
@@ -6788,6 +6953,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
                        workdir, say)
     except Exception:
         pass
+    stage_set(workdir, "done", say)  # 🧭 2.15: дійшло до кінця — хронологія у manifest.json
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -7061,7 +7227,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     if music:
         cmd += ["-filter_complex",
                 f"[0:v]{vf_base},"
-                f"subtitles=sub.srt:force_style='{stl}'[v];"
+                f"subtitles=sub.srt:force_style='{stl}'{_fontsdir_arg()}[v];"
                 f"[2:a]volume=0.5[duck];"
                 f"[duck][1:a]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[duck2];"
                 f"[1:a][duck2]amix=inputs=2:duration=first:weights='1 1',loudnorm=I=-14:TP=-1.5:LRA=11[a]",
@@ -7070,7 +7236,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         cmd += ["-map", "0:v", "-map", "1:a", "-shortest",
                 "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-vf",
                 f"{vf_base},"
-                f"subtitles=sub.srt:force_style='{stl}'"]
+                f"subtitles=sub.srt:force_style='{stl}'{_fontsdir_arg()}"]
     enc = best_video_encoder_args()
     if enc[1] != "libx264":
         say("⚡ Апаратний кодек: " + enc[1])
