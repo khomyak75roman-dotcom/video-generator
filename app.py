@@ -514,6 +514,16 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
         про втрату утримання ще ДО генерації;
       • 🧭 state machine: stage/stages у manifest.json — видно,
         ДЕ впала генерація і хронологію останніх 50 стадій.
+      Хвиля 3:
+      • 🔁 КНОПКА RESUME: впала генерація — не все заново: папка
+        впалого запуску підхоплюється, готові артефакти
+        (озвучка/субтитри/рендер) не перероблюються (⏭ у журналі),
+        тема читається з manifest.json; stage-мітки тепер і в
+        режимах 📜 Сценарій та 🎧 Мікс;
+      • 🎲 seed-детермінізм (reelforge-молекула): seed вибору
+        кадрів пишеться у manifest.json ще на старті — виживає
+        при падінні; resume тягне seed упалого запуску → кадри
+        ті самі.
 """
 import array
 import asyncio
@@ -6577,11 +6587,37 @@ def make_seo_pack(theme, text, workdir, say):
     say("📈 SEO-пак для YouTube: назва, опис, теги, хештеги, коментар — youtube-seo.txt")
 
 
-def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, orchestra=False, web_on=False, ai_visual=False):
-    """Повний цикл генерації. say — колбек журналу. Повертає робочу папку."""
+def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt_url="", bg_files=None, yt_search_urls=None, auto_yt=True, yt_many=None, pin_images=None, sub_style="Класичні", vid_style="Без стилю", transition="Різко", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, orchestra=False, web_on=False, ai_visual=False, resume_dir=None):
+    """Повний цикл генерації. say — колбек журналу. Повертає робочу папку.
+    🔁 2.15: resume_dir — продовжити ВПАЛУ генерацію у старій робочій папці:
+    наявні артефакти (voice.mp3 / sub.srt / final.mp4) не перероблюються,
+    seed вибору кадрів тягнеться з manifest.json впалого запуску —
+    кадри підбираються ті самі. Fail-open: папки чи артефактів нема —
+    іде як звичайний запуск."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
-    workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
+    resume = bool(resume_dir and os.path.isdir(resume_dir))
+    if resume:
+        workdir = resume_dir  # 🔁 та сама папка — артефакти підхоплюю
+        say("🔁 Resume: продовжую впалу генерацію у старій папці")
+    else:
+        workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r'[^\w-]', '_', query[:30]))
     os.makedirs(workdir, exist_ok=True)
+    # 🎲 2.15: детермінізм вибору кадрів (reelforge-молекула): seed у
+    # manifest.json — однаковий seed = однакові кадри/порядок; у resume
+    # беру seed впалого запуску, щоб підібрати ТІ САМІ кліпи
+    seed = random.randrange(1 << 31)
+    if resume:
+        try:
+            with open(os.path.join(workdir, "manifest.json"), encoding="utf-8") as f:
+                seed = int(json.load(f).get("seed") or seed)
+        except Exception:
+            pass
+    random.seed(seed)
+    try:  # 🎲 seed одразу у manifest.json — щоб вижив навіть якщо генерація впаде
+        with open(os.path.join(workdir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump({"seed": seed}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
     if on_workdir:
         on_workdir(workdir)
     say("🔍 Перевіряю ffmpeg (якщо немає — встановлю сам, один раз)…")
@@ -6634,13 +6670,18 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     receipts.append("озвучка: " + voice_label)
     render_estimate(text, say)  # ⏱ ціна перед спендом — рахунок до старту
     voice = VOICES[voice_label]
-    say(f"🎙️ Озвучую голосом {voice_label}…")
-    stage_set(workdir, "voice", say)
-    karaoke_words = tts_save_karaoke(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct) if not trim_sil else None
-    if karaoke_words is None:
-        tts_save(text, voice, os.path.join(workdir, "voice.mp3"), say, rate_pct=rate_pct)
+    voice_mp3 = os.path.join(workdir, "voice.mp3")
+    karaoke_words = None
+    if resume and os.path.isfile(voice_mp3) and os.path.getsize(voice_mp3) > 50000:
+        say("⏭ Озвучка вже є (resume) — не перероблюю")
     else:
-        say("🎤 Караоке-мітки зібрано: {} слів з точним таймінгом".format(len(karaoke_words)))
+        say(f"🎙️ Озвучую голосом {voice_label}…")
+        stage_set(workdir, "voice", say)
+        karaoke_words = tts_save_karaoke(text, voice, voice_mp3, say, rate_pct=rate_pct) if not trim_sil else None
+        if karaoke_words is None:
+            tts_save(text, voice, voice_mp3, say, rate_pct=rate_pct)
+        else:
+            say("🎤 Караоке-мітки зібрано: {} слів з точним таймінгом".format(len(karaoke_words)))
     if trim_sil:  # ✂️ v14: прибираємо довгі паузи з озвучки
         trim_out = os.path.join(workdir, "voice_trim.mp3")
         p, _ = remove_pauses(os.path.join(workdir, "voice.mp3"), trim_out, say)
@@ -6666,7 +6707,10 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         else:
             say("ℹ️ Ритм музики невиразний — монтую фон як звичайно")
 
-    if karaoke_words:
+    sub_path = os.path.join(workdir, "sub.srt")
+    if resume and os.path.isfile(sub_path) and os.path.getsize(sub_path) > 200:
+        say("⏭ Субтитри вже є (resume) — не перероблюю")
+    elif karaoke_words:
         n = make_karaoke_srt(karaoke_words, dur, workdir)
         say("🎤 Караоке-субтитри: {} фраз синхронно з голосом".format(n))
     else:
@@ -6877,19 +6921,24 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
     cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
 
     stage_set(workdir, "render", say)
-    say("🚀 Рендерю відео…")
-    try:
-        run(cmd, cwd=workdir)
-    except Exception as err:
-        say("⚠️ Рендер із субтитрами не вдався — спробую простіший, без субтитрів…")
-        say("📝 Причина: " + str(err)[:400])
-        cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
-                "-map", "0:v", "-map", "1:a", "-shortest"]
-        cmd2 += ["-vf", vf_base, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
-        cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
-        run(cmd2, cwd=workdir)
-        say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    final_done = (resume and os.path.isfile(os.path.join(workdir, "final.mp4"))
+                  and os.path.getsize(os.path.join(workdir, "final.mp4")) > 1000000)
+    if final_done:
+        say("⏭ final.mp4 вже відрендерений (resume) — лишаю як є")
+    else:
+        say("🚀 Рендерю відео…")
+        try:
+            run(cmd, cwd=workdir)
+        except Exception as err:
+            say("⚠️ Рендер із субтитрами не вдався — спробую простіший, без субтитрів…")
+            say("📝 Причина: " + str(err)[:400])
+            cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
+                    "-map", "0:v", "-map", "1:a", "-shortest"]
+            cmd2 += ["-vf", vf_base, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
+            cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
+            run(cmd2, cwd=workdir)
+            say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
     if overlays:  # 🏷️ 2.0: плашка-заголовок + водяний знак + смуга прогресу
         overlays_pass(os.path.join(workdir, "final.mp4"), query, workdir, say)
     if cover:  # 📷 v14: обкладинка для YouTube
@@ -6919,6 +6968,7 @@ def generate_video(query, voice_label, size_str, music, say, on_workdir=None, yt
         write_manifest({"mode": "video", "theme": query, "voice": voice_label,
                         "size": size_str, "sub_style": sub_style, "vid_style": vid_style,
                         "transition": transition, "platform": platform,
+                        "seed": seed,  # 🎲 2.15: повторний рендер з тим самим seed = ті самі кадри
                         "receipts": receipts}, workdir, say)
     except Exception:
         pass
@@ -7087,9 +7137,11 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     w, h = size_str.split(" ")[0].split("x")
     voice = VOICES[voice_label]
     say("🎬 Сценарій прийнято: {} частин".format(len(scenes)))
+    stage_set(workdir, "script", say)
 
     # 1) Озвучка кожної частини окремо
     say("🎙️ Озвучую частини голосом {}…".format(voice_label))
+    stage_set(workdir, "voice", say)
     part_words = []  # 🎤 v25: мітки слів кожної частини (None — якщо караоке недоступне)
     mp3s, durs = [], []
     for i, sc in enumerate(scenes):
@@ -7138,8 +7190,10 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     else:
         make_srt_scenes(scenes, durs, workdir)
     say("💬 Субтитри готові")
+    stage_set(workdir, "subtitles", say)
 
     # 3) Фон кожної частини: своє відео (Кліп: …) або авто-пошук YouTube
+    stage_set(workdir, "background", say)
     segs = []
     face_cascades = _face_cascades() if no_faces else []  # 🚫 v15
     if no_faces and not face_cascades:
@@ -7241,6 +7295,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     if enc[1] != "libx264":
         say("⚡ Апаратний кодек: " + enc[1])
     cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
+    stage_set(workdir, "render", say)
     say("🚀 Рендерю відео…")
     try:
         run(cmd, cwd=workdir)
@@ -7328,6 +7383,7 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
                         "голос": voice_label, "платформа": platform}, workdir, say)
     except Exception:
         pass
+    stage_set(workdir, "done", say)  # 🧭 2.15: дійшло до кінця — хронологія у manifest.json
     say(f"✅ ГОТОВО: {os.path.join(workdir, 'final.mp4')}")
     return workdir
 
@@ -7841,6 +7897,7 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
     ff = ffmpeg_path()
     w, h = size_str.split(" ")[0].split("x")
     say("📁 Робоча папка створена")
+    stage_set(workdir, "start", say)
     target_sec = max(10, min(180, int(minutes))) * 60
     say("🎵 Збираю треки з папки MixTracks (мета ~{} хв)…".format(int(target_sec // 60)))
     plan = mix_plan(MIX_TRACKS_DIR, target_sec, say)
@@ -7852,6 +7909,7 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
     say("📝 Треклист з таймкодами — у youtube-seo.txt")
     # Фон: свої файли → обрані з YouTube-пошуку → градієнт
     bg = None
+    stage_set(workdir, "background", say)
     clips = [c for c in (bg_files or []) if os.path.isfile(c)]
     if not clips and yt_search_urls:
         say("🔎 Шукаю відео для фону на YouTube…")
@@ -7880,6 +7938,7 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
     else:
         vf_in = ["-f", "lavfi", "-i", f"gradients=s={w}x{h}:c0=0x0f2027:c1=0x2c5364:speed=0.03"]
         say("🖼️ Генерую анімований градієнтний фон")
+    stage_set(workdir, "render", say)
     say("🚀 Рендерю мікс (це найдовший крок, ~10–20 хв)…")
     cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", mix_path,
            "-map", "0:v", "-map", "1:a", "-shortest",
@@ -7900,6 +7959,7 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
         audio_health_check(workdir, say)
     except Exception:
         pass
+    stage_set(workdir, "done", say)
     say("✅ ГОТОВО: {}".format(os.path.join(workdir, "final.mp4")))
     return workdir
 
@@ -9436,6 +9496,10 @@ class App:
                                  fg_color=self.ACCENT, hover_color=self.ACCENT_H,
                                  command=self.start)
         self.btn.pack(fill="x", pady=(0, 2))
+        ctk.CTkButton(center, text="🔁 Продовжити впалу генерацію (resume)",
+                      height=30, corner_radius=15, font=self._f(12),
+                      fg_color=self.ACCENT_H, hover_color=self.ACCENT,
+                      command=self._resume_last).pack(fill="x", pady=(0, 4))
         self.bar = ctk.CTkProgressBar(center, mode="indeterminate", height=6,
                                       corner_radius=3, progress_color=self.ACCENT)
         self.bar.pack(fill="x", pady=(2, 8))
@@ -13564,6 +13628,42 @@ class App:
         self.status_lbl.configure(text="● Генерується…", text_color="#F59E0B")
         target = self.pipeline_mix if mode == "mix" else self.pipeline
         threading.Thread(target=target, args=(query,), daemon=True).start()
+    def _resume_last(self):
+        """🔁 2.15: продовжити ВПАЛУ генерацію: показую папку запуску,
+        читаю тему зі збереженого manifest.json, ставлю її у поле теми
+        і запускаю той самий конвеєр — але в ту саму папку: наявні
+        voice.mp3 / sub.srt / final.mp4 не перероблюються (⏭ у журналі),
+        seed вибору кадрів тягнеться з маніфесту — кадри ті самі.
+        Fail-open: нема папки/маніфесту — просто кажу і не ламаю нічого."""
+        try:
+            d = filedialog.askdirectory(
+                title="Папка впалої генерації (де лежить manifest.json)")
+            if not d:
+                return
+            q = ""
+            try:
+                with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
+                    q = (json.load(f).get("theme") or "").strip()
+            except Exception:
+                pass
+            if not q:
+                messagebox.showwarning(
+                    "Resume", "У цій папці нема manifest.json з темою — "
+                    "вибери папку впалого запуску 🎬 Відео 🙂")
+                return
+            if getattr(self, "mode", "video") != "video":
+                messagebox.showwarning(
+                    "Resume", "Resume працює для режиму 🎬 Відео — перемкни режим 🙂")
+                return
+            self.query.delete("1.0", "end")
+            self.query.insert("1.0", q)
+            self._resume_dir = d
+            self.say("🔁 Resume: продовжую «{}» у старій папці — готові кроки пропущу".format(q[:60]))
+            self.start()
+        except Exception as e:
+            self.say("ℹ️ Resume не вийшов ({}): запускаю як звичайно".format(str(e)[:120]))
+            self._resume_dir = None
+
     def preflight_notes(self):
         """🧪 v24: передпольотні перевірки — попереджуємо ДО старту генерації,
         щоб не падати на 90-й хвилині. Тільки повідомлення у журнал."""
@@ -13701,7 +13801,9 @@ class App:
                                        pin_images=pins,
                                        sub_style=g_sub, vid_style=g_vid, transition=g_trans,
                                        trim_sil=trim, cover=g_cov, no_faces=nf, seo=g_se, master=ln, pack_mb=pk, rate_pct=g_rate, platform=pv,
-                                       upscale4k=up4, autoscrape=asc, overlays=g_ov, orchestra=g_orch, web_on=g_web, ai_visual=aiv)
+                                       upscale4k=up4, autoscrape=asc, overlays=g_ov, orchestra=g_orch, web_on=g_web, ai_visual=aiv,
+                                       resume_dir=getattr(self, "_resume_dir", None))  # 🔁 2.15
+                        self._resume_dir = None  # 🔁 resume одноразовий — наступний запуск з нової папки
                         done += 1
                         if self.workdir and os.path.isdir(self.workdir):
                             f = os.path.join(self.workdir, "final.mp4")
