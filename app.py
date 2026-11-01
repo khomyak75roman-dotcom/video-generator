@@ -572,6 +572,12 @@ _oai_chat вміє kind="anth". Драбина Авто: до 42 ступені�
         тягнеться до тривалості ролика (slow_down); обробка
         кадр-за-кадром — до кількох хвилин; кнопка у картці
         нейро-ядра, живість — у core_check.
+      Хвиля 9 (анімування зображень):
+      • 🎬 кілька картинок → готове MP4 1920x1080: кожен кадр дихає
+        Кен-Бернсом у 4 напрямках (наближення/віддалення/панорами),
+        між кадрами — xfade-кросфейд (або різко concat'ом), музика —
+        опційно (коротший трек зациклюється, фейд-аут 2 с);
+        локальний ffmpeg, БЕЗ ключів; кнопка «🎬 Анімувати зображення».
 """
 import array
 import asyncio
@@ -1549,6 +1555,113 @@ def silence_trim_video(video, say, min_sil=0.6):
     except Exception as e:
         say("✂️ Не вийшло: " + str(e)[:160])
         return None
+
+
+def animate_images(images, out_path, per=3.0, fade=0.7, music=None, say=None):
+    """🎬 Волна 9: анімування зображень — Кен-Бернс у 4 напрямках
+    (наближення/віддалення/панорама уліво/управо — патерн build_bg_animated)
+    + xfade-кросфейд + музика (опційно): обрані картинки → MP4 1920x1080
+    25 fps (локальний ffmpeg, БЕЗ ключів; музика коротша — зациклиться)."""
+    if not images:
+        raise RuntimeError("Спершу обери картинки")
+    ensure_ffmpeg(say)
+    ff = ffmpeg_path()
+    per = max(1.0, float(per or 3.0))
+    fade = min(max(0.0, float(fade or 0.0)), per / 2.0)
+    w, h = 1920, 1080
+    workdir = os.path.dirname(os.path.abspath(out_path))
+    os.makedirs(workdir, exist_ok=True)
+    segs = []
+    try:
+        for i, img in enumerate(images):
+            if not (img and os.path.isfile(img)):
+                continue
+            seg = os.path.join(workdir, "_anim_{:03d}.mp4".format(i))
+            frames = int(per * 25) + 1
+            mode = i % 4
+            if mode == 0:  # наближення
+                z = "min(zoom+0.0008,1.28)"
+                x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+            elif mode == 1:  # віддалення
+                z = "if(lte(zoom,1.0),1.30,max(zoom-0.0008,1.0))"
+                x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+            elif mode == 2:  # панорама уліво
+                z = "1.15"
+                x, y = "(iw-iw/zoom)*(1-on/{})".format(frames), "ih/2-(ih/zoom/2)"
+            else:  # панорама управо
+                z = "1.15"
+                x, y = "(iw-iw/zoom)*on/{}".format(frames), "ih/2-(ih/zoom/2)"
+            run([ff, "-y", "-hide_banner", "-nostdin", "-i", img,
+                 "-vf", ("scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},"
+                         "zoompan=z='{}':x='{}':y='{}':d={}:s={}x{}:fps=25,"
+                         "format=yuv420p").format(w, h, w, h, z, x, y, frames, w, h),
+                 "-t", "{:.2f}".format(per),
+                 "-c:v", "libx264", "-crf", "22", "-preset", "veryfast", seg])
+            segs.append(seg)
+            if say:
+                say("🎬 анімую кадр {}/{} (Кен-Бернс, напрям {})…".format(
+                    i + 1, len(images), mode + 1))
+        if not segs:
+            raise RuntimeError("Жодна картинка не анімувалась")
+        total = len(segs) * per - max(len(segs) - 1, 0) * fade
+        if len(segs) == 1:
+            if music and os.path.isfile(music):
+                run([ff, "-y", "-hide_banner", "-nostdin", "-i", segs[0],
+                     "-stream_loop", "-1", "-i", music,
+                     "-map", "0:v", "-map", "1:a",
+                     "-af", "afade=t=out:st={:.2f}:d=2.0".format(max(0.0, total - 2.0)),
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                     "-shortest", out_path])
+            else:
+                shutil.copyfile(segs[0], out_path)
+        elif fade < 0.05:  # різка зміна кадру — concat-зшивка (швидко)
+            lst = os.path.join(workdir, "_anim_list.txt")
+            with open(lst, "w", encoding="utf-8") as f:
+                for s in segs:
+                    f.write("file '{}'\n".format(s))
+            cmd = [ff, "-y", "-hide_banner", "-nostdin", "-f", "concat",
+                   "-safe", "0", "-i", lst]
+            if music and os.path.isfile(music):
+                cmd += ["-stream_loop", "-1", "-i", music, "-map", "0:v", "-map", "1:a",
+                        "-af", "afade=t=out:st={:.2f}:d=2.0".format(max(0.0, total - 2.0)),
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest"]
+            else:
+                cmd += ["-c:v", "copy"]
+            cmd.append(out_path)
+            run(cmd)
+            try:
+                os.remove(lst)
+            except OSError:
+                pass
+        else:  # xfade-кросфейд: [x1][x2]… по колу
+            inputs = []
+            for s in segs:
+                inputs += ["-i", s]
+            parts, off = [], per - fade
+            for i in range(1, len(segs)):
+                prev = "[0:v]" if i == 1 else "[x{}]".format(i - 1)
+                parts.append("{}[{}:v]xfade=transition=fade:duration={:.2f}:offset={:.2f}[x{}]".format(
+                    prev, i, fade, off, i))
+                off += per - fade
+            parts.append("[x{}]format=yuv420p[v]".format(len(segs) - 1))
+            cmd = [ff, "-y", "-hide_banner", "-nostdin"] + inputs + \
+                  ["-filter_complex", ";".join(parts), "-map", "[v]"]
+            if music and os.path.isfile(music):
+                cmd += ["-stream_loop", "-1", "-i", music,
+                        "-map", "{}:a".format(len(segs)),
+                        "-af", "afade=t=out:st={:.2f}:d=2.0".format(max(0.0, total - 2.0)),
+                        "-c:a", "aac", "-b:a", "160k", "-shortest"]
+            cmd += ["-c:v", "libx264", "-crf", "21", "-preset", "veryfast", out_path]
+            run(cmd)
+        if not (os.path.isfile(out_path) and os.path.getsize(out_path) > 1024):
+            raise RuntimeError("ffmpeg не дав відео")
+        return out_path
+    finally:
+        for s in segs:
+            try:
+                os.remove(s)
+            except OSError:
+                pass
 
 
 def _hook_score(text):
@@ -10239,6 +10352,9 @@ class App:
         ctk.CTkButton(self.tools_body, text="🎬 Зшити кадри у відео", height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.fl_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎬 Анімувати зображення (Кен-Бернс + кросфейд)", height=32, corner_radius=16,
+                      fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
+                      command=self.anim_images_now).pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="🧠 Нейро-ядро — 11 нейромереж на HF Spaces, усі без ключа",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         ctk.CTkLabel(self.tools_body,
@@ -10476,7 +10592,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 37 ШЛЮЗІВ (2.14 + Волна 7: Cline і Fireworks): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 42 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 37 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу, а у Волні 7 — ще й 🎤 Whisper (розшифровка будь-якого аудіо без ключа Groq), 🎼 MusicGen (музика без Suno) і 💎 Real-ESRGAN (апскейл 2x/4x/8x), а Волна 8 — 🎬 заміна фону на відео (BiRefNet: ти у кадрі, фон — твоє відео) — усе безкоштовні HF Spaces, без ключа.\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 37 ШЛЮЗІВ (2.14 + Волна 7: Cline і Fireworks): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 42 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 37 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу, а у Волні 7 — ще й 🎤 Whisper (розшифровка будь-якого аудіо без ключа Groq), 🎼 MusicGen (музика без Suno) і 💎 Real-ESRGAN (апскейл 2x/4x/8x), а Волна 8 — 🎬 заміна фону на відео (BiRefNet: ти у кадрі, фон — твоє відео) — усе безкоштовні HF Spaces, без ключа; 🎬 ВОЛНА 9: анімування зображень — обери кілька картинок → Кен-Бернс у 4 напрямках, кросфейд-переходи, музика → готове MP4 (локальний ffmpeg, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -11555,6 +11671,62 @@ class App:
             groq_transcribe_srt(p, self.say)
         except Exception as e:
             self.say("❌ Субтитри: " + str(e)[:300])
+        finally:
+            self.q.put(None)
+
+    def anim_images_now(self):
+        """🎬 Волна 9: анімування зображень — кілька картинок → готове відео
+        (Кен-Бернс у 4 напрямках, кросфейд, музика — локальний ffmpeg, БЕЗ ключа)."""
+        paths = [p for p in (filedialog.askopenfilenames(
+            title="Картинки для анімації (обери кілька)",
+            filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp *.bmp")]) or []) if p]
+        if not paths:
+            return
+        per = 3.0
+        try:
+            val = simpledialog.askstring("Тривалість", "Секунд на картинку (Enter = 3):")
+            v = (val or "").strip().replace(",", ".")
+            if v.replace(".", "", 1).isdigit():
+                per = min(15.0, max(1.0, float(v)))
+        except Exception:
+            pass
+        fade = 0.7
+        try:
+            if not messagebox.askyesno("Переходи",
+                                       "Так — плавний кросфейд 0.7 с,\nСкасувати — різка зміна кадру?"):
+                fade = 0.0
+        except Exception:
+            pass
+        music = None
+        try:
+            if messagebox.askyesno("Музика", "Додати музику до відео?"):
+                music = filedialog.askopenfilename(
+                    title="Музичний трек (Скасувати — без музики)",
+                    filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg *.flac *.aac")])
+                if not music:
+                    music = None
+        except Exception:
+            pass
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._anim_images_thread,
+                         args=(paths, per, fade, music), daemon=True).start()
+
+    def _anim_images_thread(self, paths, per, fade, music):
+        try:
+            outdir = self.GEN_BASE
+            os.makedirs(outdir, exist_ok=True)
+            out = os.path.join(outdir, "анімація_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".mp4")
+            self.say("🎬 Анімую {} картинок (Кен-Бернс у 4 напрямках{}) — локальний ffmpeg…".format(
+                len(paths), " + кросфейд" if fade else ""))
+            animate_images(paths, out, per, fade, music, self.say)
+            self.say("🎬 Готово: " + os.path.basename(out) + " (у теці Generated)")
+            try:
+                os.startfile(outdir)
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎬 Анімація не вийшла: " + str(e)[:200])
         finally:
             self.q.put(None)
 
