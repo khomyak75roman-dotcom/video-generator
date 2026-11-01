@@ -270,7 +270,7 @@ v52: 🧹 БРАУЗЕР ПРИБРАНО (за запитом) — агент �
 (Bearer "free", селектори auto/auto:fast/auto:smart/auto:coding)
 ступенем у драбині Авто і окремим джерелом чату; 🐎 AI HORDE —
 краудсорс-сітка волонтерів (без реєстрації, до хвилини черги)
-останнім ступенем драбини: драбина Авто — 40 джерел; 🧩 COHRE —
+останнім ступенем драбини: драбина Авто — 42 джерела; 🧩 COHRE —
 16-й безкоштовний шлюз з ключем (trial 1000 зап/міс, без картки);
 🧭 OpenRouter — СВІЖІ :free-моделі (Nemotron 3.5-lightning:free
 дефолт, gemma-4, dots-3, north-mini-code, inkling, flint); 🕵️
@@ -283,7 +283,7 @@ v52: 🧹 БРАУЗЕР ПРИБРАНО (за запитом) — агент �
 ЗАПИТ → edge-tts/HF-озвучка → фон (YouTube/Openverse/Wikimedia/Pixabay/
 Pinterest/кеш-банк) → монтаж (xfade/beat-sync) → субтитри (libass
 фолбек drawtext) → оверлеї → QC → рендер (BT.709, апаратний кодек);
-АСИСТЕНТ → драбина 40 джерел + агент DDG→Mojeek 2 раунди →
+АСИСТЕНТ → драбина 42 джерела + агент DDG→Mojeek 2 раунди →
 стрімінг → кеш RAM+диск → чат Claude-стилю). Нове у 2.0: 🏷️ ВЕРХНІ
 ОВЕРЛЕЇ ffmpeg (плашка-заголовок, водяний знак, смуга прогресу —
 патерн kajisho5/claude-motion: моушн-графіка без After Effects);
@@ -451,7 +451,7 @@ platform.openai.com — API платний, тому ступінь ОСТАНН
 coding-router-preview, ключі platform.arena.ai — прев'ю; у
 безкоштовних router-ключів 403 поза Claude Code, тоді драбина
 просто пропускає ступінь); Клод уже йшов першим (Puter/Anthropic).
-_oai_chat вміє kind="anth". Драбина Авто: до 40 ступенів.
+_oai_chat вміє kind="anth". Драбина Авто: до 42 ступенів.
 Нуль нових ключів, нуль нових pip.
 2.12: 🔎 НОВІ МОЗКИ — у драбину Авто і вікно 🔑 Ключі додано три шлюзи:
       • Perplexity (api.perplexity.ai, модель sonar) — пошук+відповідь з цитатами;
@@ -486,7 +486,7 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
       • cloudflare (Workers AI, 10K нейронів/день; ключ ACCOUNT_ID:API_TOKEN,
         гілка kind="cf" у _oai_chat + llm_stream),
       • кредитні: xai (Grok), gonka (децентралізований GPU).
-      Драбина: 35 шлюзів, до 40 ступенів; нові — між Cohere і
+      Драбина: 37 шлюзів, до 42 ступенів; нові — між Cohere і
       кредитами Qwen/DeepSeek (кредитні — перед платними).
       Нуль нових pip.
 2.15: 🇺🇦 ЧОТИРИ МОЛЕКУЛИ З 28 ШАРІВ ДОСЛІДЖЕНЬ:
@@ -543,6 +543,27 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
         запуску програми сам знаходить останній упалий запуск (без
         final.mp4, stage не done) і пропонує продовжити одним кліком;
         прапорець зберігається лише на комп'ютері.
+      Хвиля 6:
+      • 🗺 шкала прогресу: у картці Пайплайн під кроками — determinate-бар,
+        який біжить по кроках разом з ✓-піктограмами (успіх — 100%);
+      • 🗿 кеш AI-візуалів: згенеровані кадри Pollinations зберігаються
+        за хешем промпт+розмір+seed (до 400 шт.) — resume і повтори
+        тієї ж сцени беруть картинку з диска, без трафіку;
+      • 🔁 авто-ретрай кліпів: впале завантаження фону (Openverse/
+        Wikimedia) пробується двічі з паузою 3 с; історія спроб —
+        у credits.txt робочої папки.
+      Хвиля 7 (додаєм усі шлюзи і нейромережі):
+      • ☁️ +2 шлюзи (усього 37, драбина — 42 ступені): Cline
+        (minimax-m2.5, фрітір, ключ app.cline.bot → Settings → API Keys)
+        і Fireworks (7 безкоштовних моделей: GLM-4.7/DeepSeek/gpt-oss/
+        MiniMax/Kimi/Nemotron, 10 RPM без картки) — обидва
+        OpenAI-сумісні, ключі у вікні 🔑 Ключі;
+      • 🧠 +3 нейромережі (усього 10): 🎤 Whisper (розшифровка
+        будь-якого аудіо/відео у текст — без ключа Groq), 🎼 MusicGen
+        (генерація музики за описом ~30 с — трек падає прямо у
+        MixTracks), 💎 Real-ESRGAN (апскейл картинки 2x/4x/8x) —
+        усе безкоштовні HF Spaces, без ключа; кнопки у картці
+        нейро-ядра, перевірка живості — у core_check.
 """
 import array
 import asyncio
@@ -750,6 +771,9 @@ HF_SPACES = {  # 🤝 v37: публічні HF Spaces — Gradio-API БЕЗ кл
     "nobg": "https://not-lain-background-removal.hf.space",  # ✂️ v38: видалення фону
     "ocr": "https://merterbak-deepseek-ocr-demo.hf.space",  # 🔍 v38: DeepSeek-OCR: текст з картинки
     "fl": "https://multimodalart-wan-2-2-first-last-frame.hf.space",  # 🎬 v38: перший→останній кадр
+    "stt": "https://openai-whisper.hf.space",  # 🎤 Волна 7: Whisper — текст з аудіо (transcribe/translate)
+    "music": "https://facebook-musicgen.hf.space",  # 🎼 Волна 7: MusicGen — музика з опису (~30 с)
+    "upscale": "https://doevent-face-real-esrgan.hf.space",  # 💎 Волна 7: Real-ESRGAN — апскейл 2x/4x/8x
 }
 CLONE_FILE = os.path.join(TOOLS_DIR, "clone.json")  # 🗣 v38: зразок голосу і перемикач клону, лише локально
 # 🔑 v36: OpenAI-сумісні бази безкоштовних фрітір-ключів (усі — без картки; гроші — нуль)
@@ -787,6 +811,8 @@ FREEKEY_ENGINES = {
     "cloudflare": {"url": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1", "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "kind": "cf"},  # ☁️ 2.14: Workers AI — 10K нейронів/день; ключ ACCOUNT_ID:API_TOKEN
     "xai": {"url": "https://api.x.ai/v1", "model": "grok-4-1-fast"},  # 🦾 2.14: xAI Grok — частка моделей у free-тірі + тріал-кредити
     "gonka": {"url": "https://api.gonka.broker/v1", "model": "deepseek-ai/DeepSeek-V3.1"},  # 🕸 2.14: Gonka Broker — децентралізований GPU, OpenAI-сумісний, старт безкоштовний
+    "cline": {"url": "https://api.cline.bot/api/v1", "model": "minimax/minimax-m2.5"},  # 🛠️ Волна 7: Cline API — один ключ на Claude/Gemini/GPT, фрітір minimax-m2.5
+    "fireworks": {"url": "https://api.fireworks.ai/inference/v1", "model": "accounts/fireworks/models/glm-5p3-flash"},  # 🎆 Волна 7: Fireworks — 7 безкоштовних моделей, 10 RPM без картки
     "qwen": {"url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "model": "qwen-plus"},  # 🟠 2.12: Qwen напряму (Alibaba Model Studio/DashScope) — OpenAI-сумісний, новим акаунтам безкоштовна квота
     "deepseek": {"url": "https://api.deepseek.com/v1", "model": "deepseek-flash"},  # 🐋 2.12: DeepSeek V4.1-Flash — новим акаунтам ~5 млн токенів БЕЗ картки, потім дуже дешево
 }
@@ -795,8 +821,8 @@ FREEKEY_ORDER = ("puter", "anthropic", "cerebras", "groq", "mistral", "github",
                  "zhipu", "zai", "siliconflow", "modelscope", "cohere",
                  "aion", "opencode", "ovh", "agnes", "glhf", "chutes",
                  "nscale", "nebius", "ollama", "ai21", "cloudflare",
-                 "qwen", "deepseek", "xai", "gonka",
-                 "openai", "arena", "perplexity", "manus")  # 🪜 v43–2.14: драбина Авто (35 шлюзів; 13 нових 2.14 — 11 безкоштовних тірів + Grok/Gonka з кредитами; платні OpenAI/Арена/Perplexity/Manus — наприкінці)
+                 "qwen", "deepseek", "xai", "gonka", "cline", "fireworks",
+                 "openai", "arena", "perplexity", "manus")  # 🪜 v43–2.15: драбина Авто (37 шлюзів; Волна 7: +Cline і Fireworks; платні OpenAI/Арена/Perplexity/Manus — наприкінці)
 # 🌐 v44: де взяти безкоштовний ключ — сторінка відкривається у Chrome
 KEY_SIGNUP = {
     "puter": "https://puter.com/dashboard#account",  # Create token
@@ -834,6 +860,8 @@ KEY_SIGNUP = {
     "cloudflare": "https://dash.cloudflare.com/profile/api-tokens",
     "xai": "https://console.x.ai",
     "gonka": "https://app.gonkabroker.com/signup",
+    "cline": "https://app.cline.bot/",  # 🛠️ Волна 7: Settings → API Keys
+    "fireworks": "https://fireworks.ai/account/api-keys",  # 🎆 Волна 7
 }
 # 🔑 v44: коротка інструкція для кожного шлюзу (показується у вікні ключів)
 KEY_HINTS = {
@@ -872,6 +900,8 @@ KEY_HINTS = {
     "cloudflare": "☁️ Cloudflare Workers AI: dash.cloudflare.com → My Profile → API Tokens → Workers AI. ВСТАВ КЛЮЧ У ФОРМАТІ ACCOUNT_ID:API_TOKEN (Account ID — на головній панелі Cloudflare). 10 000 нейронів/день без картки.",
     "xai": "🦾 xAI Grok: console.x.ai → API Keys. Частка моделей у безкоштовному тірі (grok-4-1-fast, grok-3-mini) + тріал-кредити новим акаунтам. Ступінь — перед платними.",
     "gonka": "🕸 Gonka Broker: app.gonkabroker.com → signup → API Keys. Децентралізований GPU (OpenAI-сумісний): старт безкоштовний (перки), потім дешевий pay-per-token у USD.",
+    "cline": "🛠️ Cline: app.cline.bot → Settings → API Keys. Один ключ на Claude/Gemini/GPT (OpenAI-сумісний); безкоштовний ступінь — minimax/minimax-m2.5.",
+    "fireworks": "🎆 Fireworks: fireworks.ai → API Keys → Create User API Key. 7 безкоштовних моделей (GLM 5.3, GLM 5.3 Flash, Kimi K3, MiniMax M3, gpt-oss-120b, DeepSeek V4.1 Flash, Nemotron), 10 RPM без картки.",
 }
 # 🧠 v44: вибір моделей для кожного шлюзу (у т.ч. трійка Claude — як Sonnet/Haiku/Opus)
 FREEKEY_MODELS = {
@@ -924,6 +954,11 @@ FREEKEY_MODELS = {
     "cloudflare": ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistral/mistral-7b-instruct-v0.1"],  # ☁️ 2.14
     "xai": ["grok-4-1-fast", "grok-3-mini", "grok-4-3"],  # 🦾 2.14
     "gonka": ["deepseek-ai/DeepSeek-V3.1", "meta-llama/Meta-Llama-3.1-70B-Instruct"],  # 🕸 2.14
+    "cline": ["minimax/minimax-m2.5"],  # 🛠️ Волна 7: фрітір-модель Cline
+    "fireworks": ["accounts/fireworks/models/glm-5p3-flash", "accounts/fireworks/models/glm-5p3",
+                  "accounts/fireworks/models/deepseek-v4p1-flash", "accounts/fireworks/models/gpt-oss-120b",
+                  "accounts/fireworks/models/minimax-m3", "accounts/fireworks/models/kimi-k3",
+                  "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"],  # 🎆 Волна 7: усі 7 безкоштовні
 }
 # 🧭 v52: дефолт OpenRouter — свіжа :free-модель (стара зникла з каталогу)
 FREEKEY_ENGINES["openrouter"]["model"] = "nvidia/nemotron-3.5-lightning:free"
@@ -948,6 +983,10 @@ SUNO_CLERK_V = "5.117.0"
 CLIP_CACHE_DIR = os.path.join(TOOLS_DIR, "clip_cache")
 CLIP_CACHE_INDEX = os.path.join(CLIP_CACHE_DIR, "index.json")
 CLIP_CACHE_MAX_BYTES = 1536 * 1024 * 1024   # ~1.5 ГБ; далі видаляються найстаріші
+# 🗿 Волна 6: кеш AI-візуалів Pollinations — хеш промпта+розміру+seed → png;
+# ретрай/resume тієї ж сцени з тим самим seed дає картинку з диска, без трафіку
+AI_CACHE_DIR = os.path.join(TOOLS_DIR, "ai_cache")
+AI_CACHE_MAX_FILES = 400   # далі видаляються найстаріші
 
 
 
@@ -2427,30 +2466,40 @@ def fetch_openverse_videos(query, workdir, need=30.0, max_clips=6):
                     continue
                 except OSError:
                     pass
-            try:
-                with requests.get(it["url"], stream=True, timeout=90,
-                                  headers={"User-Agent": "VideoGenerator/1.1"}) as d:
-                    d.raise_for_status()
-                    size = int(d.headers.get("Content-Length") or 0)
-                    if size > 120 * 1024 * 1024:
-                        continue  # пропускаємо надто великі файли
-                    with open(p, "wb") as out:
-                        for chunk in d.iter_content(1 << 16):
-                            out.write(chunk)
-                paths.append(p)
-                total += (it.get("duration") or 0) / 1000.0
-                clip_cache_put(cache_idx, it["url"], p, "openverse", {
-                    "query": query, "title": it.get("title") or "",
-                    "license": it.get("license") or "",
-                    "creator": it.get("creator") or "",
-                    "duration": (it.get("duration") or 0) / 1000.0,
-                    "tags": it.get("tags") or []})
-                append_credit(workdir, credit)
-            except Exception:
+            done = False
+            for attempt in (1, 2):  # 🔁 Волна 6: авто-ретрай упалого завантаження
                 try:
-                    os.remove(p)
-                except OSError:
-                    pass
+                    with requests.get(it["url"], stream=True, timeout=90,
+                                      headers={"User-Agent": "VideoGenerator/1.1"}) as d:
+                        d.raise_for_status()
+                        size = int(d.headers.get("Content-Length") or 0)
+                        if size > 120 * 1024 * 1024:
+                            break  # надто великий файл — пропускаємо кліп
+                        with open(p, "wb") as out:
+                            for chunk in d.iter_content(1 << 16):
+                                out.write(chunk)
+                    done = True
+                    break
+                except Exception:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+                    if attempt == 1:  # історія спроб — у credits.txt робочої папки
+                        time.sleep(3)
+                        append_credit(workdir, "🔁 ретрай кліпа (спроба 2/2): " +
+                                      (it.get("title") or "?")[:60])
+            if not done:
+                continue
+            paths.append(p)
+            total += (it.get("duration") or 0) / 1000.0
+            clip_cache_put(cache_idx, it["url"], p, "openverse", {
+                "query": query, "title": it.get("title") or "",
+                "license": it.get("license") or "",
+                "creator": it.get("creator") or "",
+                "duration": (it.get("duration") or 0) / 1000.0,
+                "tags": it.get("tags") or []})
+            append_credit(workdir, credit)
         if cached:
             append_credit(workdir, "📦 {} кліп(ів) з локального кешу (без трафіку)".format(cached))
         return (paths, None) if paths else (None, "Openverse videos: кліпи не завантажились")
@@ -2579,32 +2628,42 @@ def fetch_wikimedia_videos(query, workdir, need=30.0, max_clips=6):
                     continue
                 except OSError:
                     pass
-            try:
-                with requests.get(src, stream=True, timeout=120, headers={"User-Agent": UA_STRING}) as resp:
-                    resp.raise_for_status()
-                    size = int(resp.headers.get("Content-Length") or 0)
-                    if size > 120 * 1024 * 1024:
-                        continue
-                    with open(path, "wb") as out:
-                        for chunk in resp.iter_content(1 << 16):
-                            out.write(chunk)
-                paths.append(path)
-                clip_cache_put(cache_idx, src, path, "wikimedia", {
-                    "query": query, "title": p.get("title") or "",
-                    "license": ((vi.get("extmetadata") or {}).get("LicenseShortName") or {}).get("value", ""),
-                    "duration": d})
-                meta = vi.get("extmetadata") or {}
-                author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
-                page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
-                append_credit(workdir, "🎬 {} — {} — {} — {}".format(
-                    (p.get("title") or "?")[:60],
-                    (meta.get("LicenseShortName") or {}).get("value", "?"),
-                    author, page_url))
-            except Exception:
+            done = False
+            for attempt in (1, 2):  # 🔁 Волна 6: авто-ретрай упалого завантаження
                 try:
-                    os.remove(path)
-                except OSError:
-                    pass
+                    with requests.get(src, stream=True, timeout=120, headers={"User-Agent": UA_STRING}) as resp:
+                        resp.raise_for_status()
+                        size = int(resp.headers.get("Content-Length") or 0)
+                        if size > 120 * 1024 * 1024:
+                            break  # надто великий файл — пропускаємо кліп
+                        with open(path, "wb") as out:
+                            for chunk in resp.iter_content(1 << 16):
+                                out.write(chunk)
+                    done = True
+                    break
+                except Exception:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    if attempt == 1:  # історія спроб — у credits.txt робочої папки
+                        time.sleep(3)
+                        append_credit(workdir, "🔁 ретрай кліпа (спроба 2/2): " +
+                                      (p.get("title") or "?")[:60])
+            if not done:
+                continue
+            paths.append(path)
+            clip_cache_put(cache_idx, src, path, "wikimedia", {
+                "query": query, "title": p.get("title") or "",
+                "license": ((vi.get("extmetadata") or {}).get("LicenseShortName") or {}).get("value", ""),
+                "duration": d})
+            meta = vi.get("extmetadata") or {}
+            author = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "?") or "?").strip()[:80]
+            page_url = "https://commons.wikimedia.org/wiki/" + (p.get("title") or "").replace(" ", "_")
+            append_credit(workdir, "🎬 {} — {} — {} — {}".format(
+                (p.get("title") or "?")[:60],
+                (meta.get("LicenseShortName") or {}).get("value", "?"),
+                author, page_url))
         return (paths, None) if paths else (None, "Wikimedia videos: кліпів немає/не завантажились")
     except Exception as e:
         return None, "Wikimedia videos: {}".format(e)
@@ -2818,6 +2877,16 @@ def pollinations_image(prompt, out_path, w=1280, h=720, seed=1, timeout=45):  # 
     GET /prompt/{промпт}?width&height&nologo=true&seed — nologo прибирає
     водяний знак сервісу одразу. Не вдалось — raise (вища ступінь підхопить)."""
     from urllib.parse import quote
+    # 🗿 Волна 6: кеш AI-візуалів — той самий промпт+розмір+seed → з диска
+    try:
+        key = hashlib.sha256("{}|{}|{}|{}".format(
+            prompt, w, h, seed).encode("utf-8")).hexdigest()[:32]
+        cpath = os.path.join(AI_CACHE_DIR, key + ".png")
+        if os.path.isfile(cpath) and os.path.getsize(cpath) > 15000:
+            shutil.copyfile(cpath, out_path)
+            return out_path
+    except Exception:
+        pass
     url = ("https://image.pollinations.ai/prompt/" + quote((prompt or "")[:400])
            + "?width={}&height={}&nologo=true&seed={}".format(w, h, seed))
     with requests.get(url, stream=True, timeout=timeout,
@@ -2833,6 +2902,21 @@ def pollinations_image(prompt, out_path, w=1280, h=720, seed=1, timeout=45):  # 
             pass
         raise RuntimeError("картинка порожня")
     os.replace(out_path + ".part", out_path)
+    # 🗿 Волна 6: зберігаю у кеш AI-візуалів і підстригаю найстаріші
+    try:
+        os.makedirs(AI_CACHE_DIR, exist_ok=True)
+        shutil.copyfile(out_path, cpath)
+        files = [os.path.join(AI_CACHE_DIR, n)
+                 for n in os.listdir(AI_CACHE_DIR)
+                 if n.lower().endswith(".png")]
+        if len(files) > AI_CACHE_MAX_FILES:
+            for f in sorted(files, key=os.path.getmtime)[:len(files) - AI_CACHE_MAX_FILES]:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+    except Exception:
+        pass
     return out_path
 
 
@@ -5048,7 +5132,7 @@ def horde_chat(prompt, system=None, timeout=90, history=None):
 def auto_chain_steps(prompt=None):
     """🔄 v40–v52: драбина джерел Авто: усі шлюзи з живими ключами
     (freekeys.json) → ⚡ Kilo → 🌐 LLM7 → 🚰 LLMFaucet → 🌐 Pollinations
-    → 🐎 AI Horde — всього до 40 ступенів; кожен fail-open. 🎯 2.0:
+    → 🐎 AI Horde — всього до 42 ступенів; кожен fail-open. 🎯 2.0:
     важке питання (prompt) — Faucet-ступінь іде з селектором auto:smart
     (сам підбирає розумнішу модель); просте — auto (швидка)."""
     keys = load_freekeys()
@@ -5696,6 +5780,58 @@ def hf_frames_to_video(img1, img2, prompt, out_path, say=None):
     return hf_download(base, out, out_path)
 
 
+def hf_stt(audio_path, out_txt, task="transcribe", say=None):
+    """🎤 Волна 7: текст з аудіо (OpenAI Whisper HF Space, БЕЗ ключа):
+    task="transcribe" — рідною мовою, "translate" — переклад англійською."""
+    if not (audio_path and os.path.isfile(audio_path)):
+        raise RuntimeError("Спершу обери аудіофайл")
+    base = HF_SPACES["stt"]
+    au = hf_upload(base, audio_path)
+    res = hf_space_call(base, "/predict", [au, task], timeout=900)
+    text = res[0] if isinstance(res, list) and res else res
+    if not (text or "").strip():
+        raise RuntimeError("Whisper не розпізнав мовлення (тиша?)")
+    with open(out_txt, "w", encoding="utf-8") as f:
+        f.write(text.strip() + "\n")
+    return out_txt
+
+
+def hf_music(prompt, out_path, say=None):
+    """🎼 Волна 7: коротка музика з опису (MusicGen, HF Space, БЕЗ ключа):
+    ~30 секунд треку за текстовим промптом — фолбек фону без Suno/ключів."""
+    if not (prompt or "").strip():
+        raise RuntimeError("Опиши музику (напр.: спокійний lo-fi піаніно)")
+    base = HF_SPACES["music"]
+    res = hf_space_call(base, "/predict_batched", [prompt.strip(), None],
+                        timeout=1200)
+    au = res[0] if isinstance(res, list) and res else res
+    return hf_download(base, au, out_path)
+
+
+def hf_upscale(image_path, out_path, size="2x", say=None):
+    """💎 Волна 7: апскейл картинки (Real-ESRGAN HF Space, БЕЗ ключа):
+    2x/4x/8x; простір прокидається до 2 хв — у say чесна підказка."""
+    if not (image_path and os.path.isfile(image_path)):
+        raise RuntimeError("Спершу обери картинку")
+    if size not in ("2x", "4x", "8x"):
+        size = "2x"
+    base = HF_SPACES["upscale"]
+    try:
+        probe = requests.get(base.rstrip("/") + "/gradio_api/info", timeout=15,
+                             headers={"User-Agent": UA_STRING})
+        if probe.status_code != 200:
+            raise RuntimeError("Space ще прокидається (до ~2 хв) — спробуй ще раз")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError("Space не відповідає: " + str(e)[:120])
+    img = hf_upload(base, image_path)
+    res = hf_space_call(base, "/predict", [img, size], timeout=900)
+    out = res[0] if isinstance(res, list) and res else res
+    return hf_download(base, out, out_path)
+
+
+
 def clone_cfg_load():
     """🗣 v38: tools/clone.json — зразок голосу і стан перемикача клону
     (лише локально, як ключ Pixabay; fail-open: нема файла — порожній словник)."""
@@ -5846,7 +5982,7 @@ GATEWAY_PRETTY = {  # 📡 v49: гарні імена шлюзів для нот
     "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
     "cohere": "🧩 Cohere",
     "openai": "💬 ChatGPT (OpenAI)", "arena": "🏟 Арена (arena.ai)",
-    "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka",
+    "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka", "cline": "🛠️ Cline", "fireworks": "🎆 Fireworks",
     "kilo": "⚡ Kilo", "llm7": "🌐 LLM7", "faucet": "🚰 LLMFaucet",
     "pollinations": "🌐 Pollinations", "horde": "🐎 AI Horde"}
 
@@ -9685,6 +9821,11 @@ class App:
                                corner_radius=14, height=30)
             lbl.pack(side="left", padx=4)
             self.step_lbls.append(lbl)
+        # 🗺 Волна 6: determinate-шкала прогресу по кроках пайплайна
+        self.steps_bar = ctk.CTkProgressBar(lc, mode="determinate", height=6,
+                                            corner_radius=3, progress_color=self.GREEN)
+        self.steps_bar.pack(fill="x", padx=16, pady=(0, 12))
+        self.steps_bar.set(0)
 
         pc = self._card(center, fill="x", pady=(0, 8))
         ctk.CTkLabel(pc, text="Прев'ю", font=self._f(13, "bold"),
@@ -10065,14 +10206,23 @@ class App:
         ctk.CTkButton(self.tools_body, text="🎬 Зшити кадри у відео", height=32, corner_radius=16,
                       fg_color=self.ACCENT, hover_color=self.ACCENT_H, font=self._f(12),
                       command=self.fl_now).pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkLabel(self.tools_body, text="🧠 Нейро-ядро — 7 нейромереж на HF Spaces, усі без ключа",
+        ctk.CTkLabel(self.tools_body, text="🧠 Нейро-ядро — 10 нейромереж на HF Spaces, усі без ключа",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         ctk.CTkLabel(self.tools_body,
-                     text="🗣 клон • 🖼 картинка • 🎬 оживлення • 🖌 редагування • ✂️ фон • 🔍 OCR • 🎬 2 кадри",
+                     text="🗣 клон • 🖼 картинка • 🎬 оживлення • 🖌 редагування • ✂️ фон • 🔍 OCR • 🎬 2 кадри • 🎤 Whisper • 🎼 MusicGen • 💎 апскейл",
                      font=self._f(11), text_color=self.MUTED, anchor="w").pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkButton(self.tools_body, text="🔄 Перевірити всі нейромережі", height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.core_check).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎤 Розшифрувати аудіо (Whisper, без ключа)", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.whisper_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="🎼 Згенерувати музику (MusicGen, без ключа)", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.music_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(self.tools_body, text="💎 Апскейл картинки 2x/4x/8x (Real-ESRGAN, без ключа)", height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.upscale_now).pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="🎭 Пост-обробка готового відео",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         ctk.CTkButton(self.tools_body, text="✂️ Прибрати тишу з відео", height=32, corner_radius=16,
@@ -10290,7 +10440,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 35 ШЛЮЗІВ (2.14): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 40 джерел, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 35 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу (усе — безкоштовні HF Spaces, без ключа).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 37 ШЛЮЗІВ (2.14 + Волна 7: Cline і Fireworks): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 42 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 37 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу, а у Волні 7 — ще й 🎤 Whisper (розшифровка будь-якого аудіо без ключа Groq), 🎼 MusicGen (музика без Suno) і 💎 Real-ESRGAN (апскейл 2x/4x/8x) — усе безкоштовні HF Spaces, без ключа.\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -10298,11 +10448,18 @@ class App:
 
     def _reset_steps(self):
         self._step = -1
+        if getattr(self, "steps_bar", None):
+            self.steps_bar.set(0)
         for i, lbl in enumerate(self.step_lbls):
             lbl.configure(text="○ " + self.STEPS[i], text_color=self.MUTED)
 
     def _set_step(self, i):
         self._step = i
+        if getattr(self, "steps_bar", None) and self.step_lbls:
+            try:
+                self.steps_bar.set(min(1.0, (i + 1) / float(len(self.step_lbls))))
+            except Exception:
+                pass
         for j, lbl in enumerate(self.step_lbls):
             if j < i:
                 lbl.configure(text="✓ " + self.STEPS[j], text_color=self.GREEN)
@@ -10318,6 +10475,8 @@ class App:
             else:
                 lbl.configure(text="✗ " + self.STEPS[i], text_color="#EF4444")
         self._step = len(self.step_lbls) - 1
+        if ok and getattr(self, "steps_bar", None):
+            self.steps_bar.set(1.0)
 
     # === ПРЕВ'Ю ГОТОВОГО ВІДЕО ===
 
@@ -11666,6 +11825,100 @@ class App:
             self.say("🔍 OCR не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
         finally:
             self.q.put(None)
+    def whisper_now(self):
+        """🎤 Волна 7: текст з аудіо (Whisper HF Space, БЕЗ ключа) — окремим потоком."""
+        p = filedialog.askopenfilename(
+            filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg *.flac *.aac *.webm")])
+        if not p:
+            return
+        task = "transcribe"
+        try:
+            if messagebox.askyesno("Whisper",
+                                   "Так — переклад англійською,\nСкасувати — текст рідною мовою?"):
+                task = "translate"
+        except Exception:
+            pass
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._whisper_thread, args=(p, task), daemon=True).start()
+
+    def _whisper_thread(self, p, task):
+        try:
+            out = os.path.splitext(p)[0] + ("_en.txt" if task == "translate" else "_текст.txt")
+            self.say("🎤 Whisper (HF Space, без ключа): слухаю аудіо…")
+            hf_stt(p, out, task, self.say)
+            self.say("🎤 Готово: " + os.path.basename(out) + " (поруч з аудіо)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎤 Whisper не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def music_now(self):
+        """🎼 Волна 7: музика з опису (MusicGen HF Space, БЕЗ ключа) — трек
+        лягає у папку MixTracks (для міксу), нема її — у Videos/Generated."""
+        prompt = simpledialog.askstring("MusicGen", "Опиши музику (напр.: спокійний lo-fi піаніно):")
+        if not (prompt or "").strip():
+            return
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._music_thread, args=(prompt.strip(),), daemon=True).start()
+
+    def _music_thread(self, prompt):
+        try:
+            self.say("🎼 MusicGen (HF Space, без ключа): складаю трек (~30 с)…")
+            outdir = MIX_TRACKS_DIR if os.path.isdir(MIX_TRACKS_DIR) else self.GEN_BASE
+            try:
+                os.makedirs(outdir, exist_ok=True)
+            except Exception:
+                outdir = os.path.expanduser("~")
+            out = os.path.join(outdir, "musicgen_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".wav")
+            hf_music(prompt, out, self.say)
+            self.say("🎼 Готово: " + os.path.basename(out) + " — можна брати у фон або мікс")
+            try:
+                os.startfile(outdir)
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎼 MusicGen не вийшов: " + str(e)[:200] + " (Space-черги публічні — спробуй пізніше)")
+        finally:
+            self.q.put(None)
+
+    def upscale_now(self):
+        """💎 Волна 7: апскейл картинки (Real-ESRGAN HF Space, БЕЗ ключа)."""
+        p = filedialog.askopenfilename(
+            filetypes=[("Зображення", "*.png *.jpg *.jpeg *.webp *.bmp")])
+        if not p:
+            return
+        size = "2x"
+        try:
+            val = simpledialog.askstring("Real-ESRGAN", "Множник: 2x, 4x або 8x (Enter = 2x):")
+            if (val or "").strip().lower() in ("2x", "4x", "8x"):
+                size = val.strip().lower()
+        except Exception:
+            pass
+        self.btn.configure(state="disabled")
+        self.bar.start()
+        threading.Thread(target=self._upscale_thread, args=(p, size), daemon=True).start()
+
+    def _upscale_thread(self, p, size):
+        try:
+            out = os.path.splitext(p)[0] + "_up" + size + os.path.splitext(p)[1]
+            self.say("💎 Real-ESRGAN (HF Space, без ключа): збільшую " + size + "…")
+            hf_upscale(p, out, size, self.say)
+            self.say("💎 Готово: " + os.path.basename(out) + " (поруч з картинкою)")
+            try:
+                os.startfile(os.path.dirname(p) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("💎 Апскейл не вийшов: " + str(e)[:200] + " (Space прокидається до ~2 хв — спробуй ще раз)")
+        finally:
+            self.q.put(None)
+
 
     def img_translate_now(self):
         """🌍 v49: текст з картинки → 4 мови (🇷🇺 російська, 🇪🇸 іспанська,
@@ -11830,7 +12083,7 @@ class App:
             self.q.put(None)
 
     def core_check(self):
-        """🧠 v38: перевірити живість усіх 7 нейромереж — окремим потоком."""
+        """🧠 v38: перевірити живість усіх 10 нейромереж — окремим потоком."""
         self.btn.configure(state="disabled")
         self.bar.start()
         threading.Thread(target=self._core_thread, daemon=True).start()
@@ -11838,7 +12091,9 @@ class App:
     def _core_thread(self):
         names = {"tts": "🗣 клон голосу", "img": "🖼 AI-картинка", "vid": "🎬 оживлення кадру",
                  "edit": "🖌 редагування промптом", "nobg": "✂️ видалення фону",
-                 "ocr": "🔍 OCR", "fl": "🎬 перший→останній кадр"}
+                 "ocr": "🔍 OCR", "fl": "🎬 перший→останній кадр",
+                 "stt": "🎤 Whisper (текст з аудіо)", "music": "🎼 MusicGen (музика)",
+                 "upscale": "💎 Real-ESRGAN (апскейл)"}
         self.say("🧠 Перевіряю {} нейромереж на HF Spaces (до півхвилини)…".format(len(names)))
         ok = 0
         try:
@@ -12079,7 +12334,7 @@ class App:
                    "siliconflow": "🌊 SiliconFlow", "modelscope": "🟠 ModelScope",
                    "cohere": "🧩 Cohere",
                    "openai": "💬 ChatGPT (OpenAI)", "arena": "🏟 Арена (arena.ai)",
-                   "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka",
+                   "perplexity": "🔎 Perplexity", "qwen": "🟠 Qwen", "deepseek": "🐋 DeepSeek", "manus": "🤖 Manus", "aion": "🧬 Aion Labs", "opencode": "🌀 OpenCode", "ovh": "🇪🇺 OVHcloud", "agnes": "✨ Agnes", "glhf": "🎮 GLHF", "chutes": "🕳 Chutes", "nscale": "🖼 Nscale", "nebius": "🛰 Nebius", "ollama": "🦙 Ollama Cloud", "ai21": "🧱 AI21", "cloudflare": "☁️ Cloudflare", "xai": "🦾 Grok (xAI)", "gonka": "🕸 Gonka", "cline": "🛠️ Cline", "fireworks": "🎆 Fireworks",
                    "pollinations": "🌐 Pollinations", "kilo": "⚡ Kilo",
                    "freekey": "🔑 Ключ", "auto": "🔄 Авто (драбина)",
                    "9router": "🌐 9Router", "ollama": "🧠 Ollama"}
