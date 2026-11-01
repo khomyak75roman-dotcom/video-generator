@@ -524,6 +524,14 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
         кадрів пишеться у manifest.json ще на старті — виживає
         при падінні; resume тягне seed упалого запуску → кадри
         ті самі.
+      Хвиля 4:
+      • 🔁 resume у ВСІХ режимах: 📜 Сценарій (готові частини озвучки
+        і завантажені кліпи сцен не перероблюються, фінал-гейт final.mp4)
+        і 🎧 Мікс (гейт фону bg.mp4 і фіналу); кнопка «⏯ Продовжити
+        упалий запуск» тепер розуміє і сценарійний маніфест;
+      • ⏳ ETA-підказки: скануючи історію запусків, генератор підказує,
+        скільки триває поточний крок (озвучка/субтитри/фон/рендер)
+        за минулими запусками — очікування без «сліпоти».
 """
 import array
 import asyncio
@@ -2022,6 +2030,43 @@ def write_manifest(info, workdir, say):
         pass  # 📋 v28: маніфест — артефакт, ніколи не ламає генерацію
 
 
+def _eta_history(base_dir, stage, limit=12):
+    """⏳ ETA з історії запусків (Хвиля 4): сканує манифести сусідніх тиків,
+    шукає пари «stage → наступна стадія» і рахує медіанну тривалість кроку.
+    Повертає 0, якщо спостережень замало. Тільки підказка у журнал — fail-open."""
+    try:
+        if not base_dir or not os.path.isdir(base_dir):
+            return 0.0
+        durs = []
+        names = [e for e in os.listdir(base_dir)
+                 if os.path.isdir(os.path.join(base_dir, e))]
+        names = sorted(names, reverse=True)[:limit]
+        for name in names:
+            mf = os.path.join(base_dir, name, "manifest.json")
+            try:
+                with open(mf, encoding="utf-8") as f:
+                    stages = (json.load(f) or {}).get("stages") or []
+            except Exception:
+                continue
+            times = []
+            for item in stages:
+                try:
+                    times.append((item[0], datetime.strptime(item[1], "%H:%M:%S")))
+                except Exception:
+                    pass
+            for i, (st, t0) in enumerate(times):
+                if st == stage and i + 1 < len(times):
+                    dt = (times[i + 1][1] - t0).total_seconds()
+                    if 1 < dt < 3600:
+                        durs.append(dt)
+        if len(durs) >= 2:
+            durs.sort()
+            return durs[len(durs) // 2]
+        return 0.0
+    except Exception:
+        return 0.0
+
+
 def stage_set(workdir, stage, say=None):
     """🧭 2.15: state machine у manifest.json — яка стадія генерації триває
     зараз (research / script / voice / subtitles / background / render / done).
@@ -2043,6 +2088,13 @@ def stage_set(workdir, stage, say=None):
         data["stage"] = stage
         with open(mfp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        if say and stage in ("voice", "subtitles", "background", "render"):
+            base = os.path.dirname(os.path.abspath(mfp))
+            eta = _eta_history(base, stage)
+            if eta >= 60:
+                say("⏳ За минулими запусками цей крок ~%d хв %d с" % (eta // 60, eta % 60))
+            elif eta > 0:
+                say("⏳ За минулими запусками цей крок ~%d с" % int(eta))
     except Exception:
         pass  # 🧭 state machine — діагностика, ніколи не ламає генерацію
 
@@ -7116,7 +7168,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, resume_dir=None):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -7127,7 +7179,12 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         say("⚠️ Частин {} — беру перші {}".format(len(scenes), SCRIPT_MAX_SCENES))
         scenes = scenes[:SCRIPT_MAX_SCENES]
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
-    workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_scenario")
+    resume = bool(resume_dir and os.path.isdir(resume_dir))  # 🔁 2.15: resume
+    if resume:
+        workdir = resume_dir  # 🔁 та сама папка — готові частини підхоплюю
+        say("🔁 Resume сценарію: продовжую впалу генерацію у старій папці")
+    else:
+        workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S") + "_scenario")
     os.makedirs(workdir, exist_ok=True)
     if on_workdir:
         on_workdir(workdir)
@@ -7146,6 +7203,13 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
     mp3s, durs = [], []
     for i, sc in enumerate(scenes):
         m = os.path.join(workdir, "voice_{:02d}.mp3".format(i))
+        if resume and os.path.isfile(m) and os.path.getsize(m) > 20000:
+            # 🔁 2.15: частину вже озвучено впалим запуском — не перероблюю
+            part_words.append(None)
+            durs.append(max(audio_duration(m), 1.0))
+            mp3s.append(m)
+            say("⏭ Частина {}/{} вже озвучена (resume)".format(i + 1, len(scenes)))
+            continue
         pw = tts_save_karaoke(sc["text"], voice, m, say, rate_pct=rate_pct) if not trim_sil else None
         if pw is None:
             tts_save(sc["text"], voice, m, say, rate_pct=rate_pct)
@@ -7184,7 +7248,10 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         if pw:
             karaoke_all.extend((w, s0 + acc, e0 + acc) for (w, s0, e0) in pw)
         acc += d
-    if karaoke_all:
+    sub_path = os.path.join(workdir, "sub.srt")
+    if resume and os.path.isfile(sub_path) and os.path.getsize(sub_path) > 200:
+        say("⏭ Субтитри вже є (resume) — не перероблюю")
+    elif karaoke_all:
         n = make_karaoke_srt(karaoke_all, total, workdir)
         say("🎤 Караоке-субтитри: {} фраз синхронно з голосом".format(n))
     else:
@@ -7200,7 +7267,12 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         say("ℹ️ OpenCV не встановлено — фільтр обличчя пропускаю")
     for i, sc in enumerate(scenes):
         clip = None
-        if sc.get("url"):
+        if resume:  # 🔁 2.15: кліп сцени вже завантажений впалим запуском — не качаю
+            cpath = os.path.join(workdir, "scene{:02d}.mp4".format(i))
+            if os.path.isfile(cpath) and os.path.getsize(cpath) > 100000:
+                clip = cpath
+                say("⏭ Фон частини {} вже завантажений (resume)".format(i + 1))
+        if clip is None and sc.get("url"):
             say("🔗 Частина {}/{}: беру ТВОЄ відео {}".format(i + 1, len(scenes), sc["url"][:70]))
             try:
                 clip = youtube_download(sc["url"], workdir, 720, say,
@@ -7296,19 +7368,24 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
         say("⚡ Апаратний кодек: " + enc[1])
     cmd += [*enc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
     stage_set(workdir, "render", say)
-    say("🚀 Рендерю відео…")
-    try:
-        run(cmd, cwd=workdir)
-    except Exception as err:
-        say("⚠️ Рендер із субтитрами не вдався — рендерю без субтитрів…")
-        say("📝 Причина: " + str(err)[:400])
-        cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
-                "-map", "0:v", "-map", "1:a", "-shortest"]
-        cmd2 += ["-vf", vf_base, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
-        cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
-        run(cmd2, cwd=workdir)
-        say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
+    final_done = (resume and os.path.isfile(os.path.join(workdir, "final.mp4"))
+                  and os.path.getsize(os.path.join(workdir, "final.mp4")) > 1000000)
+    if final_done:
+        say("⏭ final.mp4 вже відрендерений (resume) — лишаю як є")
+    else:
+        say("🚀 Рендерю відео…")
+        try:
+            run(cmd, cwd=workdir)
+        except Exception as err:
+            say("⚠️ Рендер із субтитрами не вдався — рендерю без субтитрів…")
+            say("📝 Причина: " + str(err)[:400])
+            cmd2 = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", "voice.mp3",
+                    "-map", "0:v", "-map", "1:a", "-shortest"]
+            cmd2 += ["-vf", vf_base, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
+            cmd2 += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "final.mp4"]
+            run(cmd2, cwd=workdir)
+            say("ℹ️ Відео готове без субтитрів; повний лог: ffmpeg-error.txt у робочій папці")
     if overlays:  # 🏷️ 2.0: плашка-заголовок (перша частина) + знак + смуга прогресу
         overlays_pass(os.path.join(workdir, "final.mp4"),
                       (scenes[0]["text"].splitlines()[0].strip()
@@ -7881,13 +7958,22 @@ def make_mix_seo_pack(title, tracklist, workdir, say):
 
 
 def generate_mix(title, minutes, size_str, say, on_workdir=None,
-                 bg_files=None, yt_search_urls=None, cover=True, seo=True):
+                 bg_files=None, yt_search_urls=None, cover=True, seo=True,
+                 resume_dir=None):
     """🎧 v16: музичний мікс — треки з папки MixTracks зшиваються з кросфейдами
     у одну доріжку (гучність -14 LUFS), фон — петля з кліпів або градієнт,
-    плюс обкладинка і SEO-пак із треклистом. Повертає робочу папку."""
+    плюс обкладинка і SEO-пак із треклистом. Повертає робочу папку.
+    🔁 2.15: resume_dir — продовжити впалий мікс у старій папці: готовий
+    фон (bg.mp4) і фінальний рендер (final.mp4) не перероблюються.
+    Fail-open: папки нема — іде як звичайний запуск."""
     base = os.path.join(os.path.expanduser("~"), "Videos", "Generated")
-    workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S")
-                           + "_mix_" + re.sub(r'[^\w-]', '_', (title or "mix")[:30]))
+    resume = bool(resume_dir and os.path.isdir(resume_dir))  # 🔁 2.15: resume
+    if resume:
+        workdir = resume_dir  # 🔁 та сама папка — готові артефакти підхоплюю
+        say("🔁 Resume міксу: продовжую впалу генерацію у старій папці")
+    else:
+        workdir = os.path.join(base, datetime.now().strftime("%Y%m%d_%H%M%S")
+                               + "_mix_" + re.sub(r'[^\w-]', '_', (title or "mix")[:30]))
     os.makedirs(workdir, exist_ok=True)
     if on_workdir:
         on_workdir(workdir)
@@ -7910,7 +7996,13 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
     # Фон: свої файли → обрані з YouTube-пошуку → градієнт
     bg = None
     stage_set(workdir, "background", say)
-    clips = [c for c in (bg_files or []) if os.path.isfile(c)]
+    if resume and os.path.isfile(os.path.join(workdir, "bg.mp4")) \
+            and os.path.getsize(os.path.join(workdir, "bg.mp4")) > 200000:
+        bg = os.path.join(workdir, "bg.mp4")  # 🔁 2.15: фон уже змонтований
+        say("⏭ Фон міксу вже змонтований (resume) — не перероблюю")
+        clips = []
+    else:
+        clips = [c for c in (bg_files or []) if os.path.isfile(c)]
     if not clips and yt_search_urls:
         say("🔎 Шукаю відео для фону на YouTube…")
         try:
@@ -7939,12 +8031,17 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
         vf_in = ["-f", "lavfi", "-i", f"gradients=s={w}x{h}:c0=0x0f2027:c1=0x2c5364:speed=0.03"]
         say("🖼️ Генерую анімований градієнтний фон")
     stage_set(workdir, "render", say)
-    say("🚀 Рендерю мікс (це найдовший крок, ~10–20 хв)…")
-    cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", mix_path,
-           "-map", "0:v", "-map", "1:a", "-shortest",
-           "-c:v", "libx264", "-crf", "23", "-preset", "veryfast", "-r", "25",
-           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4"]
-    run(cmd, cwd=workdir)
+    final_done = (resume and os.path.isfile(os.path.join(workdir, "final.mp4"))
+                  and os.path.getsize(os.path.join(workdir, "final.mp4")) > 1000000)
+    if final_done:
+        say("⏭ final.mp4 вже відрендерений (resume) — лишаю як є")
+    else:
+        say("🚀 Рендерю мікс (це найдовший крок, ~10–20 хв)…")
+        cmd = [ff, "-y", "-hide_banner", "-nostdin", *vf_in, "-i", mix_path,
+               "-map", "0:v", "-map", "1:a", "-shortest",
+               "-c:v", "libx264", "-crf", "23", "-preset", "veryfast", "-r", "25",
+               "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "final.mp4"]
+        run(cmd, cwd=workdir)
     if cover:  # 📷 обкладинка для YouTube
         try:
             make_cover(workdir, title or "Night Chill Mix", say)
@@ -11065,7 +11162,9 @@ class App:
             generate_mix(title, minutes, SIZES[self.size.get()], self.say,
                          on_workdir=lambda wd: setattr(self, "workdir", wd),
                          bg_files=files, yt_search_urls=sel,
-                         cover=bool(self.cover_on.get()), seo=bool(self.seo.get()))
+                         cover=bool(self.cover_on.get()), seo=bool(self.seo.get()),
+                         resume_dir=getattr(self, "_resume_dir", None))  # 🔁 2.15
+            self._resume_dir = None  # 🔁 resume одноразовий
             ok = True
             if self.workdir and os.path.isdir(self.workdir):
                 f = os.path.join(self.workdir, "final.mp4")
@@ -13629,37 +13728,52 @@ class App:
         target = self.pipeline_mix if mode == "mix" else self.pipeline
         threading.Thread(target=target, args=(query,), daemon=True).start()
     def _resume_last(self):
-        """🔁 2.15: продовжити ВПАЛУ генерацію: показую папку запуску,
-        читаю тему зі збереженого manifest.json, ставлю її у поле теми
-        і запускаю той самий конвеєр — але в ту саму папку: наявні
-        voice.mp3 / sub.srt / final.mp4 не перероблюються (⏭ у журналі),
-        seed вибору кадрів тягнеться з маніфесту — кадри ті самі.
+        """🔁 2.15: продовжити ВПАЛУ генерацію (🎬 Відео і 📜 Сценарій):
+        показую папку запуску, читаю mode/theme/сцену зі збереженого
+        manifest.json, заповнюю поля і запускаю той самий конвеєр — але
+        в ту саму папку: готові артефакти (озвучка частин, кліпи сцен,
+        sub.srt, final.mp4) не перероблюються (⏭ у журналі).
         Fail-open: нема папки/маніфесту — просто кажу і не ламаю нічого."""
         try:
             d = filedialog.askdirectory(
                 title="Папка впалої генерації (де лежить manifest.json)")
             if not d:
                 return
-            q = ""
+            data = {}
             try:
                 with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
-                    q = (json.load(f).get("theme") or "").strip()
+                    data = json.load(f)
             except Exception:
-                pass
-            if not q:
+                data = {}
+            mode = (data.get("mode") or "video").strip().lower()
+            if mode == "script" and data.get("scenes"):
+                # 📜 сценарій зберігався по частинах — зшиваю у поле сценарію
+                script = "\n\n".join(str(s.get("text") or "").strip()
+                                     for s in data["scenes"] if (s.get("text") or "").strip())
+                if len(script) < 10:
+                    messagebox.showwarning(
+                        "Resume", "У маніфесті нема тексту сценарію — "
+                        "resume для цього запуску не вийде 🙂")
+                    return
+                self._set_mode("script")
+                self.script.delete("1.0", "end")
+                self.script.insert("1.0", script)
+                self._resume_dir = d
+                self.say("🔁 Resume сценарію: {} частин — продовжую у старій папці".format(
+                    len(data["scenes"])))
+                self.start()
+            elif mode == "video" and (data.get("theme") or "").strip():
+                q = data["theme"].strip()
+                self._set_mode("video")
+                self.query.delete("1.0", "end")
+                self.query.insert("1.0", q)
+                self._resume_dir = d
+                self.say("🔁 Resume: продовжую «{}» у старій папці — готові кроки пропущу".format(q[:60]))
+                self.start()
+            else:
                 messagebox.showwarning(
-                    "Resume", "У цій папці нема manifest.json з темою — "
-                    "вибери папку впалого запуску 🎬 Відео 🙂")
-                return
-            if getattr(self, "mode", "video") != "video":
-                messagebox.showwarning(
-                    "Resume", "Resume працює для режиму 🎬 Відео — перемкни режим 🙂")
-                return
-            self.query.delete("1.0", "end")
-            self.query.insert("1.0", q)
-            self._resume_dir = d
-            self.say("🔁 Resume: продовжую «{}» у старій папці — готові кроки пропущу".format(q[:60]))
-            self.start()
+                    "Resume", "У цій папці manifest.json без теми/сценарію "
+                    "(resume чекає запуск режиму 🎬 Відео або 📜 Сценарій) 🙂")
         except Exception as e:
             self.say("ℹ️ Resume не вийшов ({}): запускаю як звичайно".format(str(e)[:120]))
             self._resume_dir = None
@@ -13756,7 +13870,9 @@ class App:
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
                                       no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                      upscale4k=up4, autoscrape=asc, overlays=ov)
+                                      upscale4k=up4, autoscrape=asc, overlays=ov,
+                                      resume_dir=getattr(self, "_resume_dir", None))  # 🔁 2.15
+                self._resume_dir = None  # 🔁 resume одноразовий
                 ok = True
                 if self.workdir and os.path.isdir(self.workdir):
                     f = os.path.join(self.workdir, "final.mp4")
