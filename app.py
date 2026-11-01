@@ -532,6 +532,17 @@ _oai_chat вміє kind="anth". Драбина Авто: до 40 ступені�
       • ⏳ ETA-підказки: скануючи історію запусків, генератор підказує,
         скільки триває поточний крок (озвучка/субтитри/фон/рендер)
         за минулими запусками — очікування без «сліпоти».
+      Хвиля 5:
+      • 🎧 resume МІКСУ: маніфест міксу тепер зберігає mode/title/minutes
+        (v71 і старше не мали) — кнопка ⏯ підхоплює і мікс, підставляє
+        назву і хвилини, фон/рендер не перероблюються;
+      • 🗺 ETA-шкала: на кожній стадії журнал малює мапу конвеєра
+        start ▸ script ▸ voice ▸ [subtitles] ▸ background ▸ render ▸ done
+        з маркером, ДЕ генерація зараз;
+      • 🔁 авто-resume (opt-in): перемикач під кнопкою resume — при
+        запуску програми сам знаходить останній упалий запуск (без
+        final.mp4, stage не done) і пропонує продовжити одним кліком;
+        прапорець зберігається лише на комп'ютері.
 """
 import array
 import asyncio
@@ -725,6 +736,7 @@ WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # v16 🎧: мікс-режим — папка треків і локальний ключ Pixabay (НЕ в коді/репозиторії)
 MIX_TRACKS_DIR = os.path.join(os.path.expanduser("~"), "Videos", "MixTracks")
 PIXABAY_KEY_FILE = os.path.join(TOOLS_DIR, "pixabay.key")
+AUTO_RESUME_FILE = os.path.join(TOOLS_DIR, "autoresume.txt")  # 🔁 Волна 5: opt-in прапорець
 OLLAMA_CONF_FILE = os.path.join(TOOLS_DIR, "ollama.json")  # 🧠 v29/🌐 v31: URL+модель+провайдер, лише локально
 POLLINATIONS_URL = "https://text.pollinations.ai"  # 🌐 v35: безкоштовний онлайн-LLM БЕЗ ключів (Pollinations)
 KILO_URL = "https://api.kilo.ai/api/gateway"  # ⚡ v36: безкоштовний шлюз Kilo Code — 200 зап/год БЕЗ ключа
@@ -2095,6 +2107,12 @@ def stage_set(workdir, stage, say=None):
                 say("⏳ За минулими запусками цей крок ~%d хв %d с" % (eta // 60, eta % 60))
             elif eta > 0:
                 say("⏳ За минулими запусками цей крок ~%d с" % int(eta))
+        if say:
+            order = ("start", "script", "voice", "subtitles",
+                     "background", "render", "done")
+            if stage in order:
+                say("🗺 " + " ▸ ".join(
+                    "[" + s + "]" if s == stage else s for s in order))
     except Exception:
         pass  # 🧭 state machine — діагностика, ніколи не ламає генерацію
 
@@ -7481,6 +7499,25 @@ def save_pixabay_key(key):
         f.write(key.strip())
 
 
+def load_auto_resume():
+    """🔁 2.15 (Волна 5): прапорець авто-resume — лише на цьому комп'ютері."""
+    try:
+        with open(AUTO_RESUME_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip() == "1"
+    except Exception:
+        return False
+
+
+def save_auto_resume(on):
+    """Зберігає прапорець авто-resume локально (як ключ Pixabay). Fail-open."""
+    try:
+        os.makedirs(TOOLS_DIR, exist_ok=True)
+        with open(AUTO_RESUME_FILE, "w", encoding="utf-8") as f:
+            f.write("1" if on else "0")
+    except Exception:
+        pass
+
+
 def load_ollama_conf():
     """🧠 v29: URL і модель Ollama — лише на цьому комп'ютері (як ключ Pixabay).
     Файла нема — дефолти: локальний сервер, модель ще не обрана (Tier 2 спить)."""
@@ -7984,6 +8021,9 @@ def generate_mix(title, minutes, size_str, say, on_workdir=None,
     w, h = size_str.split(" ")[0].split("x")
     say("📁 Робоча папка створена")
     stage_set(workdir, "start", say)
+    write_manifest({"mode": "mix", "title": (title or "mix"),
+                   "minutes": int(minutes), "size": size_str},
+                  workdir, None)  # 🔁 Волна 5: resume міксу з маніфесту
     target_sec = max(10, min(180, int(minutes))) * 60
     say("🎵 Збираю треки з папки MixTracks (мета ~{} хв)…".format(int(target_sec // 60)))
     plan = mix_plan(MIX_TRACKS_DIR, target_sec, say)
@@ -8179,6 +8219,32 @@ class App:
         if best:
             self.say("📼 Знайшов твоє останнє відео — показую його в прев'ю")
             self.q.put(("poster", best))
+        if load_auto_resume():  # 🔁 Волна 5: opt-in — підказати упалий запуск
+            try:
+                names = sorted(os.listdir(self.GEN_BASE), reverse=True)[:60]
+            except Exception:
+                names = []
+            for name in names:
+                d = os.path.join(self.GEN_BASE, name)
+                mf = os.path.join(d, "manifest.json")
+                if not os.path.isfile(mf) or os.path.isfile(
+                        os.path.join(d, "final.mp4")):
+                    continue
+                data = {}
+                try:
+                    with open(mf, encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+                mode = (data.get("mode") or "").strip().lower()
+                if mode not in ("video", "script", "mix"):
+                    continue
+                if (data.get("stage") or "").strip().lower() == "done":
+                    continue
+                label = name + ": " + ((data.get("title") or data.get("theme")
+                                         or "").strip()[:50])
+                self.q.put(("resume_offer", (d, label)))
+                break
 
     def _build(self):
         # === ШАПКА: логотип, таби, статус, годинник ===
@@ -9597,6 +9663,11 @@ class App:
                       height=30, corner_radius=15, font=self._f(12),
                       fg_color=self.ACCENT_H, hover_color=self.ACCENT,
                       command=self._resume_last).pack(fill="x", pady=(0, 4))
+        self.autoresume_on = ctk.BooleanVar(value=load_auto_resume())  # 🔁 Волна 5
+        ctk.CTkSwitch(center, text="🔁 Авто-resume: при запуску програми пропонувати продовжити упалий запуск",
+                      variable=self.autoresume_on, font=self._f(11),
+                      progress_color=self.ACCENT,
+                      command=self._autoresume_toggle).pack(anchor="w", pady=(0, 4))
         self.bar = ctk.CTkProgressBar(center, mode="indeterminate", height=6,
                                       corner_radius=3, progress_color=self.ACCENT)
         self.bar.pack(fill="x", pady=(2, 8))
@@ -11834,6 +11905,8 @@ class App:
                     self._show_transcript(msg[1], msg[2])
                 elif kind == "poster":
                     self._set_poster(msg[1])
+                elif kind == "resume_offer":  # 🔁 Волна 5: упалий запуск при старті
+                    self._resume_offer(msg[1], msg[2])
                 elif kind == "poster_img":
                     self._apply_poster(msg[1])
                 elif kind == "thumb":
@@ -13727,16 +13800,17 @@ class App:
         self.status_lbl.configure(text="● Генерується…", text_color="#F59E0B")
         target = self.pipeline_mix if mode == "mix" else self.pipeline
         threading.Thread(target=target, args=(query,), daemon=True).start()
-    def _resume_last(self):
-        """🔁 2.15: продовжити ВПАЛУ генерацію (🎬 Відео і 📜 Сценарій):
+    def _resume_last(self, d=None):
+        """🔁 2.15: продовжити ВПАЛУ генерацію (🎬 Відео, 📜 Сценарій, 🎧 Мікс):
         показую папку запуску, читаю mode/theme/сцену зі збереженого
         manifest.json, заповнюю поля і запускаю той самий конвеєр — але
         в ту саму папку: готові артефакти (озвучка частин, кліпи сцен,
         sub.srt, final.mp4) не перероблюються (⏭ у журналі).
         Fail-open: нема папки/маніфесту — просто кажу і не ламаю нічого."""
         try:
-            d = filedialog.askdirectory(
-                title="Папка впалої генерації (де лежить manifest.json)")
+            if not d:
+                d = filedialog.askdirectory(
+                    title="Папка впалої генерації (де лежить manifest.json)")
             if not d:
                 return
             data = {}
@@ -13770,13 +13844,47 @@ class App:
                 self._resume_dir = d
                 self.say("🔁 Resume: продовжую «{}» у старій папці — готові кроки пропущу".format(q[:60]))
                 self.start()
+            elif mode == "mix" and (data.get("title") or "").strip():
+                t = data["title"].strip()
+                self._set_mode("mix")
+                self.query.delete("1.0", "end")
+                self.query.insert("1.0", t)
+                try:
+                    m = int(data.get("minutes") or 60)
+                    self.mix_minutes.delete(0, "end")
+                    self.mix_minutes.insert(0, str(max(10, min(180, m))))
+                except Exception:
+                    pass
+                self._resume_dir = d
+                self.say("🔁 Resume міксу «{}»: готовий фон і рендер не перероблюю".format(t[:60]))
+                self.start()
             else:
                 messagebox.showwarning(
-                    "Resume", "У цій папці manifest.json без теми/сценарію "
-                    "(resume чекає запуск режиму 🎬 Відео або 📜 Сценарій) 🙂")
+                    "Resume", "У цій папці manifest.json без теми/сценарію/назви "
+                    "(resume чекає запуск режиму 🎬 Відео, 📜 Сценарій або 🎧 Мікс) 🙂")
         except Exception as e:
             self.say("ℹ️ Resume не вийшов ({}): запускаю як звичайно".format(str(e)[:120]))
             self._resume_dir = None
+
+    def _autoresume_toggle(self):
+        """🔁 Волна 5: прапорець авто-resume — зберігається лише локально."""
+        try:
+            save_auto_resume(bool(self.autoresume_on.get()))
+            self.say("🔁 Авто-resume {} — при наступному запуску програми {}".format(
+                "увімкнено" if self.autoresume_on.get() else "вимкнено",
+                "підкажу упалий запуск" if self.autoresume_on.get() else "не турбую"))
+        except Exception:
+            pass
+
+    def _resume_offer(self, d, label):
+        """🔁 Волна 5: діалог «продовжити упалий запуск?» — у головному потоці."""
+        try:
+            if messagebox.askyesno(
+                    "Resume", "Знайшов упалий запуск:\n" + label +
+                    "\n\nПродовжити його зараз? (готові кроки пропущу)"):
+                self._resume_last(d)
+        except Exception:
+            pass
 
     def preflight_notes(self):
         """🧪 v24: передпольотні перевірки — попереджуємо ДО старту генерації,
