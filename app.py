@@ -632,6 +632,24 @@ _oai_chat вміє kind="anth". Драбина Авто: до 42 ступені�
         якщо й AI не відповість.
       • 🩹 Openverse-відео: старий User-Agent ловив HTTP 404 —
         тепер UA_STRING як у фото-пошуку, що працював.
+      Хвиля 14 (п'ять нових каналів — «додаєм все» з черги знань):
+      • 🌊 COBALT — запасний даунлоадер (imputnet/cobalt): коли yt-dlp
+        впав, youtube_download автоматично пробує cobalt-драбину —
+        спершу СВОЮ інстанцію (tools/cobalt.json {"instance": ...},
+        docker run imputnet/cobalt), потім публічні (kwiatekmiki,
+        meowing.de — часто за Turnstile; тоді чесний fail-open).
+      • 🎬 AI-КЛІПИ частин сценарію (перемикач у картці 📜): FLUX
+        малює кадр по запиту частини → WAN 2.2 (HF Space, без ключа)
+        оживляє його у справжнє відео. Черги HF повільні — лише перші
+        4 частини; впав → звичайний ланцюг підхоплює.
+      • 🎭 АВАТАР-ВЕДУЧИЙ (кнопка у 🧰): фото + аудіо голосу →
+        Кен-Бернс-ролик з ТВОЇМ голосом (avatar_video). Чесно:
+        ліпсинк DUIX/SadTalker — GPU-модель, губи статичні.
+      • 🌐 LibreTranslate: свіжі офіційні безключові дзеркала
+        (translate.cutie.dating, translate.fedilab.app) перед старими.
+      • 🖼 Обкладинки: назва з чорною обводкою (PIL stroke) —
+        читається на будь-якому фоні; MOSS-Image (локальний 5B DiT)
+        потребує GPU — в черзі, поки типографіка робить те саме.
 """
 import array
 import asyncio
@@ -3770,9 +3788,17 @@ def youtube_download(url, outdir, height, say, fixed_name=None, max_sec=0):
             final_path = line
     if err:
         proc.terminate()
+        cb = cobalt_download(url, outdir, say, fixed_name or "cobalt_clip")  # 🌊 Волна 14
+        if cb:
+            append_credit(outdir, "🎬 {} — фонове відео — cobalt — {}".format(os.path.basename(cb), url))
+            return cb
         raise RuntimeError("yt-dlp: " + err)
     code = proc.wait()
     if code != 0 or not final_path:
+        cb = cobalt_download(url, outdir, say, fixed_name or "cobalt_clip")  # 🌊 Волна 14
+        if cb:
+            append_credit(outdir, "🎬 {} — фонове відео — cobalt — {}".format(os.path.basename(cb), url))
+            return cb
         raise RuntimeError("yt-dlp не зміг завантажити відео (код {}). Перевір посилання.".format(code))
     append_credit(outdir, "🎬 {} — фонове відео (права належать автору каналу) — YouTube-канал — {}".format(os.path.basename(final_path), url))
     return final_path
@@ -5601,8 +5627,9 @@ def _dshow_mic_name():
         return ""
 
 
-LIBRE_INSTANCES = ("https://libretranslate.de",
-                   "https://translate.terraprint.xyz",
+LIBRE_INSTANCES = ("https://translate.cutie.dating",  # 🌊 Волна 14: офіційні безключові дзеркала (docs LibreTranslate)
+                   "https://translate.fedilab.app",
+                   "https://libretranslate.de",
                    "https://libretranslate.com")  # 🌐 v51: публічні LibreTranslate (без ключів), драбина
 
 
@@ -6613,7 +6640,8 @@ def make_cover(workdir, title, say):
         y = H - int(H * 0.06) - lh * len(lines)
         for ln in lines:
             tw = d.textlength(ln, font=font)
-            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
+            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255),
+                   stroke_width=max(2, fs // 14), stroke_fill=(0, 0, 0, 200))  # 🖼 Волна 14: обводка — назва читається завжди
             y += lh
         img.save(cover, quality=90)
         say("📷 Обкладинка для YouTube: cover.jpg у робочій папці")
@@ -6678,7 +6706,8 @@ def make_cover_from_image(src_img, title, out_path, say=None):
         y = H - int(H * 0.06) - lh * len(lines)
         for ln in lines:
             tw = d.textlength(ln, font=font)
-            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255))
+            d.text(((W - tw) / 2, y), ln, font=font, fill=(255, 255, 255, 255),
+                   stroke_width=max(2, fs // 14), stroke_fill=(0, 0, 0, 200))  # 🖼 Волна 14: обводка — назва читається завжди
             y += lh
         img.save(out_path, quality=90)
         if say:
@@ -7645,6 +7674,102 @@ def script_photo_fallback(q, dur, w, h, workdir, i, say=None):
     return out
 
 
+COBALT_INSTANCES = ("https://cobalt-api.kwiatekmiki.com",
+                   "https://cobalt-api.meowing.de")  # 🌊 Волна 14: публічні cobalt-інстанси (часто за Turnstile — тоді fail-open)
+COBALT_FILE = os.path.join(TOOLS_DIR, "cobalt.json")  # 🌊 Волна 14: СВІЯ інстанція: {"instance": "http://localhost:9000"}
+
+
+def cobalt_instances():
+    """🌊 Волна 14: драбина cobalt-інстансів — спершу СВІЯ (tools/cobalt.json),
+    потім публічні. Своя піднімається однією командою docker (imputnet/cobalt)."""
+    out = []
+    try:
+        with open(COBALT_FILE, encoding="utf-8") as f:
+            u = str((json.load(f) or {}).get("instance") or "").strip()
+        if u:
+            out.append(u.rstrip("/"))
+    except Exception:
+        pass
+    return out + [u.rstrip("/") for u in COBALT_INSTANCES]
+
+
+def cobalt_download(url, outdir, say, out_name=None):
+    """🌊 Волна 14: ЗАПАСНИЙ даунлоадер cobalt (imputnet/cobalt, 20k★) —
+    рятівник, коли yt-dlp впав на нових хитрощах YouTube. Без ключів;
+    публічні інстанси часто за Turnstile — тоді чесно мовчу (None),
+    і генератор іде далі за своїм fail-open-ланцюгом."""
+    name = (out_name or "cobalt_clip").replace(".mp4", "")
+    for inst in cobalt_instances():
+        try:
+            if say:
+                say("🌊 Пробую запасний даунлоадер cobalt ({})…".format(inst.replace("https://", "")[:40]))
+            r = requests.post(
+                inst + "/", json={"url": url, "videoQuality": "720", "filenameStyle": "basic"},
+                headers={"User-Agent": UA_STRING, "Accept": "application/json"}, timeout=45)
+            if r.status_code != 200:
+                continue
+            j = r.json()
+            if j.get("status") not in ("tunnel", "redirect") or not j.get("url"):
+                continue
+            out_path = os.path.join(outdir, name + ".mp4")
+            with requests.get(j["url"], stream=True, timeout=300,
+                               headers={"User-Agent": UA_STRING}) as resp:
+                resp.raise_for_status()
+                with open(out_path + ".part", "wb") as f:
+                    for chunk in resp.iter_content(1 << 18):
+                        f.write(chunk)
+            if os.path.getsize(out_path + ".part") > 100000:
+                os.replace(out_path + ".part", out_path)
+                if say:
+                    say("🌊 cobalt витягнув відео! (запасний канал спрацював)")
+                return out_path
+            try:
+                os.remove(out_path + ".part")
+            except OSError:
+                pass
+        except Exception:
+            continue
+    return None
+
+
+def avatar_video(photo, audio, out_path, say=None):
+    """🎭 Волна 14: АВАТАР-ВЕДУЧИЙ без ключів і без GPU: твоє фото оживляється
+    Кен-Бернсом і говорить твоїм голосом (клон з 🧰 або озвучка). Чесно:
+    ліпсинк губ (DUIX/SadTalker) — локальна GPU-модель, тут кадр живий, а
+    губи статичні; голос і рух — справжні. Fail-open на кожен крок."""
+    if not (photo and os.path.isfile(photo)):
+        raise RuntimeError("Спершу обери фото ведучого")
+    if not (audio and os.path.isfile(audio)):
+        raise RuntimeError("Спершу обери аудіо з голосом")
+    ensure_ffmpeg(say)
+    workdir = os.path.dirname(os.path.abspath(out_path))
+    dur = audio_duration(audio) or 5.0
+    seg = os.path.join(workdir, "_avatar_seg.mp4")
+    animate_images([photo], seg, per=max(dur, 1.0), fade=0.0, say=say)
+    run([ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-i", seg, "-i", audio,
+         "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-crf", "20",
+         "-preset", "veryfast", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "160k", "-shortest",
+         "-movflags", "+faststart", out_path], cwd=workdir)
+    try:
+        os.remove(seg)
+    except OSError:
+        pass
+    return out_path
+
+
+def script_ai_clip(q, dur, w, h, workdir, i, say):
+    """🎬 Волна 14: AI-КЛІП частини сценарію (WAN 2.2 на HF Space, без ключа):
+    FLUX малює кадр по запиту частини → WAN оживляє кадр у справжнє відео.
+    Публічні черги повільні — тому лише перші частини; впав → звичайний
+    ланцюг (YouTube → фото → градієнт) підхопить, нічого не впаде."""
+    img = os.path.join(workdir, "scene{:02d}_flux.jpg".format(i))
+    hf_image(q + ", cinematic, high detail", img)
+    out = os.path.join(workdir, "scene{:02d}.mp4".format(i))
+    hf_image_to_video(img, "slow cinematic camera movement, subtle natural motion, high quality", out, say)
+    return out
+
+
 def gradient_segment(dur, w, h, workdir, idx):
     """Резервний фон частини, коли на YouTube нічого не знайшлось."""
     ff = ffmpeg_path()
@@ -7694,7 +7819,7 @@ def make_srt_scenes(scenes, durs, workdir):
         f.write("\n".join(lines))
 
 
-def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, resume_dir=None):
+def generate_script_video(script_text, voice_label, size_str, music, say, on_workdir=None, sub_style="Класичні", vid_style="Без стилю", trim_sil=False, cover=False, no_faces=False, seo=False, master=False, pack_mb=None, rate_pct=0, platform=None, upscale4k=False, autoscrape=False, overlays=False, ai_clips=False, resume_dir=None):
     """Генерація за сценарієм: кожна частина озвучується окремо і отримує
     ВЛАСНИЙ фон — кліп знайдений на YouTube автоматичним пошуком (нуль ключів).
     Порядок фону частин = порядку частин у сценарії."""
@@ -7798,6 +7923,14 @@ def generate_script_video(script_text, voice_label, size_str, music, say, on_wor
             if os.path.isfile(cpath) and os.path.getsize(cpath) > 100000:
                 clip = cpath
                 say("⏭ Фон частини {} вже завантажений (resume)".format(i + 1))
+        if clip is None and ai_clips and i < 4:  # 🎬 Волна 14: живий AI-кліп (FLUX→WAN, без ключа)
+            try:
+                say("🎬 Частині {}: AI-кліп — FLUX-кадр, WAN оживляє (черги HF, до кількох хв)…".format(i + 1))
+                clip = script_ai_clip(sc["q"], durs[i], w, h, workdir, i, say)
+                say("🎬 Частині {}: фон — СПРАВЖНІЙ AI-кліп 🤯".format(i + 1))
+            except Exception as e:
+                say("ℹ️ AI-кліп частини {} не вийшов ({}), іду як завжди".format(i + 1, str(e)[:100]))
+                clip = None
         if clip is None and sc.get("url"):
             say("🔗 Частина {}/{}: беру ТВОЄ відео {}".format(i + 1, len(scenes), sc["url"][:70]))
             try:
@@ -10321,6 +10454,10 @@ class App:
         self.no_faces = ctk.BooleanVar(value=False)  # 🚫 v15: фрагменти без обличчя
         ctk.CTkSwitch(self.extra_body, text="🚫 Без обличчя у кадрі (OpenCV)", variable=self.no_faces,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
+        self.ai_clips = ctk.BooleanVar(value=False)  # 🎬 Волна 14: живі AI-кліпи частин
+        ctk.CTkSwitch(self.extra_body, text="🎬 AI-кліпи частин (FLUX→WAN, без ключа, довго)",
+                      variable=self.ai_clips,
+                      font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
         self.seo = ctk.BooleanVar(value=True)  # 📈 v15: SEO-пак
         ctk.CTkSwitch(self.extra_body, text="📈 SEO-пак для YouTube (youtube-seo.txt)", variable=self.seo,
                       font=self._f(12), progress_color=self.ACCENT).pack(anchor="w", padx=14, pady=(2, 0))
@@ -10610,6 +10747,15 @@ class App:
         ctk.CTkButton(self.tools_body, text="🎬 Замінити фон на відео (BiRefNet, без ключа)", height=32, corner_radius=16,
                       fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
                       command=self.bgvid_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body, text="🌊🎭 Волна 14 — запасні канали і аватар",
+                     font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        ctk.CTkButton(self.tools_body, text="🎭 Аватар-ведучий: фото + аудіо голосу → ролик (без ключа)",
+                      height=32, corner_radius=16,
+                      fg_color=self.INSET, hover_color=self.HOVER, font=self._f(12),
+                      command=self.avatar_now).pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(self.tools_body,
+                     text="🌊 cobalt — запасний даунлоадер YouTube: підніми свою інстанцію однією\nкомандою docker (imputnet/cobalt) і вкажи її в tools/cobalt.json —\nгенератор сам підхопить, коли yt-dlp впаде.",
+                     font=self._f(11), text_color=self.MUTED, anchor="w", justify="left").pack(fill="x", padx=14, pady=(0, 4))
         ctk.CTkLabel(self.tools_body, text="🎭 Пост-обробка готового відео",
                      font=self._f(11, "bold"), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
         ctk.CTkButton(self.tools_body, text="✂️ Прибрати тишу з відео", height=32, corner_radius=16,
@@ -10827,7 +10973,7 @@ class App:
         ac = self._card(scroll, fill="x", padx=24, pady=(8, 16))
         ctk.CTkLabel(ac, text="Про застосунок", font=self._f(14, "bold"),
                      anchor="w").pack(fill="x", padx=16, pady=(12, 2))
-        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 37 ШЛЮЗІВ (2.14 + Волна 7: Cline і Fireworks): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 42 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 37 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу, а у Волні 7 — ще й 🎤 Whisper (розшифровка будь-якого аудіо без ключа Groq), 🎼 MusicGen (музика без Suno) і 💎 Real-ESRGAN (апскейл 2x/4x/8x), а Волна 8 — 🎬 заміна фону на відео (BiRefNet: ти у кадрі, фон — твоє відео) — усе безкоштовні HF Spaces, без ключа; 🎬 ВОЛНА 9: анімування зображень — обери кілька картинок → Кен-Бернс у 4 напрямках, кросфейд-переходи, музика → готове MP4 (локальний ffmpeg, без ключа); 📜 ВОЛНА 10: сценарій з чату — обговори з асистентом у вкладці чату (ChatGPT/Claude/Gemini), кнопка 📜 У сценарій під відповіддю переносить її у картку 📜 Сценарій (авто-частини), 🪄 розбиває будь-який текст ззовні — запит і сценарій даєш у чаті, а все інше робить генератор; 🖼 ВОЛНА 11: АДЕКВАТНІСТЬ — фони частин тепер справді ЗА ЗМІСТОМ (розумний запит пошуку: стоп-слова геть, YouTube більше не отримує перші 6 слів прози), коли YouTube впав — фото-фолбек (Openverse → AI-кадр → Кен-Бернс, без ключа), yt-dlp докачує нестабільні зв'язки (8 ретраїв), а кнопка 🖼 Обкладинка під відповіддю чату малює обкладинку з назви (FLUX, без ключа); 🩹 ХОТФІКС ВОЛНА 12: краш озвучки на паузах сценарію виправлено — шматки тиші тепер зберігаються як .mp3 (раніше ffmpeg не розумів формат .part001 і падав ВЕСЬ рендер); 🩹 ВОЛНА 13: ffprobe тепер докачається сам (без нього yt-dlp валив КОЖНЕ завантаження з YouTube — звідси всі «скачування падають» і сірі градієнти), усі фінальні рендери з +faststart (moov на початку — YouTube стартує миттєво, QC-попередження геть), відкриті кліпи Openverse знову знаходяться (новий User-Agent), а якщо всі джерела фонів мовчать — генератор САМ малює AI-кадри і анімує їх Кен-Бернсом (сірий градієнт — майже неможливий).\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
+        ctk.CTkLabel(ac, text="Генератор відео 2.15 — простий інтерфейс: обери режим (🎬 Відео / 📜 Сценарій / 🎧 Мікс) і натисни кнопку.\nТема → озвучка → субтитри → фон (YouTube / фото: Openverse, Pixabay, Pinterest) → рендер. Додатково: 🎭 ОРКЕСТР АГЕНТІВ (2.1: тема проходить чотири ролі — 🎯 режисер → ✍️ сценарист → 🧐 критик → ✨ редактор — усе безкоштовною драбиною Авто), 🚜 КОМБАЙНИ ГЕНЕРАЦІЇ (2.3): перемикач + вибір лінії (🎬 Універсальний / 📰 Новинний / 📱 Shorts / 🎧 Подкаст) — агент-машиніст сам налаштовує генерацію, 🎬 ЧАТ → ВІДЕО (2.4): кнопка Згенерувати відео у чаті — запит стає готовим відео, а 🎬 З цього — відео під відповіддю озвучує саму відповідь, 🪄 AI-ВІЗУАЛ (2.5): двигун сам збирає відеоряд — генерує кадри без ключів (Pollinations) + скачує фото з мережі, 💎 апскейл+різкість, 🧹 водяні знаки-смуги геть, 🎬 Кен-Бернс-анімація 15–30 кадрів/хв, 🎞 МОНТАЖ (2.6): вкладка у стилі CapCut — медіатека, мультитрековий таймлайн (кліпи/музика/тексти), ✂️ нарізка, швидкість, гучність, фільтри, переходи, титри — ручний монтаж і 📦 Експорт MP4 (2.8: виправлено — кліпи на таймлайні реальної ширини за тривалістю, прев'ю без фризів), ⚡ ШВИДКІСТЬ (2.9): баг стрімінгу чату виправлено (подвоєння шляху запиту — токени тепер летять одразу), таймаути драбини 60с, пошук — бюджет 24с, підбір візуала — фото паралельно і yt-dlp не висне, 🛠 АУДИТ (2.10): повна перевірка коду — виправлено вибір якості YouTube (пресети і завантаження не працювали), 🎯 ВІЗУАЛ ПО ТЕМІ (2.11): запити візуалів тепер англійською — стоки і генерація кадрів влучають у тему (раніше українські фрази давали мимо), 🏟 ChatGPT і АРЕНА (2.11): у драбині нові ступені — ChatGPT (ключ OpenAI) і Арена (arena.ai), а Клод іде першим через Puter, 🔎 НОВІ МОЗКИ (2.12): Perplexity (Sonar), Qwen і DeepSeek у драбині — ключі у вікні 🔑 Ключі, 🤖 MANUS-АГЕНТ (2.13): останній ступінь драбини — агент Manus (api.manus.ai, кредитний і повільний — на найважчі випадки), 🇪🇺 Містраль оновлено (2.13), ☁️ 37 ШЛЮЗІВ (2.14 + Волна 7: Cline і Fireworks): за awesome-списками Ґітхабу (mnfst, freellm) підключено 13 нових — Aion, OpenCode Zen, OVHcloud, Agnes, GLHF, Chutes, Nscale, Nebius, Ollama Cloud, AI21, Cloudflare, Grok (xAI) і Gonka — усі з безкоштовними тірами або кредитами, ключі у вікні 🔑 Ключі, 🎧 ОЗВУЧКА → ВІЗУАЛ (2.7): кинув аудіофайл озвучки — ШІ розшифрує (Whisper на Groq), арт-директор поділить на сцени і сам підбере ілюстрації: AI-кадри, фото з мережі, відео-нарізки YouTube або мікс, 🌐 СВІЖІ ФАКТИ з інтернету перед сценарієм (DuckDuckGo → Mojeek, ⚡ сторінки ПАРАЛЕЛЬНО — дослідження біжить поруч з оркестром, без ключів), ✅ верифікація озвучки сказане = написане (Whisper на Groq після озвучки), ⏱ рахунок генерації до старту (слова → секунди), 📜 receipts-провенас кроків у manifest.json; 🎼🎼 музика Suno AI, стилі, пресети, транскрипція, SEO-пак, 🧬 метадані (змінити до невпізнаваності + ⏱ ETA), 🧹 авто-чистка, 📈 4К-апскейл, 🏷️ ОВЕРЛЕЇ (плашка-заголовок, водяний знак, смуга прогресу — 2.0), 🛡️ QC+ (контакт-шит, спалахи кадру, пік гучності — 2.0), 📋 EDL-таймлайн фону (Resolve — 2.0), 🧪 A/B-заголовки (8 варіантів, топ-3 — 2.0), ✂️ прибирання тиші з готового відео, 🌐 переклад субтитрів, 🎙 дубляж (.srt → озвучка у таймінги), 🌐 онлайн AI-асистент (Pollinations, ⚡ Kilo, 🌐 LLM7, 🚰 LLMFaucet, 🐎 AI Horde — без ключів; 🔑 безкоштовні ключі (Groq, GitHub, 🤖 Google AI Studio, ⚡ Cerebras, 🇪🇺 Mistral, 🧭 OpenRouter, 🟩 NVIDIA, 🟧 SambaNova, 🤗 HF, 🟣 GLM Zhipu, 🟣 GLM Z.AI, 🌊 SiliconFlow, 🟠 ModelScope, 🟣 Cohere) і 🤖 Claude через Puter-токен — вікно 🔑 Ключі: сторінка шлюзу відкриється у Chrome, ключ запам'ятається назавжди (лише локально); 🔑 РОТАЦІЯ КЛЮЧІВ (2.0): кілька ключів одного шлюзу через кому — кожен запит ходить по колу, ліміти не впираються; вибір моделей: Claude Sonnet/Haiku/Opus, GLM (glm-4.7-flash — безкоштовна, 200K), Qwen, gpt-oss; 🔄 Авто (за замовчуванням) — драбина 42 джерела, не впирається в ліміти) і 🎤 авто-субтитри (Whisper на Groq), а ще 💬 чат з Асистентом у стилі Claude — вкладка у головному вікні: 🎯 власне меню джерела у шапці чату (🤖 Claude онлайн, 💬 ChatGPT онлайн, 🤖 Gemini онлайн, 🇪🇺 Mistral онлайн, усі 37 шлюзів, ⚡ Kilo/🌐 LLM7/🚰 LLMFaucet/🐎 AI Horde без ключів) і 🧠 ПЕРЕМИКАЧ МОДЕЛЕЙ поруч (Claude-трійка, gpt-oss, Gemini, GLM, Qwen), 🔑 Ключ іде до шлюзу обраної моделі, а лежачий шлюз сам обмінюється драбиною живих ключів — чат не мовчить; ⏳ драбина показує нотами, який шлюз мовчить; 💾 ДВОЙНИЙ КЕШ (2.0): RAM + диск — повторне питання миттєве навіть після перезапуску; 🔐 Google — кнопка у шапці чату: одразу вікно входу Google → ключ Gemini; 🕵️ АГЕНТ (2.0): знайди/новини… або кнопка 🌐 Пошук — до 2 раундів: свіжі дані з DuckDuckGo, а як лежить — запасний Mojeek (без ключів) у відповіді з посиланнями й витягами сторінок; 🎤 ГОЛОС У ЧАТІ (2.0): кнопка 🎤 — сказав питання в мікрофон, Whisper на Groq розшифрував; 📄 ЕКСПОРТ чату у txt (2.0); 🖱 ПКМ у будь-якому полі — СТАНДАРТНЕ меню Вирізати/Копіювати/Вставити/Виділити все/Очистити (виправлено — раніше могло не відкриватись); стрімінг токенів, Markdown-рендер, 📦 артефакти, 🧠 локальна пам'ять, 📎 вкладення файлів, ✏️ редагування повідомлень, 🖱 правий клік — Вставити/Копіювати, відповіді виділяються і копіюються, 📊 таблиці Markdown у відповідях, ⚡ швидкість стріму (симв/с) у мітці, 🔗 кинь URL у повідомлення — агент прочитає сторінку, 🤖 tool-use 🔍ПОШУК: — модель сама просить мережу, 🌙 темна тема чату (кнопка у шапці), 📡 мітка показує, який шлюз фактично відповів, 🌍 переклад картинки на 🇷🇺🇪🇸🇮🇹🇬🇧 (OCR → 4 txt) і 📷 обкладинка іншою мовою (перекладений заголовок на тій самій картинці 4), 🗣 клон голосу, 🖼 AI-картинки і 🎬 оживлення кадру, а ще 🧠 нейро-ядро: 🖌 редагування промптом, ✂️ видалення фону, 🔍 OCR, 🎬 перехід двох кадрів і 🗣 озвучка відео клоном твого голосу, а у Волні 7 — ще й 🎤 Whisper (розшифровка будь-якого аудіо без ключа Groq), 🎼 MusicGen (музика без Suno) і 💎 Real-ESRGAN (апскейл 2x/4x/8x), а Волна 8 — 🎬 заміна фону на відео (BiRefNet: ти у кадрі, фон — твоє відео) — усе безкоштовні HF Spaces, без ключа; 🎬 ВОЛНА 9: анімування зображень — обери кілька картинок → Кен-Бернс у 4 напрямках, кросфейд-переходи, музика → готове MP4 (локальний ffmpeg, без ключа); 📜 ВОЛНА 10: сценарій з чату — обговори з асистентом у вкладці чату (ChatGPT/Claude/Gemini), кнопка 📜 У сценарій під відповіддю переносить її у картку 📜 Сценарій (авто-частини), 🪄 розбиває будь-який текст ззовні — запит і сценарій даєш у чаті, а все інше робить генератор; 🖼 ВОЛНА 11: АДЕКВАТНІСТЬ — фони частин тепер справді ЗА ЗМІСТОМ (розумний запит пошуку: стоп-слова геть, YouTube більше не отримує перші 6 слів прози), коли YouTube впав — фото-фолбек (Openverse → AI-кадр → Кен-Бернс, без ключа), yt-dlp докачує нестабільні зв'язки (8 ретраїв), а кнопка 🖼 Обкладинка під відповіддю чату малює обкладинку з назви (FLUX, без ключа); 🩹 ХОТФІКС ВОЛНА 12: краш озвучки на паузах сценарію виправлено — шматки тиші тепер зберігаються як .mp3 (раніше ffmpeg не розумів формат .part001 і падав ВЕСЬ рендер); 🩹 ВОЛНА 13: ffprobe тепер докачається сам (без нього yt-dlp валив КОЖНЕ завантаження з YouTube — звідси всі «скачування падають» і сірі градієнти), усі фінальні рендери з +faststart (moov на початку — YouTube стартує миттєво, QC-попередження геть), відкриті кліпи Openverse знову знаходяться (новий User-Agent), а якщо всі джерела фонів мовчать — генератор САМ малює AI-кадри і анімує їх Кен-Бернсом (сірий градієнт — майже неможливий); 🌊🎭 ВОЛНА 14: П'ЯТЬ НОВИХ КАНАЛІВ — запасний даунлоадер cobalt (своя інстанція через docker + публічні, підхоплює коли yt-dlp впав), перемикач 🎬 AI-кліпи частин (FLUX малює кадр → WAN 2.2 оживляє у справжнє відео, без ключа), 🎭 Аватар-ведучий у 🧰 (фото + твій голос → ролик, Кен-Бернс), переклад субтитрів на свіжих безключових дзеркалах LibreTranslate, а назва на обкладинці тепер з обводкою — читається на будь-якому фоні.\nКлючі Pixabay/Groq і cookie Suno — лише локально на комп'ютері. Дизайн надихався MoneyPrinterTurbo. Репозиторій: khomyak75roman-dotcom/video-generator",
                      font=self._f(12), text_color=self.MUTED, justify="left",
                      anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
@@ -12378,6 +12524,38 @@ class App:
                 pass
         except Exception as e:
             self.say("💎 Апскейл не вийшов: " + str(e)[:200] + " (Space прокидається до ~2 хв — спробуй ще раз)")
+        finally:
+            self.q.put(None)
+
+    def avatar_now(self):
+        """🎭 Волна 14: аватар-ведучий — ТВОЄ фото + ТВОЄ аудіо (клон голосу
+        з 🧰, озвучка, будь-який mp3) → готовий ролик: фото оживляється
+        Кен-Бернсом і говорить твоїм голосом. Без ключів, без GPU."""
+        photo = filedialog.askopenfilename(
+            title="Фото ведучого (обличчя крупно)",
+            filetypes=[("Фото", "*.jpg *.jpeg *.png *.webp *.bmp")])
+        if not photo:
+            return
+        audio = filedialog.askopenfilename(
+            title="Аудіо з голосом (озвучка/клон/мука)",
+            filetypes=[("Аудіо", "*.mp3 *.wav *.m4a *.ogg *.aac *.flac")])
+        if not audio:
+            return
+        threading.Thread(target=self._avatar_thread, args=(photo, audio),
+                         daemon=True).start()
+
+    def _avatar_thread(self, photo, audio):
+        try:
+            out = os.path.splitext(photo)[0] + "_аватар.mp4"
+            self.say("🎭 Аватар-ведучий: оживляю фото Кен-Бернсом і кладу твій голос…")
+            avatar_video(photo, audio, out, self.say)
+            self.say("🎭 Готово: " + os.path.basename(out) + " (поруч з фото)")
+            try:
+                os.startfile(os.path.dirname(photo) or ".")
+            except Exception:
+                pass
+        except Exception as e:
+            self.say("🎭 Аватар не вийшов: " + str(e)[:150])
         finally:
             self.q.put(None)
 
@@ -14792,6 +14970,7 @@ class App:
             orch = bool(self.orchestra_on.get()) if hasattr(self, "orchestra_on") else False  # 🎭 2.1: оркестр агентів
             webn = bool(self.web_on.get()) if hasattr(self, "web_on") else False  # 🌐 2.1: свіжі факти
             aiv = getattr(self, "bg_kind", "") == "ai"  # 🪄 2.5: AI-візуал-двигун
+            aic = bool(self.ai_clips.get()) if hasattr(self, "ai_clips") else False  # 🎬 Волна 14
             if getattr(self, "mode", "video") == "script":
                 generate_script_video(self.script.get("1.0", "end").strip(),
                                       self.voice.get(), SIZES[self.size.get()],
@@ -14799,7 +14978,7 @@ class App:
                                       on_workdir=lambda wd: setattr(self, "workdir", wd),
                                       sub_style=sub, vid_style=vid, trim_sil=trim, cover=cov,
                                       no_faces=nf, seo=se, master=ln, pack_mb=pk, rate_pct=rt, platform=pv,
-                                      upscale4k=up4, autoscrape=asc, overlays=ov,
+                                      upscale4k=up4, autoscrape=asc, overlays=ov, ai_clips=aic,
                                       resume_dir=getattr(self, "_resume_dir", None))  # 🔁 2.15
                 self._resume_dir = None  # 🔁 resume одноразовий
                 ok = True
