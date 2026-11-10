@@ -1729,6 +1729,44 @@ def console_mode():
         print("❌ " + str(e))
 
 
+def smoke_mode():
+    """Смоук-тест (--smoke): перевірка збірки без GUI — для GitHub Actions.
+    Генерує коротке відео безключовим шляхом, пише smoke-log.txt,
+    виходить із кодом 0 (успіх) / 1 (невдача)."""
+    log_path = os.path.join(APP_DIR, "smoke-log.txt")
+    lf = open(log_path, "w", encoding="utf-8")
+
+    def say(msg):
+        line = str(msg)
+        try:
+            print(line)
+        except Exception:
+            pass
+        try:
+            lf.write(line + "\n")
+            lf.flush()
+        except Exception:
+            pass
+
+    code = 1
+    try:
+        say("🔍 Смоук-тест 3.0: генерація без GUI…")
+        final = generate_video("Перевірка збірки генератора", "theme", "Остап", "720p",
+                               subs=True, cover=False, ai_clips=False, say=say)
+        if final and os.path.isfile(final):
+            say("SMOKE OK: " + str(final))
+            code = 0
+        else:
+            say("SMOKE FAILED: final.mp4 не створено")
+    except SystemExit:
+        lf.close()
+        raise
+    except Exception as e:
+        say("SMOKE FAILED: " + str(e)[:2000])
+    lf.close()
+    sys.exit(code)
+
+
 def app_main():
     if ctk is None:
         console_mode()
@@ -1877,4 +1915,9 @@ def app_main():
 
 
 if __name__ == "__main__":
-    app_main()
+    if "--smoke" in sys.argv:
+        smoke_mode()
+    else:
+        app_main()
+📋 КОПІЮВАТИ ВЕСЬ КОД (app.py)
+✅ Якщо збірка після вставки впаде — у Issues зʼявиться звіт 💥 з логом смоук
